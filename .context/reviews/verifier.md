@@ -1,87 +1,91 @@
-# Cycle 22 Verifier Review
+# Cycle 23 Verifier Review
 
 Role: `verifier`
 Repo: `/Users/hletrd/flash-shared/gallery`
-Current HEAD at write: `dabf8e8a` (intervening commits after `8b795862` changed other review artifacts only)
-Reviewed source HEAD: `8b795862079b0e5318242a09390b4cdff1dc2058`
-Baseline: Cycle 21 review HEAD `45b32d1db373e03d82a29511f53832051c770880`
+Current HEAD at write: `57c1ae33` (`origin/master`)
+Reviewed scope: Cycle 22 recovery implementation and current verification surface.
 
 ## Inventory
 
 Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
 
-Relevant files/categories inspected:
+Test/verification inventory built before findings:
 
-- Current Cycle 21 implementation ledger and index: `.context/plans/cycle-21-2026-07-08-plan.md`, `.context/plans/cycle-21-2026-07-08-deferred.md`, `.context/plans/deferred-carry-forward.md`, `.context/plans/README.md`.
-- Prior-cycle claims and assertions: `.context/reviews/_aggregate.md`, prior `.context/reviews/verifier.md`, prior `.context/reviews/test-engineer.md`, commit `8b795862`.
-- Mutation-barrier scanner and tests: `apps/web/scripts/check-action-origin.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`, all `apps/web/src/app/actions/**` acquired-slot call shapes.
-- Pending deletion ledger: `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`, `apps/web/scripts/migrate.js`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts`.
-- Scheduled fix surfaces spot-checked: image queue permanent failures, MySQL datetime parsing, root script syntax gate, i18n keys, map marker naming, image-manager checkbox labels.
+- Gate definitions: root `package.json`, `apps/web/package.json`, `.github/workflows/quality.yml`.
+- Unit/browser surfaces: 360 Vitest files under `apps/web/src/__tests__`; 9 Playwright specs under `apps/web/e2e`; `apps/web/vitest.config.ts`; `apps/web/playwright.config.ts`.
+- Cycle 22 implementation and ledger files: `.context/plans/cycle-22-2026-07-08-plan.md`, `.context/plans/cycle-22-2026-07-08-deferred.md`, `.context/plans/README.md`, `.context/reviews/_aggregate.md`, `CLAUDE.md`.
+- Mutation-barrier scanner and fixtures: `apps/web/scripts/check-action-origin.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`, current `apps/web/src/app/actions/**` slot shapes.
+- Pending deletion drain and restore wiring: `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, related tests.
+- Timeline parser-backed grouping: `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/mysql-datetime.ts`, `apps/web/src/__tests__/data-timeline*.test.ts`.
+- Remaining test-infra risks: source-contract-heavy tests, Playwright project matrix, screenshot/manual artifact tests, hydration readiness waits.
 
 ## Findings
 
-### VER-C22-01 - Positive acquired-guard shape still lets mutations run outside the restore slot check
-
-- Severity: High
-- Confidence: High
-- Status: Confirmed
-- Files/regions: `apps/web/scripts/check-action-origin.ts:641-650`, `apps/web/scripts/check-action-origin.ts:664-708`, `apps/web/src/__tests__/check-action-origin.test.ts:640-655`, `apps/web/src/app/actions/auth.ts:290-302`
-- Contract: Cycle 21 WP1 required the scanner to prove mutation-barrier acquisition before mutations; the positive `if (slot.acquired) { ... }` shape is only safe when protected mutations are lexically inside that branch.
-- Evidence: `statementIsMutationSlotPositiveGuard()` returns true for a bare `if (mutationSlot.acquired)` and `bodyAcquiresAdminMutationSlot()` accepts it solely because it is the next statement after `using`. It does not inspect whether later mutations are inside the branch. A focused reproduction passed:
-
-```bash
-cd apps/web
-node --import tsx -e "import { checkActionSource } from './scripts/check-action-origin.ts'; const src = \`import { requireSameOriginAdmin } from '@/lib/action-guards'; import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier'; import { db, images } from '@/db'; import { eq } from 'drizzle-orm'; export async function updateImage(id, input) { const originError = await requireSameOriginAdmin(); if (originError) return { error: originError }; using mutationSlot = acquireAdminMutationSlot(); if (mutationSlot.acquired) { console.log('guard observed'); } await db.update(images).set(input).where(eq(images.id, id)); return { success: true }; }\`; console.log(JSON.stringify(checkActionSource(src, 'src/app/actions/images.ts'), null, 2));"
-```
-
-Output included `"OK: src/app/actions/images.ts::updateImage"`. Current production actions mostly use the negative early-return shape; `logout()` uses the positive branch correctly at `apps/web/src/app/actions/auth.ts:290-302`.
-- Failure scenario: a future mutating action adds an empty/logging positive acquired check, then performs DB writes afterward. `npm run lint:action-origin` remains green while restore maintenance can be bypassed.
-- Suggested fix/test: for positive guards, require all mutation markers/protected writes after the `using` declaration to be lexically contained in the acquired branch, or disallow the positive shape except in explicitly reasoned exemptions. Add a negative fixture where `if (slot.acquired) {}` is followed by `await db.update(...)`.
-
-### VER-C22-02 - Pending file-deletion rows are durable but have no later retry/drain path
-
-- Severity: High
-- Confidence: High
-- Status: Confirmed
-- Files/regions: `.context/plans/cycle-21-2026-07-08-plan.md:53-68`, `apps/web/src/lib/pending-file-deletions.ts:70-90`, `apps/web/src/app/actions/images.ts:714-727`, `apps/web/src/app/actions/images.ts:864-907`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts:39-45`
-- Contract: Cycle 21 WP2 says failed cleanup should be preserved "so a later retry can finish cleanup" and acceptance says cleanup failures leave durable retry state.
-- Evidence: failed cleanup updates `pending_file_deletions.attempts` and `last_error`, but repo-wide search shows no reader/drain/scheduler/admin retry path for `pendingFileDeletions` outside the immediate delete call and migration/backup allowlists. The only cleanup executor is `cleanupPendingFileDeletion(record)`, called synchronously from `deleteImage()` and `deleteImages()`.
-- Failure scenario: a transient filesystem or permission failure leaves a public derivative on disk and records a ledger row. After the action returns success, no restart, scheduler tick, admin page, or operator command will consume that row, so the file can remain publicly available indefinitely unless someone writes ad hoc cleanup.
-- Suggested fix/test: add a bounded cleanup drain invoked at startup/maintenance and an admin/operator retry surface, with idempotent behavior for missing files. Add behavior tests that seed a failed ledger row, mock one transient failure then success, and prove a later drain deletes files and removes the ledger row.
-
-### VER-C22-03 - Cycle 21 deploy/release ledger remains unfinished at the pushed HEAD
+### VER-C23-01 - Cycle 22 terminal release ledger is still stale after the pushed recovery commit
 
 - Severity: Medium
 - Confidence: High
 - Status: Confirmed
-- Files/regions: `.context/plans/cycle-21-2026-07-08-plan.md:1-6`, `.context/plans/cycle-21-2026-07-08-plan.md:221-253`, `.context/plans/README.md:34-37`, commit `8b795862`
-- Contract: Project policy requires `npm run deploy` after every pushed commit to `master`; Cycle 21 WP9 explicitly scheduled commit, push, and per-cycle deploy.
-- Evidence: `8b795862` is `HEAD -> master, origin/master`, so commit/push happened. The plan still says `commit/push/deploy pending`, the WP9 checkbox for signed commit/push/deploy is unchecked, and the commit trailer says `Not-tested: Production deploy pending until after signed commit is pushed per DEPLOY_MODE=per-cycle`.
-- Failure scenario: future cycles read the active plan index and treat Cycle 21 as the current complete release lineage, but the authoritative ledger still lacks production deploy/smoke evidence for the actual pushed HEAD.
-- Suggested fix/test: run/record the Cycle 21 deploy or explicitly mark it superseded by a later deploy with the exact commit hash and smoke result. Add a lightweight ledger check that a plan cannot claim active completion while its terminal deploy checkbox and HEAD hash evidence are missing.
+- Files/regions: `.context/plans/cycle-22-2026-07-08-plan.md:1-6`, `.context/plans/cycle-22-2026-07-08-plan.md:135-163`, `.context/plans/README.md:34-37`, commit `57c1ae33`
+- Contract: Project policy requires the per-cycle plan to carry terminal gate, push, and deploy evidence. Cycle 22 WP6 explicitly schedules full gates, signed commit/push, and `npm run deploy`.
+- Evidence: current HEAD is `57c1ae33` and is already `origin/master`, and the commit body records all local gates as tested. The Cycle 22 plan still says `Status: IMPLEMENTED - GATES PENDING`, WP6 says `commit/push/deploy pending`, and the WP6 checkbox remains open. No tracked deploy/live-smoke evidence for `57c1ae33` is present in the Cycle 22 ledger.
+- Failure scenario: Cycle 23+ agents cannot tell from committed ledgers whether `57c1ae33` was deployed, superseded, or only pushed locally, so production-state assumptions drift from source-state evidence.
+- Suggested fix: append terminal Cycle 22 evidence with exact commit hash, push state, deploy result or superseding deploy, and smoke result; then move Cycle 22 out of active plans.
 
-## No Finding From Focused Checks
+### VER-C23-02 - Successful full-scan derivative cleanup emits a false debug error
 
-- The negative early-return mutation-barrier regression from Cycle 21 is fixed: `check-action-origin.test.ts:745-760` covers mutation before `if (!slot.acquired)`.
-- The new migration journal entry is monotonic: `0030_pending_file_deletions` has `when=1783463767421`, greater than all prior journal entries.
-- `APP_BACKUP_TABLES` includes `pending_file_deletions`, so own-backup restore scanning is not immediately broken by the new table.
-- Root `scripts/*.mjs` are covered by `check-js-scripts.mjs` discovery.
+- Severity: Low
+- Confidence: High
+- Status: Confirmed
+- Files/regions: `apps/web/src/lib/process-image.ts:576-588`, `apps/web/src/lib/process-image.ts:118-127`, `apps/web/src/lib/pending-file-deletions.ts:82-88`
+- Contract: pending deletion cleanup and restored stale rows should quietly treat absent files as already clean unless storage actually refuses cleanup.
+- Evidence: `deleteImageVariantsStrict(..., [])` full-scans a directory with `for await (const entry of dirHandle)` and then calls `safeCloseDirHandle(dirHandle)` in `finally`. Node closes the `Dir` handle at iterator completion; the second close throws `ERR_DIR_CLOSED`, which `safeCloseDirHandle()` logs because it ignores only `ENOENT`. A direct probe from `apps/web` showed `deleteImageVariantsStrict missing: resolved` while logging `[safeCloseDirHandle] Failed to close directory handle: Error [ERR_DIR_CLOSED]`.
+- Failure scenario: ordinary image deletion or maintenance drains can produce debug noise for successful derivative scans, making real cleanup failures harder to spot.
+- Suggested fix: treat `ERR_DIR_CLOSED` as benign or remove the explicit close after `for await`; add a regression test that a successful `sizes=[]` scan does not call `console.debug`.
+
+### VER-C23-03 - Pending deletion recovery is partly behavior-backed, but restore suppression remains source-only
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed test/evidence gap
+- Files/regions: `apps/web/src/lib/maintenance-scheduler.ts:26-49`, `apps/web/src/app/[locale]/admin/db-actions.ts:655-678`, `apps/web/src/__tests__/pending-file-deletions.test.ts:111-158`, `apps/web/src/__tests__/pending-session-revocations.test.ts:101-116`
+- Contract: Cycle 22 WP2 acceptance requires the drain not to run during restore maintenance and restored rows to retry after the restore marker clears.
+- Evidence: implementation wires the drain through `runMaintenanceTask()` and post-restore cleanup. The executable `pending-file-deletions.test.ts` covers success, permanent failure, and limit normalization, but not restore-active suppression or post-marker ordering as behavior. Those claims are currently asserted only by string/index checks in `pending-session-revocations.test.ts`.
+- Failure scenario: a future refactor can preserve the strings while moving the drain before marker clear, dropping the scheduler guard, or letting a maintenance sweep delete files mid-import; current behavior tests would stay green.
+- Suggested fix: add a mocked `isRestoreMaintenanceActive()` maintenance test that proves the drain is skipped while active, plus a restore-action harness or extracted helper test proving post-restore drains run only after `endDurableRestoreMaintenance()`.
+
+### VER-C23-04 - Browser-flow verification still leaves non-Chromium, PWA, and visual regressions manual
+
+- Severity: Medium
+- Confidence: High
+- Status: Manual-validation risk
+- Files/regions: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/e2e/hydration-photo-page.spec.ts:20-49`
+- Contract: browser-flow verification should prove user-visible behavior, not only produce artifacts.
+- Evidence: Playwright defines one `chromium` project and CI installs only Chromium. The nav visual checks write screenshots with `page.screenshot()` but do not compare baselines. The hydration page still waits on `networkidle`, a timing proxy that can be affected by background requests.
+- Failure scenario: mobile WebKit touch behavior, Firefox color/display differences, PWA/offline paths, or visual spacing regress while CI remains green.
+- Suggested fix: add a small tagged browser matrix for mobile WebKit/mobile Chromium/PWA smoke and convert stable visual checks to `toHaveScreenshot()` or mark current screenshots as manual artifacts.
+
+## Confirmed Closures / No Finding
+
+- The Cycle 22 positive mutation-slot scanner bypass is closed: `apps/web/scripts/check-action-origin.ts:647-675` rejects later sibling mutations after a positive acquired guard, and `apps/web/src/__tests__/check-action-origin.test.ts:657-675` covers the regression.
+- Runtime year-in-review grouping now uses `parseMySqlDateTimeParts()` at `apps/web/src/lib/data-timeline.ts:248-266`, with a mocked query-chain behavior test in `apps/web/src/__tests__/data-timeline-behavior.test.ts:65-80`.
+- The strict original and derivative helpers treat missing files as success in direct probes, so the `CLAUDE.md:437` missing-file claim is true at runtime; the residual is the noisy close path in VER-C23-02.
 
 ## Evidence Commands
 
 ```bash
 git rev-parse --short HEAD
-git diff --name-status 45b32d1d..8b795862
-git show --format=fuller --no-patch 8b795862
+git log --oneline --decorate -n 12
+git diff --name-status 8b795862079b0e5318242a09390b4cdff1dc2058..HEAD
 npm run lint:action-origin --workspace=apps/web
-npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/mysql-datetime.test.ts src/__tests__/pending-file-deletions-source.test.ts
-npm test --workspace=apps/web -- --run src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/check-js-scripts-contract.test.ts src/__tests__/sql-restore-scan.test.ts
+npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/pending-file-deletions.test.ts src/__tests__/pending-session-revocations.test.ts src/__tests__/data-timeline-behavior.test.ts
+npm test --workspace=apps/web -- --run src/__tests__/process-image-variant-scan.test.ts src/__tests__/upload-paths.test.ts
 ```
 
-Results: targeted tests passed; `lint:action-origin` passed on current files; the custom positive-guard reproduction still passed incorrectly.
+Results: targeted tests passed; `lint:action-origin` passed. I did not rerun the full blocking suite in this review lane.
 
 ## Final Missed-Issue Sweep / Uninspected
 
-- I did not run the full blocking suite (`lint`, `api-auth`, `public-route-rate-limit`, `typecheck`, `build`, full unit tests, Playwright e2e); this was a review lane and I ran targeted checks only.
-- I did not verify live production deploy/nginx/proxy state.
-- I did not inspect every historical archive under `.context/plans/archive/`; current plan/deferred/index/aggregate were inspected.
+- Full `lint`, `api-auth`, `public-route-rate-limit`, `typecheck`, `build`, full unit, and full Playwright gates were not rerun; Cycle 22 commit text claims them green.
+- Live production deploy, host nginx, proxy topology, and real CLIP model weights were not dynamically inspected.
+- I did not inspect every historical plan archive; current active/deferred/index artifacts and recent review aggregates were inspected.

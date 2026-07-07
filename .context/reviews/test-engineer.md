@@ -1,95 +1,88 @@
-# Cycle 22 Test-Engineer Review
+# Cycle 23 Test-Engineer Review
 
 Role: `test-engineer`
 Repo: `/Users/hletrd/flash-shared/gallery`
-Current HEAD at write: `dabf8e8a` (intervening commits after `8b795862` changed other review artifacts only)
-Reviewed source HEAD: `8b795862079b0e5318242a09390b4cdff1dc2058`
+Current HEAD at write: `57c1ae33` (`origin/master`)
 
 ## Inventory
 
 Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
 
-Test inventory and high-risk interactions inspected:
+Test/verification inventory built first:
 
-- 376 test/e2e files under `apps/web/src/__tests__` and `apps/web/e2e`.
-- Blocking gate scripts from `package.json` and `apps/web/package.json`: ESLint, `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, `typecheck`, unit tests, Playwright e2e.
-- Scanner tests: `check-action-origin`, API auth, public route rate limit, JS script syntax, SQL restore scan.
-- Current-cycle tests around scheduled fixes: `check-action-origin.test.ts`, `pending-file-deletions-source.test.ts`, `image-queue-permanent-failure*.test.ts`, `mysql-datetime.test.ts`, `data-timeline.test.ts`, `check-js-scripts-contract.test.ts`.
-- Broader persistent test-risk categories: migration/reconcile source contracts, backup/restore child-process source contracts, client search/load-more source contracts, Playwright matrix, visual screenshots, hydration readiness.
+- Commands and gates: root `package.json`, `apps/web/package.json`, `.github/workflows/quality.yml`.
+- Test files: 360 Vitest files in `apps/web/src/__tests__`; 9 Playwright specs in `apps/web/e2e`; `apps/web/vitest.config.ts`; `apps/web/playwright.config.ts`.
+- New/changed Cycle 22 tests: `check-action-origin.test.ts`, `pending-file-deletions.test.ts`, `pending-session-revocations.test.ts`, `data-timeline-behavior.test.ts`, `data-timeline.test.ts`.
+- Test-adjacent implementation under review: `check-action-origin.ts`, `pending-file-deletions.ts`, `maintenance-scheduler.ts`, `db-actions.ts`, `process-image.ts`, `upload-paths.ts`, `data-timeline.ts`.
+- Recurring weak-assertion areas: migration/reconcile source contracts, restore child-process source contracts, semantic scan cap source tests, stale client response source tests, browser visual artifacts, hydration timing waits.
 
 ## Findings
 
-### TE-C22-01 - Missing negative fixture for positive acquired guards allowed the scanner bypass to survive
-
-- Severity: High
-- Confidence: High
-- Status: Confirmed test gap with confirmed scanner behavior
-- Files/regions: `apps/web/src/__tests__/check-action-origin.test.ts:640-655`, `apps/web/src/__tests__/check-action-origin.test.ts:745-760`, `apps/web/scripts/check-action-origin.ts:641-650`, `apps/web/scripts/check-action-origin.ts:688-690`
-- Weakness: Cycle 21 added a negative test for "mutation before `if (!slot.acquired)`" but not for the positive-guard sibling shape. The existing positive test only proves the valid case where the mutation is inside `if (mutationSlot.acquired)`.
-- Failure scenario: a fixture with `using slot; if (slot.acquired) {}; await db.update(...)` passes today. That is exactly the kind of source-contract-vs-behavior weakness the scanner exists to prevent.
-- Suggested test: add a failing fixture where the positive branch does not contain all mutations. Assert the scanner fails it before changing scanner logic. Add one positive fixture for the real `logout()` pattern so valid contained work stays accepted.
-
-### TE-C22-02 - Pending file deletion durability is tested by source strings, not by executable cleanup behavior
-
-- Severity: High
-- Confidence: High
-- Status: Confirmed gap
-- Files/regions: `apps/web/src/__tests__/pending-file-deletions-source.test.ts:1-45`, `apps/web/src/lib/pending-file-deletions.ts:34-90`, `apps/web/src/app/actions/images.ts:714-727`, `apps/web/src/app/actions/images.ts:864-907`
-- Weakness: The new tests read source and assert names/order. They do not execute `collectImageCleanupFailures()`, do not mock strict unlink failures, do not verify DB updates/deletes, and do not prove a later retry/drain exists.
-- Failure scenario: cleanup can keep a row forever after one failed synchronous delete, or a future refactor can record attempts but never retry or remove successful rows. Source strings stay green.
-- Suggested test: extract DB/filesystem effects behind injectable helpers or mock modules with Vitest. TDD cases: all cleanup succeeds -> ledger row deleted; one target fails once then succeeds on later drain -> attempts increments then row removed; permanent failure preserves `last_error`; missing files are idempotent success; batch deletion aggregates failures without unbounded concurrency.
-
-### TE-C22-03 - Timeline grouping tests still reimplement old `Date` logic instead of exercising the new parser-backed behavior
+### TE-C23-01 - Pending file-deletion drain tests do not cover the highest-risk acceptance cases
 
 - Severity: Medium
 - Confidence: High
-- Status: Confirmed gap; production code uses the parser correctly
-- Files/regions: `apps/web/src/__tests__/data-timeline.test.ts:121-205`, `apps/web/src/lib/data-timeline.ts:244-266`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:100-110`, `apps/web/src/components/on-this-day-widget.tsx:48-52`, `apps/web/src/lib/mysql-datetime.ts:33-69`
-- Weakness: Cycle 21 correctly moved production timeline grouping to `parseMySqlDateTimeParts()`, but `data-timeline.test.ts` still validates inline fake grouping with `new Date(capture_date)`. That no longer tests the source contract it claims to test and could mask a future reintroduction of host-timezone parsing.
-- Failure scenario: a later refactor switches `getYearInReviewImages()` or the page grouping back to `new Date()`. Parser unit tests still pass, and the fake grouping tests continue to bless `Date` behavior.
-- Suggested test: export a small pure grouping helper or test `parseMySqlDateTimeParts`-based grouping directly. Add a TZ-sensitive fixture such as `2026-01-01 00:30:00` under a non-UTC timezone and assert the month remains January without `Date.parse`.
+- Status: Confirmed test gap
+- Files/regions: `.context/plans/cycle-22-2026-07-08-plan.md:53-61`, `apps/web/src/__tests__/pending-file-deletions.test.ts:111-158`, `apps/web/src/lib/pending-file-deletions.ts:46-71`, `apps/web/src/lib/maintenance-scheduler.ts:26-49`, `apps/web/src/app/[locale]/admin/db-actions.ts:655-678`
+- Weakness: the new drain test mocks both strict filesystem helpers and covers only all-success, permanent failure, and limit normalization. It does not test transient failure followed by success, already-missing files through the real strict helpers, restore-active suppression, or post-restore marker ordering as executable behavior.
+- Failure scenario: a future change can break the restore guard or leave stale restored rows undrained while the current drain unit test still passes because it never crosses the scheduler/restore boundary.
+- Suggested test: add cases for `mockRejectedValueOnce()` then success, real temp-directory missing-file cleanup, mocked `isRestoreMaintenanceActive() === true` preventing scheduler drain, and a small extracted post-restore sequencing helper that asserts `endDurableRestoreMaintenance()` precedes drain.
 
-### TE-C22-04 - Safety-critical source-contract concentration remains high
+### TE-C23-02 - Cleanup tests miss the successful-scan debug noise path
+
+- Severity: Low
+- Confidence: High
+- Status: Confirmed test gap with confirmed behavior
+- Files/regions: `apps/web/src/lib/process-image.ts:576-588`, `apps/web/src/lib/process-image.ts:118-127`, `apps/web/src/__tests__/process-image-variant-scan.test.ts:24-84`, `apps/web/src/__tests__/pending-file-deletions.test.ts:73-82`
+- Weakness: `process-image-variant-scan.test.ts` asserts files are deleted but does not spy on `console.debug`; `pending-file-deletions.test.ts` mocks `deleteImageVariantsStrict`, so it cannot catch helper-level logging.
+- Failure scenario: every successful `sizes=[]` derivative scan can log `ERR_DIR_CLOSED`, and tests still pass because they assert filesystem outcome only.
+- Suggested test: add a no-debug assertion around `deleteImageVariantsStrict(tempDir, 'missing-or-existing.jpg', [])`, or add a focused `safeCloseDirHandle`/full-scan test after changing the helper to ignore `ERR_DIR_CLOSED`.
+
+### TE-C23-03 - Safety-critical coverage is still heavily source-contract based
 
 - Severity: Medium
 - Confidence: High
-- Status: Risk / recurring gap
-- Files/regions: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/db-restore.test.ts:47-136`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-77`, `apps/web/src/__tests__/search-stale-response.test.ts:1-35`
-- Weakness: 167 unit test files read source with `readFileSync`; 221 files use at least one source/string assertion pattern. Some are useful tripwires, but high-risk runtime contracts still lack behavior-backed coverage.
-- Failure scenario: schema reconcile semantics, restore child-process settlement, semantic scan caps, or stale client response handling can drift while preserving expected strings/imports.
-- Suggested test strategy: keep source tripwires as lint-like checks, but add behavior gates for the highest-risk classes: disposable MySQL reconcile diff, fake `mysqldump`/`mysql` child-process harness, route-level semantic scan cap test, jsdom/RTL search stale-response test.
+- Status: Confirmed recurring gap
+- Files/regions: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:28-37`, `apps/web/src/__tests__/db-restore.test.ts:12-136`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:19-77`, `apps/web/src/__tests__/search-stale-response.test.ts:13-35`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts:5-45`
+- Weakness: repo-wide scan found 167 unit test files using source-read/source-index patterns. Some are useful lint-like tripwires, but several high-risk runtime contracts still lean on string shape rather than behavior.
+- Failure scenario: migration reconcile semantics, restore child-process settlement, semantic scan caps, stale response suppression, or delete-ledger wiring can preserve expected imports/strings while changing runtime behavior.
+- Suggested test strategy: keep source tripwires, but add behavior harnesses for the highest-risk classes: disposable MySQL/reconcile diff tests, fake `mysqldump`/`mysql` child-process settlement, route-level semantic scan cap tests, and jsdom/RTL stale-search cancellation tests.
 
-### TE-C22-05 - Browser-flow coverage remains single-project Chromium with non-asserting visual artifacts
+### TE-C23-04 - Browser coverage remains Chromium-only with screenshot artifacts rather than visual assertions
 
 - Severity: Medium
 - Confidence: High
-- Status: Risk / recurring gap
-- Files/regions: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/e2e/hydration-photo-page.spec.ts:36-38`
-- Weakness: CI installs/runs only Desktop Chromium. The nav "visual" spec writes screenshots but does not compare baselines, and hydration waits on `networkidle`, which is a timing heuristic vulnerable to service-worker/analytics/background work.
-- Failure scenario: WebKit/mobile touch, Firefox color capability, PWA install/offline behavior, visual spacing, or hydration readiness regresses while CI stays green or flakes.
-- Suggested test: add a small tagged matrix rather than broad parallelism: mobile WebKit smoke, mobile Chromium touch smoke, production service-worker offline smoke, and deterministic `toHaveScreenshot` baselines or rename the current screenshots as manual artifacts. Replace hydration `networkidle` with an app-specific readiness sentinel.
+- Status: Manual-validation risk
+- Files/regions: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/e2e/hydration-photo-page.spec.ts:20-49`
+- Weakness: CI installs only Chromium, Playwright defines only a Desktop Chrome project, and nav visual tests write screenshots without comparing them. Hydration readiness still uses `networkidle`.
+- Failure scenario: mobile WebKit touch issues, Firefox display-gamut behavior, PWA/offline regressions, visual layout drift, or hydration flakes escape automated gates.
+- Suggested test: add tagged smoke projects for mobile WebKit/mobile Chromium/PWA offline and convert stable screenshots to `toHaveScreenshot()`; replace `networkidle` with an app-level readiness condition.
 
-## Existing Strengths
+### TE-C23-05 - Cycle 22 quality-gate evidence is not reconciled with the pushed HEAD/deploy requirement
 
-- `lint:action-origin` is now AST-based and catches the Cycle 21 negative early-return bypass.
-- Migration journal monotonicity and app-backup-table coverage caught the new table/index integration points.
-- `mysql-datetime.test.ts` directly covers parser validity and MySQL DATETIME output shape.
-- Root operator script syntax is now part of `typecheck:scripts`.
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed evidence gap
+- Files/regions: `.context/plans/cycle-22-2026-07-08-plan.md:135-175`, `.context/plans/README.md:34-37`, commit `57c1ae33`
+- Weakness: the commit body for `57c1ae33` records all blocking local gates as green, but the committed Cycle 22 plan still lists WP6 open and says commit/push/deploy pending. No deploy/smoke evidence is recorded for the pushed recovery commit.
+- Failure scenario: a later test/release lane may assume Cycle 22 is complete from commit history or incomplete from plan history, and production verification remains ambiguous.
+- Suggested test/process fix: add a lightweight ledger consistency check for active plans: if HEAD is pushed and gate evidence exists, the plan must either record deploy evidence or explicitly mark deploy superseded/pending with a blocking reason.
 
 ## Evidence Commands
 
 ```bash
-npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/mysql-datetime.test.ts src/__tests__/pending-file-deletions-source.test.ts
-npm test --workspace=apps/web -- --run src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/check-js-scripts-contract.test.ts src/__tests__/sql-restore-scan.test.ts
+find apps/web/src/__tests__ -maxdepth 1 -name '*.test.ts' | wc -l
+find apps/web/e2e -maxdepth 1 -name '*.spec.ts' | wc -l
+rg -l "readFileSync|fs\\.readFileSync|extractFunctionBody|source\\.indexOf|source\\.includes" apps/web/src/__tests__ | wc -l
 npm run lint:action-origin --workspace=apps/web
-rg -n "pendingFileDeletions|pending_file_deletions|cleanupPendingFileDeletion" apps/web/src apps/web/scripts apps/web/drizzle
-rg -n "new Date\\(|Date\\.parse|getMonth|getDate" apps/web/src/lib/data-timeline.ts apps/web/src/components/on-this-day-widget.tsx "apps/web/src/app/[locale]/(public)/timeline/page.tsx" apps/web/src/__tests__/data-timeline.test.ts
+npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/pending-file-deletions.test.ts src/__tests__/pending-session-revocations.test.ts src/__tests__/data-timeline-behavior.test.ts
+npm test --workspace=apps/web -- --run src/__tests__/process-image-variant-scan.test.ts src/__tests__/upload-paths.test.ts
 ```
 
-Results: targeted tests passed; `lint:action-origin` passed current files; repo-wide search confirmed no pending-deletion retry/drain path; `data-timeline.test.ts` still contains `new Date()` in fake grouping assertions.
+Results: targeted tests and `lint:action-origin` passed. Full gates and live deploy were not rerun in this review lane.
 
 ## Final Missed-Issue Sweep / Uninspected
 
-- No `test.only` sweep was rerun in this lane; prior top-level review recorded this class, and I focused on changed/high-risk tests.
-- I did not run full Playwright, full unit, build, typecheck, or lint gates.
-- Live production deploy state, host nginx, real CLIP model weights, and non-Chromium browsers were not dynamically inspected.
+- No `test.only` sweep beyond the targeted `rg` inventory was run.
+- Full unit suite, full Playwright suite, build, typecheck, and all lint gates were not rerun.
+- Real browser matrix, live production, nginx/proxy topology, and CLIP model preflight remain manual/uninspected here.
