@@ -125,6 +125,14 @@ export function BulkEditDialog({
             setValidationError(t('imageManager.bulkSelectTopic'));
             return;
         }
+        // AGG9B-04 / CR9-03 (loop-B cycle 9b): the two TagInputs are
+        // independent, so nothing else stops the same tag landing in both
+        // fields — server-side, removal silently wins for every selected
+        // image. Mirror the server's overlap rejection with a clear error.
+        if (addTagNames.some((tag) => removeTagNames.includes(tag))) {
+            setValidationError(t('imageManager.bulkTagOverlap'));
+            return;
+        }
 
         const topicField: TriState<string> = topicMode === 'leave'
             ? { mode: 'leave' }

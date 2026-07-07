@@ -1051,6 +1051,16 @@ export async function bulkUpdateImages(input: BulkUpdateImagesInput) {
     if (normalizedAddTagNames.some((tag) => tag === null) || normalizedRemoveTagNames.some((tag) => tag === null)) {
         return { error: t('invalidTagName') };
     }
+    // AGG9B-04 / CR9-03 (loop-B cycle 9b): reject a tag present in BOTH
+    // lists (compared by canonical slug — the same identity the add/remove
+    // loops resolve records by). The add loop runs first and the remove loop
+    // unconditionally undoes it for every image in the batch, so the silent
+    // net effect was "remove" while the audit log recorded the tag under
+    // addTagNames.
+    const addTagSlugSet = new Set(normalizedAddTagNames.map((tag) => tag?.slug));
+    if (normalizedRemoveTagNames.some((tag) => tag && addTagSlugSet.has(tag.slug))) {
+        return { error: t('overlappingBulkTags') };
+    }
 
     // COR-R5C1-01 (plan-315 item 1, pulled forward this cycle): validate each
     // TriState field's SHAPE before reading `.mode`. The fields below are read

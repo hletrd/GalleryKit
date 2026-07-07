@@ -298,6 +298,31 @@ describe('bulkUpdateImages — input validation', () => {
         expect(res).toEqual({ error: 'invalidTagName' });
         expect(transactionMock).not.toHaveBeenCalled();
     });
+
+    it('rejects a tag present in both addTagNames and removeTagNames (AGG9B-04)', async () => {
+        // The add loop runs first and the remove loop unconditionally undoes
+        // it for every image, so an overlapping tag silently netted to
+        // "remove" while the audit log recorded it as added.
+        const res = await bulkUpdateImages(makeInput({
+            addTagNames: ['portrait', 'landscape'],
+            removeTagNames: ['draft', 'portrait'],
+        }));
+
+        expect(res).toEqual({ error: 'overlappingBulkTags' });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects an overlap that only appears after normalization (AGG9B-04)', async () => {
+        // normalizeBulkTagName trims/NFKC-normalizes, so raw-inequal inputs
+        // can still collide post-normalization.
+        const res = await bulkUpdateImages(makeInput({
+            addTagNames: ['portrait'],
+            removeTagNames: ['  portrait  '],
+        }));
+
+        expect(res).toEqual({ error: 'overlappingBulkTags' });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
 });
 
 describe('bulkUpdateImages — tri-state diff applier', () => {
