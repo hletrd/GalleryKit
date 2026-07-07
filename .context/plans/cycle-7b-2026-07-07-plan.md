@@ -183,7 +183,9 @@ that image's reprocessing.
       (first full run had 5 contention flakes while the peer session ran heavy
       work concurrently; each failing spec passed individually and the full
       re-run was clean — exit 0).
-- [ ] Deploy (per-cycle): `npm run deploy` from repo root after checking for a concurrent peer run.
+- [x] Deploy (per-cycle): `npm run deploy` succeeded 2026-07-07 ~23:26 KST (no concurrent
+      peer run; "Deployment Complete!", post-prune disk 14% used). Post-deploy verification:
+      `/api/live` 200, `/` 307 locale redirect, `/en` 200. DEPLOY: per-cycle-success.
 
 ### Shared-worktree note (for provenance)
 
