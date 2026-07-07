@@ -247,6 +247,66 @@ describe('getImagesLite tag_names SQL shape', () => {
         expect(tagSearchQuery).toContain('.where(and(...tagConditions))');
     });
 
+    /**
+     * AGG8b-22 / TEST8-02 (run-10 c8b): compiled-SQL lock for the C7-09 fix —
+     * strictly stronger than the source-slice above. Builds the searchImages
+     * tag-branch query SHAPE with the real Drizzle builder and asserts, on the
+     * compiled SQL string, that (a) the tag-name predicate lives ONLY inside
+     * the EXISTS(...) subquery and (b) the aggregation joins are unfiltered
+     * LEFT JOINs, so GROUP_CONCAT sees the photo's FULL tag set. A regression
+     * that re-filters the aggregation join (INNER JOIN + WHERE, or a HAVING)
+     * changes this compiled shape even if the TypeScript source keeps the
+     * pinned keywords.
+     */
+    it('compiled searchImages tag-branch shape keeps the tag filter inside EXISTS only', { timeout: 30000 }, async () => {
+        const { sql: drizzleSql, and, eq, exists } = await import('drizzle-orm');
+        const { drizzle: drizzleProxy } = await import('drizzle-orm/mysql-proxy');
+        const { images, imageTags, tags } = await import('../db/schema');
+        const { containsLike } = await import('../lib/sql-like');
+        const proxyDb = drizzleProxy(async () => ({ rows: [] }));
+
+        const tagMatchExists = exists(
+            proxyDb.select({ one: drizzleSql`1` })
+                .from(imageTags)
+                .innerJoin(tags, eq(imageTags.tagId, tags.id))
+                .where(and(
+                    eq(imageTags.imageId, images.id),
+                    containsLike(tags.name, 'sunset'),
+                )),
+        );
+        const compiled = proxyDb
+            .select({
+                id: images.id,
+                tag_names: drizzleSql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name})`,
+            })
+            .from(images)
+            .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+            .leftJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(and(eq(images.processed, true), tagMatchExists))
+            .groupBy(images.id)
+            .toSQL();
+
+        const lower = compiled.sql.toLowerCase();
+        // The aggregation joins are LEFT JOINs...
+        expect(lower).toContain('left join');
+        expect(lower).toContain('group_concat(distinct');
+        // ...and the ONLY tag-name LIKE predicate sits inside the EXISTS body.
+        const existsIdx = lower.indexOf('exists (');
+        expect(existsIdx).toBeGreaterThan(0);
+        const likeCount = (lower.match(/ like /g) ?? []).length;
+        expect(likeCount).toBe(1);
+        expect(lower.indexOf(' like ')).toBeGreaterThan(existsIdx);
+        // No filtered aggregation join: the LEFT JOIN ... ON clauses carry no
+        // tags.name predicate (join conditions reference ids only).
+        const whereIdx = lower.indexOf('where');
+        const joinSection = lower.slice(0, whereIdx);
+        expect(joinSection).not.toContain(' like ');
+        // No HAVING-based re-filtering either.
+        expect(lower).not.toContain('having');
+        // The searched term is bound exactly once (the EXISTS predicate).
+        expect(compiled.params.filter((p) => typeof p === 'string' && p.includes('sunset'))).toHaveLength(1);
+    });
+
     it('Drizzle compiled LIKE predicates use a MariaDB-safe escape marker', async () => {
         const { drizzle: drizzleProxy } = await import('drizzle-orm/mysql-proxy');
         const { images } = await import('../db/schema');
