@@ -624,6 +624,33 @@ describe('topic actions', () => {
         expect(txDeleteMock).not.toHaveBeenCalled();
     });
 
+    it('blocks topic deletion when a smart collection query cannot be parsed', async () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const txSelectMock = vi
+            .fn()
+            .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([{
+                id: 9,
+                query_json: '{not valid json',
+            }]));
+        const txDeleteMock = vi.fn().mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
+        transactionMock.mockImplementationOnce(async (callback: (tx: {
+            select: typeof txSelectMock;
+            delete: typeof txDeleteMock;
+        }) => Promise<void>) => callback({
+            select: txSelectMock,
+            delete: txDeleteMock,
+        }));
+
+        await expect(deleteTopic('travel')).resolves.toEqual({ error: 'cannotDeleteCategoryDueToInvalidCollectionQuery' });
+        expect(txDeleteMock).not.toHaveBeenCalled();
+        expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('blocking topic deletion'),
+            expect.anything(),
+        );
+        warnSpy.mockRestore();
+    });
+
     it('creates a topic when the route segment is free (COR-R4C19-01)', async () => {
         // Regression lock for the six-week production breakage: drizzle's raw
         // db.execute returns the mysql2 `[rows, fields]` tuple, and the

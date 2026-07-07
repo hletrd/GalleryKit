@@ -21,6 +21,9 @@ class TopicHasImagesError extends Error {
 class TopicReferencedBySmartCollectionError extends Error {
     constructor() { super('Topic is referenced by smart collections'); this.name = 'TopicReferencedBySmartCollectionError'; }
 }
+class SmartCollectionQueryInvalidError extends Error {
+    constructor() { super('Smart collection query is invalid'); this.name = 'SmartCollectionQueryInvalidError'; }
+}
 
 import { connection, db, images, topics, topicAliases, topicViews, smartCollections } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
@@ -472,9 +475,10 @@ export async function deleteTopic(slug: string) {
                     } catch (err) {
                         if (err instanceof TopicReferencedBySmartCollectionError) throw err;
                         console.warn(
-                            `[deleteTopic] smart_collection ${collection.id} has unparseable query_json — skipping topic-reference delete guard`,
+                            `[deleteTopic] smart_collection ${collection.id} has unparseable query_json — blocking topic deletion`,
                             err,
                         );
+                        throw new SmartCollectionQueryInvalidError();
                     }
                 }
                 const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanSlug)).limit(1);
@@ -511,6 +515,9 @@ export async function deleteTopic(slug: string) {
          }
          if (e instanceof TopicReferencedBySmartCollectionError) {
              return { error: t('cannotDeleteCategoryReferencedByCollection') };
+         }
+         if (e instanceof SmartCollectionQueryInvalidError) {
+             return { error: t('cannotDeleteCategoryDueToInvalidCollectionQuery') };
          }
          if (hasMySQLErrorCode(e, 'ER_ROW_IS_REFERENCED_2')) {
              return { error: t('cannotDeleteCategoryWithImages') };

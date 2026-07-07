@@ -504,6 +504,7 @@
     "invalidDescription": "Invalid description",
     "cannotDeleteCategoryWithImages": "Remove photos from this category first.",
     "cannotDeleteCategoryReferencedByCollection": "This category is referenced by a smart collection. Update the collection query directly before deleting it.",
+    "cannotDeleteCategoryDueToInvalidCollectionQuery": "A smart collection query could not be checked. Fix the collection query directly before deleting this category.",
     "failedToDeleteTopic": "Could not delete category.",
     "invalidTopicSlug": "Invalid category slug",
     "invalidAliasFormat": "Invalid alias format.",
