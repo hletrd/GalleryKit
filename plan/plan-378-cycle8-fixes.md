@@ -86,7 +86,7 @@ Run all configured gates after implementation:
 - [x] Planned
 - [x] Implemented
 - [x] Gates passed
-- [ ] Committed and pushed
+- [x] Committed and pushed (`44ab13c4`)
 - [ ] Deployed per `DEPLOY_MODE=per-cycle`
 
 ## Cycle 8 Implementation Notes
