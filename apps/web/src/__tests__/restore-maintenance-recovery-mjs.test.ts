@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'restore-maintenance-recovery.mjs');
 const CLEAR_CONFIRM_FLAG = '--confirm-clear-restore-maintenance';
@@ -76,5 +77,43 @@ describe('restore-maintenance-recovery.mjs shipped command', () => {
             markerPath,
             active: false,
         });
+    });
+});
+
+// C7-22 (run-10 cycle 7b): the shipped .mjs hand-duplicates the marker-path
+// derivation from restore-maintenance-durable.ts (it cannot import TS). This
+// parity pin fails loudly if either side's filename constant, default-dir
+// expression, or test-override hook drifts — this is the incident-recovery
+// command the runbook depends on working under pressure. The unused
+// scripts/restore-maintenance-recovery.ts twin was removed in the same
+// change (zero references: package.json, Dockerfile, and tests all point at
+// the .mjs).
+describe('marker-path derivation parity with restore-maintenance-durable.ts (C7-22)', () => {
+    const mjsSource = readFileSync(SCRIPT_PATH, 'utf8');
+    const durableSource = readFileSync(
+        join(process.cwd(), 'src', 'lib', 'restore-maintenance-durable.ts'),
+        'utf8',
+    );
+
+    it('uses the same marker filename', () => {
+        expect(mjsSource).toContain("const MARKER_FILENAME = 'restore-maintenance.json'");
+        expect(durableSource).toContain("const RESTORE_MAINTENANCE_MARKER_FILENAME = 'restore-maintenance.json'");
+    });
+
+    it('uses the same default-directory expression (env override, prod /app/data, dev data)', () => {
+        const defaultDirExpr = "configuredDir || (process.env.NODE_ENV === 'production' ? '/app/data' : 'data')";
+        expect(mjsSource).toContain(defaultDirExpr);
+        expect(durableSource).toContain(defaultDirExpr);
+        expect(mjsSource).toContain('RESTORE_MAINTENANCE_DIR');
+        expect(durableSource).toContain('RESTORE_MAINTENANCE_DIR');
+    });
+
+    it('honors the same test-override marker-path hook', () => {
+        expect(mjsSource).toContain('RESTORE_MAINTENANCE_MARKER_PATH');
+        expect(durableSource).toContain('RESTORE_MAINTENANCE_MARKER_PATH');
+    });
+
+    it('the dead .ts twin stays deleted (references must point at the .mjs)', () => {
+        expect(existsSync(join(process.cwd(), 'scripts', 'restore-maintenance-recovery.ts'))).toBe(false);
     });
 });
