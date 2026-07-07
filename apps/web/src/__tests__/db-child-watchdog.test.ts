@@ -111,8 +111,25 @@ describe('armDbChildProcessWatchdog (C7-15 behavioral)', () => {
         vi.advanceTimersByTime(DB_CHILD_PROCESS_KILL_GRACE_MS);
         expect(kill).toHaveBeenCalledWith('SIGKILL');
 
-        // Settle listeners were detached by cleanup; a very late exit is a no-op.
+        // A very late exit after the grace window is still safe.
         expect(() => emitter.emit('exit', 0)).not.toThrow();
+    });
+
+    it('post-timeout cleanup keeps settle listeners: an exit in the grace window still cancels SIGKILL (AGG8b-14)', () => {
+        const { child, kill, emitter } = makeFakeChild();
+        const cleanup = armDbChildProcessWatchdog(child, 'test child', vi.fn());
+
+        vi.advanceTimersByTime(DB_CHILD_PROCESS_TIMEOUT_MS);
+        expect(kill).toHaveBeenCalledWith('SIGTERM');
+
+        // An unconditional caller runs cleanup right after the timeout fired…
+        cleanup();
+        // …and the child then exits during the SIGKILL grace window. The
+        // settle listeners must still be attached so the grace timer is
+        // canceled — no SIGKILL to an already-exited (or PID-reused) process.
+        emitter.emit('exit', 0);
+        vi.advanceTimersByTime(DB_CHILD_PROCESS_KILL_GRACE_MS);
+        expect(kill).not.toHaveBeenCalledWith('SIGKILL');
     });
 
     it('double settle (exit then close) clears the grace timer exactly once without throwing', () => {
