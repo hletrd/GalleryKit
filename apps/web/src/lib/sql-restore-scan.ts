@@ -130,6 +130,18 @@ const DANGEROUS_SQL_PATTERNS = [
 
 export const SQL_SCAN_TAIL_BYTES = 1024 * 1024;
 
+// C6-01 (run-10 cycle-6): raw byte-continuous bridge width. The compacted
+// `\n`-join in appendSqlScanChunk collapses megabytes of inter-token whitespace
+// so `CREATE … TRIGGER` still fits the retained tail window, but that injected
+// newline lands EXACTLY at the read boundary. An attacker who aligns a dangerous
+// statement so the boundary falls inside a keyword TOKEN (e.g. `DROP TAB`|`LE`)
+// breaks the token with the newline, evading `/\bDROP\s+TABLE\b/i`. To close
+// that, we ALSO scan the raw suffix of the previous chunk concatenated directly
+// (no separator) to the raw prefix of the current chunk, losslessly rejoining a
+// split keyword. 128 comfortably spans the longest contiguous dangerous keyword
+// phrase; huge-whitespace inter-token splits stay covered by the compacted tail.
+export const SQL_SCAN_RAW_BRIDGE_BYTES = 128;
+
 function maskMatches(input: string, pattern: RegExp): string {
     return input.replace(pattern, (match) => ' '.repeat(match.length));
 }
@@ -268,11 +280,29 @@ export function appendSqlScanChunk(
     previousTail: string,
     chunk: string,
     maxTailBytes: number = SQL_SCAN_TAIL_BYTES,
+    previousRawSuffix: string = '',
 ) {
-    const combined = previousTail ? `${previousTail}\n${chunk}` : chunk;
-    const compactTail = compactSqlScanTail(combined);
+    // Compacted-tail join: preserves the >window whitespace-collapse case so a
+    // dangerous keyword separated from its object by megabytes of whitespace
+    // still fits the retained tail. The injected `\n` is a token separator here.
+    const compactedJoin = previousTail ? `${previousTail}\n${chunk}` : chunk;
+    // Raw byte-continuous bridge (C6-01): rejoin a keyword token split exactly at
+    // the chunk read boundary. `previousRawSuffix` is the last
+    // SQL_SCAN_RAW_BRIDGE_BYTES raw chars of the prior chunk; concatenating it
+    // directly (NO separator) to this chunk's raw prefix reassembles e.g.
+    // `DROP TAB` + `LE images;` → `DROP TABLE images;`, which the compacted `\n`
+    // join would otherwise break. Scanned as an extra `\n`-separated segment so
+    // it cannot merge tokens with the compacted-join tail.
+    const rawBridge = previousRawSuffix
+        ? `${previousRawSuffix}${chunk.slice(0, SQL_SCAN_RAW_BRIDGE_BYTES)}`
+        : '';
+    const combined = rawBridge ? `${compactedJoin}\n${rawBridge}` : compactedJoin;
+    const compactTail = compactSqlScanTail(compactedJoin);
     return {
         combined,
         nextTail: compactTail.slice(-maxTailBytes),
+        nextRawSuffix: chunk.length > SQL_SCAN_RAW_BRIDGE_BYTES
+            ? chunk.slice(-SQL_SCAN_RAW_BRIDGE_BYTES)
+            : chunk,
     };
 }

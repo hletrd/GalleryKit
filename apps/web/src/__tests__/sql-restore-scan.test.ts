@@ -280,4 +280,43 @@ describe('containsDangerousSql', () => {
         const nextWindow = appendSqlScanChunk(nextTail, secondChunk);
         expect(containsDangerousSql(nextWindow.combined)).toBe(true);
     });
+
+    // C6-01 (run-10 cycle-6): the compacted `\n`-join in appendSqlScanChunk
+    // injects a newline exactly at the read boundary. When a dangerous keyword
+    // TOKEN is split there (e.g. `DROP TAB`|`LE`), the newline breaks the token
+    // and `/\bDROP\s+TABLE\b/i` never matches — a byte-alignment evasion. The
+    // raw byte-continuous bridge (threaded via `nextRawSuffix`) rejoins the
+    // token. This differs from the whitespace-boundary tests above, which split
+    // in the inter-token gap and are caught by the `\n`-join itself.
+    it('detects dangerous keywords split INSIDE a token at the chunk boundary (raw bridge)', () => {
+        const cases: Array<{ first: string; second: string }> = [
+            { first: 'DROP TAB', second: 'LE images;' },
+            { first: 'DROP DATABA', second: 'SE gallerykit;' },
+            { first: 'DELETE FRO', second: 'M images;' },
+            { first: 'TRUNC', second: 'ATE TABLE images;' },
+        ];
+
+        for (const { first, second } of cases) {
+            const label = `${first}|${second}`;
+            const firstWindow = appendSqlScanChunk('', first, SQL_SCAN_TAIL_BYTES, '');
+            // The benign prefix on its own must not self-trigger.
+            expect(containsDangerousSql(firstWindow.combined), label).toBe(false);
+
+            // Regression sentinel: WITHOUT the raw-suffix thread (legacy 2-arg
+            // call), the intra-token split evades detection — this documents the
+            // exact bug the raw bridge closes.
+            const evasion = appendSqlScanChunk(firstWindow.nextTail, second);
+            expect(containsDangerousSql(evasion.combined), `${label} (no bridge)`).toBe(false);
+
+            // WITH the raw suffix threaded, the split keyword is rejoined and the
+            // dangerous statement is detected.
+            const bridged = appendSqlScanChunk(
+                firstWindow.nextTail,
+                second,
+                SQL_SCAN_TAIL_BYTES,
+                firstWindow.nextRawSuffix,
+            );
+            expect(containsDangerousSql(bridged.combined), `${label} (bridge)`).toBe(true);
+        }
+    });
 });

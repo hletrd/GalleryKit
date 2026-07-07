@@ -16,7 +16,7 @@ import { isAdmin, getCurrentUser } from "@/app/actions";
 import { logAuditEvent } from "@/lib/audit";
 import { getTranslations } from 'next-intl/server';
 import { revalidateAllAppData } from "@/lib/revalidation";
-import { appendSqlScanChunk, containsDangerousSql } from "@/lib/sql-restore-scan";
+import { appendSqlScanChunk, containsDangerousSql, SQL_SCAN_TAIL_BYTES } from "@/lib/sql-restore-scan";
 import { createBackupFilename } from "@/lib/backup-filename";
 import { requireSameOriginAdmin } from "@/lib/action-guards";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
@@ -722,6 +722,10 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
         let dangerousSqlDetected = false;
         try {
             let scanTail = '';
+            // C6-01: carry the raw suffix of the previous chunk so
+            // appendSqlScanChunk can rejoin a dangerous keyword split exactly at
+            // the read boundary (the compacted `\n`-join alone would break it).
+            let scanRawSuffix = '';
             for (let off = 0; off < fileSize; off += CHUNK_SIZE) {
                 const readSize = Math.min(CHUNK_SIZE, fileSize - off);
                 const chunkBuf = Buffer.alloc(readSize);
@@ -732,12 +736,18 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
                 const { bytesRead } = await scanFd.read(chunkBuf, 0, readSize, off);
                 if (bytesRead === 0) break;
                 const chunk = chunkBuf.subarray(0, bytesRead).toString('utf8');
-                const { combined, nextTail } = appendSqlScanChunk(scanTail, chunk);
+                const { combined, nextTail, nextRawSuffix } = appendSqlScanChunk(
+                    scanTail,
+                    chunk,
+                    SQL_SCAN_TAIL_BYTES,
+                    scanRawSuffix,
+                );
                 if (containsDangerousSql(combined)) {
                     dangerousSqlDetected = true;
                     break;
                 }
                 scanTail = nextTail;
+                scanRawSuffix = nextRawSuffix;
             }
         } finally {
             await scanFd.close();
