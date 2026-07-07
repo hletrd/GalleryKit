@@ -1,0 +1,32 @@
+# Run-10 Cycle 18/100 Deferred Findings
+
+Status: OPEN
+Aggregate: `.context/reviews/_aggregate.md`
+Date: 2026-07-08 KST
+
+Deferred items preserve original severity/confidence. Repo policies still apply when reopened: GPG-signed Conventional Commits with gitmoji, `git pull --rebase` before push, no force-push, no `--no-verify`, required quality gates, migration checklist, and deployment rules.
+
+Repo-rule basis for operator/manual deferrals:
+
+- `CLAUDE.md` says: "The shipped Docker Compose deployment is a single web-instance / single-writer topology" and "do not horizontally scale the web service unless those coordination states are moved to a shared store."
+- `CLAUDE.md` says: "Dumps are plaintext SQL at rest; host/storage encryption is the operator boundary."
+- `CLAUDE.md` says: "Admin DB backup/restore is SQL-only" and "does not snapshot or roll back host files."
+- `CLAUDE.md` says: "Deploys do NOT touch host nginx" and live nginx/proxy changes are operator-applied.
+- `CLAUDE.md` says CLIP production activation requires live model/env/DB checks and that the manual pre-flight is "the ONLY verification that the real encoder loads offline and ranks semantically."
+- `AGENTS.md` says to keep diffs small, reviewable, and reversible, and to prefer deletion/existing utilities before adding new abstractions or dependencies.
+
+## Deferred Register
+
+| Finding | Original severity/confidence | Citation | Reason for deferral | Exit criterion |
+| --- | --- | --- | --- | --- |
+| `AGG-C18-03` large multipart framework materialization | High / High | `apps/web/src/app/api/admin/lr/upload/route.ts:101-180`; `apps/web/src/app/actions/images.ts:184-260` | Performance/architecture rewrite to streaming multipart route handlers and a shared large-ingress semaphore. Current caps bound input size and `CLAUDE.md` already documents multipart upload RSS budgeting. | Reopen when implementing streaming upload/restore ingestion or after production RSS measurement shows memory budget breach. |
+| `AGG-C18-04` semantic/similar request-local vector scans | High / High | `apps/web/src/app/api/search/semantic/route.ts:263-311`; `apps/web/src/app/api/search/similar/[id]/route.ts:177-214` | Performance/infrastructure work requiring vector index/service or shared matrix worker. Production mode is operator-enabled and bounded by documented scan limits. | Reopen when semantic traffic/gallery size exceeds current limits, when scan caps are raised, or when vector indexing/caching is scheduled. |
+| `AGG-C18-05` public map renders up to 10k Leaflet markers | Medium / High | `apps/web/src/lib/data.ts:1775-1816`; `apps/web/src/components/map/map-client.tsx:77-140` | Product/performance redesign needing clustering or viewport fetch design; current cap prevents unbounded growth. | Reopen when map-visible GPS rows approach thousands, mobile map jank is measured, or map clustering is prioritized. |
+| `AGG-C18-07` UI/operator-copy browser verification gap | Medium / High | `.context/plans/cycle-17-2026-07-08-plan.md:89-120`; `.context/plans/cycle-17-2026-07-08-plan.md:151-158`; `apps/web/src/__tests__/cycle-17-source-contracts.test.ts:80-112` | Browser-flow coverage expansion needs seeded/credentialed admin e2e setup for token, alias, and analytics flows. No current rendered-copy defect was confirmed. | Reopen when admin e2e credentials are available, when these flows change, or in a dedicated browser-flow coverage cycle. |
+| `AGG-C18-08` e2e browser matrix is Chromium desktop only | Medium / High | `apps/web/playwright.config.ts:72-77` | CI/runtime expansion for WebKit/mobile/Firefox is broad test-infrastructure work; no browser-specific failure was confirmed this cycle. | Reopen when public browser-matrix work is scheduled or after a WebKit/mobile/Firefox regression appears. |
+| `AGG-C18-09` admin e2e can pass locally while admin flows skip | Low-Medium / High | `apps/web/e2e/admin.spec.ts:6-12`; `apps/web/e2e/helpers.ts:28-45` | Local credential handling/reporting improvement; current CI/admin opt-in behavior is intentional and no source defect was found. | Reopen when admin e2e setup changes, when admin UI is modified without credentialed validation, or when adding skip-count reporting. |
+| `AGG-C18-16` admin image management table-first layout | Medium / High | `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`; `apps/web/src/components/image-manager.tsx:427-591` | Admin workbench redesign spans dashboard layout, image manager, tag editing, status chips, and responsive behavior; not a narrow correctness fix. | Reopen when building responsive admin card/workbench mode or addressing authenticated admin responsive UX. |
+| `AGG-C18-17` flat wrapping admin navigation | Low-Medium / High | `apps/web/src/components/admin-nav.tsx:15-49`; `apps/web/src/components/admin-header.tsx:13-26` | Admin IA redesign. Current navigation remains functional and touch targets are policy-compliant. | Reopen when admin navigation is redesigned, mobile/tablet admin work starts, or sensitive operations need stronger IA separation. |
+| `AGG-C18-18` live deployment/operator state outside static proof | Low / High | `README.md:48`; `apps/web/README.md:80-88`; `CLAUDE.md:509-521`; `CLAUDE.md:553-631`; `apps/web/nginx/default.conf:59-71` | Deferred under repo operator-boundary rules for CLIP weights/env/DB, host nginx/proxy, and deployment state. Static source cannot prove live state. | Reopen before claiming live semantic/proxy activation or if a cycle/deploy completion ledger lacks deploy transcript and smoke evidence. |
+| `AGG-C18-21` protected admin responsive behavior needs credentialed browser validation | Low-Medium / Medium | `apps/web/src/app/[locale]/admin/(protected)`; `apps/web/src/components/image-manager.tsx` | Validation risk requiring local DB/admin credentials and browser snapshots. No specific protected-page runtime defect was confirmed. | Reopen when admin UI changes, when seeded admin e2e credentials are available, or in a dedicated admin responsive validation pass. |
+| `AGG-C18-22` RTL future risk | Low / Medium | `apps/web/src/app/[locale]/layout.tsx`; physical left/right classes across nav/lightbox/admin components | Shipped locales are EN/KO and both are LTR; this is a future product-scope risk, not a live defect. | Reopen before adding any RTL locale or when adding an RTL Playwright/accessibility matrix. |

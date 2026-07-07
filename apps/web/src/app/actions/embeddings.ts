@@ -12,7 +12,7 @@
 
 import { db, connection, images, imageEmbeddings } from '@/db';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { eq, notExists, and } from 'drizzle-orm';
+import { asc, eq, gt, notExists, and } from 'drizzle-orm';
 import { getTranslations } from 'next-intl/server';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { requireSameOriginAdmin } from '@/lib/action-guards';
@@ -133,38 +133,46 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
         const maintenanceAfterLock = getRestoreMaintenanceMessage(t('restoreInProgress'));
         if (maintenanceAfterLock) return { status: 'error', message: maintenanceAfterLock };
 
-        // Select processed images without an embedding row FOR THE ACTIVE model_version
-        // (bounded by SEMANTIC_SCAN_LIMIT), mirroring the sidecar's per-version selection.
-        const pending = await db
-            .select({ id: images.id, filenameOriginal: images.filename_original })
-            .from(images)
-            .where(
-                and(
-                    eq(images.processed, true),
-                    notExists(
-                        db.select({ imageId: imageEmbeddings.imageId })
-                            .from(imageEmbeddings)
-                            .where(
-                                and(
-                                    eq(imageEmbeddings.imageId, images.id),
-                                    eq(imageEmbeddings.modelVersion, modelVersion),
-                                ),
-                            ),
-                    ),
-                ),
-            )
-            .limit(SEMANTIC_SCAN_LIMIT);
-
         let processed = 0;
         let skipped = 0;
+        let attemptedEmbeddings = 0;
+        let cursor = 0;
 
-        // Process in batches with bounded concurrency
-        for (let batchStart = 0; batchStart < pending.length; batchStart += BACKFILL_BATCH_SIZE) {
-            const batch = pending.slice(batchStart, batchStart + BACKFILL_BATCH_SIZE);
+        for (;;) {
+            const remainingEmbeddingBudget = Math.max(SEMANTIC_SCAN_LIMIT - attemptedEmbeddings, 0);
+            if (remainingEmbeddingBudget === 0) break;
+
+            // Select processed images without an embedding row FOR THE ACTIVE
+            // model_version, using the sidecar's keyset pattern so skipped
+            // missing-original rows cannot trap later valid rows behind them.
+            const pending = await db
+                .select({ id: images.id, filenameOriginal: images.filename_original })
+                .from(images)
+                .where(
+                    and(
+                        eq(images.processed, true),
+                        gt(images.id, cursor),
+                        notExists(
+                            db.select({ imageId: imageEmbeddings.imageId })
+                                .from(imageEmbeddings)
+                                .where(
+                                    and(
+                                        eq(imageEmbeddings.imageId, images.id),
+                                        eq(imageEmbeddings.modelVersion, modelVersion),
+                                    ),
+                                ),
+                        ),
+                    ),
+                )
+                .orderBy(asc(images.id))
+                .limit(Math.min(BACKFILL_BATCH_SIZE, remainingEmbeddingBudget));
+
+            if (pending.length === 0) break;
+            cursor = pending[pending.length - 1].id;
 
             // Run BACKFILL_CONCURRENCY items concurrently within each batch
-            for (let i = 0; i < batch.length; i += BACKFILL_CONCURRENCY) {
-                const chunk = batch.slice(i, i + BACKFILL_CONCURRENCY);
+            for (let i = 0; i < pending.length; i += BACKFILL_CONCURRENCY) {
+                const chunk = pending.slice(i, i + BACKFILL_CONCURRENCY);
                 await Promise.all(chunk.map(async ({ id, filenameOriginal }) => {
                     try {
                         let embedding: Float32Array;
@@ -172,8 +180,10 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                             if (!filenameOriginal) { skipped++; return; }
                             const originalPath = await resolveOriginalUploadPath(filenameOriginal);
                             if (!originalPath) { skipped++; return; }
+                            attemptedEmbeddings++;
                             embedding = await embedImageReal(originalPath);
                         } else {
+                            attemptedEmbeddings++;
                             embedding = embedImageStub(id);
                         }
                         // AGG-C10-01: store the RAW buffer (not base64) so the read path
@@ -197,6 +207,8 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                     }
                 }));
             }
+
+            if (pending.length < BACKFILL_BATCH_SIZE) break;
         }
 
         return { status: 'ok', processed, skipped };

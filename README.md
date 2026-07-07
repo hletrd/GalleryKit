@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://gallery.atik.kr">Live Demo</a> &middot;
+  <a href="https://gallery.atik.kr">Example deployment</a> &middot;
   <a href="#getting-started">Getting Started</a> &middot;
   <a href="#docker-deployment">Docker</a>
 </p>
@@ -27,6 +27,8 @@
 ---
 
 GalleryKit is built for photographers and trusted owner/operator teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions within browser and codec limits, and leaves heavy operator features such as production semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
+
+The linked example deployment is a live GalleryKit site and may include deployment-specific content, branding, settings, and model/search state. Fresh-install defaults are documented below.
 
 **For:** finished-photo publishing, private original storage, self-hosted sharing, browser-managed color-faithful delivery, and operator-controlled search.  
 **Not for:** editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
@@ -41,7 +43,7 @@ GalleryKit is built for photographers and trusted owner/operator teams who want 
 
 - **Masonry Grid Layout** -- responsive, column-balanced photo grid with infinite scroll
 - **Multi-Format Optimization** -- wide-gamut-aware AVIF/WebP/JPEG conversion via Sharp, with 10-bit AVIF when the deployed libheif stack supports it and explicit 8-bit fallback when it does not
-- **Photographer-grade color management** -- ICC profile honored, NCLX `colr` ISOBMFF detection, ICC chromaticity-based gamut detection (Eizo / BenQ / X-Rite custom monitor profiles), Display P3 / DCI-P3 / Adobe RGB / ProPhoto / Rec.2020 sources mapped to Display P3 with 4:4:4 chroma JPEG, DCI-P3 white-point Bradford-adapted to D65. Apple HDR gain map detection (admin audit only). PQ / HLG ingest gated behind admin opt-in. See `CLAUDE.md` "Color & HDR Pipeline" for the full decision matrix
+- **Photographer-oriented color pipeline** -- ICC profile honored within browser/codec delivery limits, NCLX `colr` ISOBMFF detection, ICC chromaticity-based gamut detection (Eizo / BenQ / X-Rite custom monitor profiles), Display P3 / DCI-P3 / Adobe RGB / ProPhoto / Rec.2020 sources mapped to Display P3 with 4:4:4 chroma JPEG, DCI-P3 white-point Bradford-adapted to D65. Apple HDR gain map detection (admin audit only). PQ / HLG ingest gated behind admin opt-in; public HDR delivery is not shipped yet. See `CLAUDE.md` "Color & HDR Pipeline" for the full decision matrix
 - **Categories & Sharing** -- organize photos into categories with slug aliases and publish per-photo or group share links with Base56 short keys
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin). Review GPS stripping before the first upload; once any photo exists, the setting is locked because changing it later would not rewrite already stored originals.
 - **Tagging & Search** -- keyword metadata search across titles, descriptions, cameras, and tags

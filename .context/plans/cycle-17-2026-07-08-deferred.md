@@ -1,6 +1,6 @@
 # Run-10 Cycle 17/100 Deferred Findings
 
-Status: OPEN
+Status: SUPERSEDED BY CYCLE 18 DEFERRED REGISTER WHERE STILL OPEN
 Aggregate: `.context/reviews/_aggregate.md`
 Date: 2026-07-08 KST
 

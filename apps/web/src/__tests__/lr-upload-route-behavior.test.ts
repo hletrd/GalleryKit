@@ -10,6 +10,7 @@ const {
     enqueueImageProcessingMock,
     ensureUploadDirectoriesMock,
     getAdminAuthTokenMock,
+    markAdminAuthTokenUsedMock,
     getClientIpMock,
     getGalleryConfigStrictMock,
     getUploadTrackerMock,
@@ -30,6 +31,7 @@ const {
         enqueueImageProcessingMock: vi.fn(),
         ensureUploadDirectoriesMock: vi.fn(async () => undefined),
         getAdminAuthTokenMock: vi.fn(),
+        markAdminAuthTokenUsedMock: vi.fn(async () => undefined),
         getClientIpMock: vi.fn(),
         getGalleryConfigStrictMock: vi.fn(),
         getUploadTrackerMock: vi.fn(() => tracker),
@@ -50,6 +52,7 @@ vi.mock('fs/promises', async (importOriginal) => {
 
 vi.mock('@/lib/api-auth', () => ({
     getAdminAuthToken: getAdminAuthTokenMock,
+    markAdminAuthTokenUsed: markAdminAuthTokenUsedMock,
     withAdminAuth: (handler: unknown) => handler,
 }));
 
@@ -280,6 +283,7 @@ describe('Lightroom upload route behavior', () => {
             '203.0.113.42',
             { topic: 'seoul', filename: 'pat-upload.jpg' },
         );
+        expect(markAdminAuthTokenUsedMock).toHaveBeenCalledOnce();
         expect(lockReleaseMock).toHaveBeenCalledOnce();
     });
 
@@ -306,6 +310,7 @@ describe('Lightroom upload route behavior', () => {
         expect(saveOriginalAndGetMetadataMock).not.toHaveBeenCalled();
         expect(dbInsertMock).not.toHaveBeenCalled();
         expect(enqueueImageProcessingMock).not.toHaveBeenCalled();
+        expect(markAdminAuthTokenUsedMock).not.toHaveBeenCalled();
     });
 
     it('rejects with 411 when Content-Length is absent', async () => {

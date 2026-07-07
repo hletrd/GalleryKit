@@ -39,6 +39,12 @@ describe('backfillClipEmbeddings action — model_version-aware selection', () =
     expect(notExistsIdx).toBeGreaterThan(-1);
     expect(declIdx).toBeLessThan(notExistsIdx);
   });
+  it('uses keyset pagination so skipped rows do not trap later candidates', () => {
+    expect(actionSrc).toContain('let cursor = 0');
+    expect(actionSrc).toMatch(/gt\(\s*images\.id\s*,\s*cursor\s*\)/);
+    expect(actionSrc).toContain('orderBy(asc(images.id))');
+    expect(actionSrc).toContain('SEMANTIC_SCAN_LIMIT - attemptedEmbeddings');
+  });
   it('serializes the server action against restore with the semantic backfill advisory lock', () => {
     expect(actionSrc).toContain('LOCK_SEMANTIC_EMBEDDING_BACKFILL');
     expect(actionSrc).toContain('SELECT GET_LOCK(?, 0) AS acquired');

@@ -16,17 +16,15 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c4):** NO open High-severity carry-forward row remains
-(`C94-09 / C77-ARCH-01` was scheduled + implemented in run-10 cycle-1; `C1-25(a)` is a
-product-decision row whose only High attachment was a doc issue already fixed — reworded
-below so it no longer reads as an open High finding, C4-34). No open row is at or past the
-8-cycle High budget in a way that requires scheduling. **MED 16-cycle checkpoint (new,
-C4-45; refreshed C11):** `C80-06` (~15) is the only MED row approaching/crossing
-the 16-cycle re-justify window. The build-time contract is now documented in
-`CLAUDE.md` (`site-config.json` imports are inlined by Next and the compose bind
-mount is inert at runtime). The remaining row is only the product/operator
-decision of whether runtime-editable file config is desired. Next mandatory
-re-check: every cycle, in the WP that updates this file.
+**Age-budget check (run-10 c18):** no newly deferred Cycle 18 High-severity row is a
+correctness/security/data-loss issue; the two High rows are performance/architecture
+items with explicit exit criteria in `cycle-18-2026-07-08-deferred.md`.
+Older High-severity carry-forward rows with correctness implications were already
+scheduled in earlier run-10 cycles (`C77-ARCH-01`, `C94-11`). **MED 16-cycle
+checkpoint:** legacy MED rows at or beyond the soft checkpoint remain product,
+operator, or performance decisions with exit criteria preserved in their home
+registers; Cycle 18 adds the current deferred register to the lineage below so the
+next cycle does not need to infer age from prose.
 
 **Provenance note:** an UNTRACKED, stale `.context/plans/run10-cycle2/` directory
 (mtime 2026-06-25, from an abandoned earlier session that also used the "run10" name)
@@ -121,6 +119,18 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C6-27 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Next bulk-edit cycle OR a maintainer trips on the `titlePrefix` exact-set naming |
 | C6-28 | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | On-this-day made client-driven, OR a `TZ` operator-config note ships, OR a wrong-day report |
 | C7b-06code | MED/High | cycle-7b-2026-07-07 | r10c7(loop-B) | 0 | `IMAGE_BASE_URL` configured in production (decide the boot-validation story once with C4-25/C2-37res), OR an operator restart-without-rebuild thumbnail incident (boot-time remotePatterns-vs-runtime probe; doc half shipped c7b WP14) |
+| C17-register | mixed, includes High performance/operator rows | cycle-17-2026-07-08 | r10c17 | 1 | Superseded by `cycle-18-2026-07-08-deferred.md` where still open; see the Cycle 17 register for original severity/confidence and citations |
+| C18-03 | HIGH/High | cycle-18-2026-07-08 | r10c18 | 0 | Streaming upload/restore ingestion OR production RSS breach |
+| C18-04 | HIGH/High | cycle-18-2026-07-08 | r10c18 | 0 | Semantic traffic/gallery size exceeds limits OR vector indexing/caching scheduled |
+| C18-05 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Map GPS rows approach thousands OR clustering prioritized |
+| C18-07 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Credentialed admin browser-flow coverage cycle |
+| C18-08 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | WebKit/mobile/Firefox matrix scheduled OR browser-specific regression |
+| C18-09 | LOW-MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Admin e2e skip reporting/setup changes |
+| C18-16 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Responsive admin card/workbench mode scheduled |
+| C18-17 | LOW-MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Admin nav redesign or sensitive-operation IA separation |
+| C18-18 | LOW/High | cycle-18-2026-07-08 | r10c18 | 0 | Live semantic/proxy/deploy claim requires host evidence |
+| C18-21 | LOW-MED/Medium | cycle-18-2026-07-08 | r10c18 | 0 | Credentialed protected-admin responsive validation pass |
+| C18-22 | LOW/Medium | cycle-18-2026-07-08 | r10c18 | 0 | Any RTL locale addition |
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |

@@ -1,187 +1,108 @@
-# Cycle 16 UI/UX Designer Reviewer - GalleryKit
+# UI/UX Designer Reviewer - Cycle 18
 
-Review lane: `ui-ux-designer-reviewer`, adapted to GalleryKit's Next.js photo-gallery product. I used `/Users/hletrd/.codex/agents/ui-ux-designer-reviewer.md` for rigor and review posture only; its BurstPick/SwiftUI source paths do not apply to this repository.
+Role surface: `ui-ux-designer-reviewer`, adapted from the stale BurstPick-oriented global prompt to GalleryKit's Next.js web UI.
 
-Constraints honored: no source edits, no plan edits, no DB/container/deploy action, no admin credential use, no commit, no push. This review file is the only intentional write.
+## Inventory
 
-## Executive Summary
+Reviewed `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, newest available plan/deferred pointers, root/app READMEs, current source, EN/KO messages, PWA files, tests, and prior UI/product review artifacts.
 
-GalleryKit's public gallery is broadly accessible and visually coherent, but the largest remaining UX fault is still mobile information architecture: the home page spends the first meaningful viewport on tag controls before the visitor reaches photos. Admin photo operations also still look more like a maintenance table than a photo workbench, and one destructive image confirmation regressed behind the stronger target-naming pattern now used for tags/categories. Design quality score: 7/10 for public browsing, 5.5/10 for repeat admin photo operations.
+Relevant surfaces inventoried:
 
-## Inventory First
+- Public visitor IA: home, topic galleries, photo viewer, lightbox, similar photos, search, map, timeline/year pages, shared links, smart collection read route, about/privacy, footer/nav.
+- Admin IA: login, dashboard upload/image manager, taxonomy, SEO/settings, upload tokens, password/users, DB backup/restore, analytics, admin shell.
+- Accessibility/interaction: Radix/shadcn dialogs/selects/sheets, focus restoration helpers, skip links, touch-target audit patterns, reduced-motion CSS, theme tokens, i18n routing.
+- Performance/perceived performance: masonry placement, image sizing, `content-visibility`/hover transforms, loading/error/empty states, service worker/offline fallback.
 
-- Project guidance/docs: supplied `AGENTS.md`, repo `CLAUDE.md`, prior UI reviews at `.context/reviews/ui-ux-designer-reviewer.md`, `.context/reviews/ui-ux-designer-reviewer-cycle13.md`, and `.context/reviews/run9-cycle8/designer.md`.
-- UI inventory: 111 UI/source files under `apps/web/src/components` and `apps/web/src/app/[locale]`; 61 component files; 58 app route files; 2 message catalogs.
-- Public UI inspected: nav, home, masonry cards, tag filtering, search, photo viewer, lightbox, image zoom, bottom sheet, map, timeline, year, topic, smart collection, shared photo/group, privacy/about, loading/not-found/error routes.
-- Admin UI inspected: login, admin header/nav, dashboard, upload dropzone, image manager, bulk edit, categories, tags, SEO, settings, tokens, users, password, DB, analytics, protected loading/error layouts.
-- UI support inspected: `globals.css`, theme provider, i18n provider, locale direction helper, UI primitives, touch/focus/i18n/theme/lightbox/source tests.
+Agent-browser requirement: used core/config/query/wait/debug-style commands where feasible. Local dev was blocked by an existing Next lock (`PID 7042`) while port 3000 refused connections, so I did not kill/delete anything. `next start` on port 3001 was reachable but `/en` returned HTTP 500 due local DB/config; `/ko/admin` rendered and agent-browser measured controls. Playwright was used as a read-only fallback for live DOM metrics after agent-browser became unresponsive; evidence below is DOM/box/source based, not screenshot-only.
 
-## Browser And Validation Evidence
+## Confirmed Issues
 
-- Local browser validation blocker: `npm run dev --workspace=apps/web` and `npm run dev --workspace=apps/web -- -p 3001` both failed because Next reported an existing dev server lock for PID 7042 on `localhost:3000`; `curl http://localhost:3000/en` could not connect. I did not kill the PID or remove `.next/dev` state.
-- Agent-browser live read-only checks: `https://gallery.atik.kr/en`, `https://gallery.atik.kr/en/p/348`, mobile `390x844`, desktop `1440x900`, light/dark media. Screenshots captured at `/tmp/gallery-home-mobile.png`, `/tmp/gallery-home-mobile-5s.png`, and `/tmp/gallery-photo-desktop-dark.png`.
-- Confirmed mobile home DOM: 30 photo links present; tag group occupied `y=116..316`; first photo link started at `y=348`; no horizontal overflow on tested mobile home.
-- Focused tests passed:
+### UIUX-C18-01 - Mobile gallery hierarchy delays the first photo behind a tag wall
 
-```sh
-npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/password-form-a11y.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/lightbox-controls-contract.test.ts src/__tests__/client-source-contracts.test.ts src/__tests__/settings-save-affordance-source.test.ts
-```
+Severity: Medium
+Confidence: High
+Exact file/region: `apps/web/src/components/home-client.tsx:287-330`; `apps/web/src/components/tag-filter.tsx:63-122`
 
-Result: 8 test files passed, 64 tests passed.
+Why it is a real problem: GalleryKit's public visitor contract is finished-photo browsing. The current mobile hierarchy renders heading/count and all tags before the grid. Since every tag is a full 44 px chip, a realistic tag set consumes a large first-viewport block.
 
-## Findings
+Evidence: live DOM probe on `https://gallery.atik.kr/en` at `390x844` returned `tagGroup y=180 h=200`, first photo link `y=412 h=238`, and controls 8-16 as tag chips before control 17, the first `/en/p/348` photo link.
 
-### UIUX-C16-01 - Mobile home still puts a full tag-filter wall before photos
+Concrete failure scenario: after a photographer adds many tags, a phone visitor lands on "Latest", count text, and multiple filter rows. The page's first impression becomes administrative filtering rather than photography.
 
-- Severity: Medium
-- Confidence: High
-- Validation: Confirmed with live DOM and source
-- Area: information architecture, responsive behavior, keyboard/touch workflow
-- Evidence:
-  - Live selector: `https://gallery.atik.kr/en`, viewport `390x844`, `[role="group"][aria-label="Filter by tag"]` measured `y=116..316`; first `a[href*="/en/p/"]` started at `y=348`.
-  - Source places `TagFilter` before the masonry grid in `HomeClient`: `apps/web/src/components/home-client.tsx:303-305`, grid begins at `apps/web/src/components/home-client.tsx:318-330`.
-  - `TagFilter` renders every tag as wrapping chips with no mobile collapse or overflow model: `apps/web/src/components/tag-filter.tsx:62-122`.
-- Why this is a problem:
-  - A photo gallery's first mobile task is viewing photos. Here, taxonomy controls consume about 200 px before the first image, and keyboard users traverse every chip before photo content.
-- Concrete failure scenario:
-  - A mobile visitor lands from a social link or searches the gallery, then must scroll or tab through `All`, event tags, and member tags before reaching the first photograph.
-- Suggested fix:
-  - On mobile, show `All` plus 2-3 top/current tags and move the full taxonomy to a filter sheet, or use a horizontal chip rail with a clear overflow affordance. Preserve `aria-pressed`, 44 px targets, and active-filter summary.
+Suggested fix: collapse or defer secondary filters on mobile. Show at most active filters plus a "Filters" affordance above the grid; put the full `TagFilter` in a sheet/disclosure or horizontal overflow rail. Keep the expanded controls keyboard-accessible and 44 px minimum.
 
-### UIUX-C16-02 - Individual image delete confirmation does not name the image
+### UIUX-C18-02 - Admin image manager is visually and ergonomically table-first
 
-- Severity: Medium
-- Confidence: High
-- Validation: Source-confirmed
-- Area: error prevention, admin destructive-action UX, accessibility
-- Evidence:
-  - The row delete button has a target-specific accessible label: `apps/web/src/components/image-manager.tsx:562`.
-  - The confirmation dialog title/description are generic and do not receive the current image title/id: `apps/web/src/components/image-manager.tsx:566-570`.
-  - English copy is generic at `apps/web/messages/en.json:201-202`; Korean copy is generic at `apps/web/messages/ko.json:201-202`.
-  - Tags and categories now use the safer target-naming pattern: `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:145-148` and `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:331-334`.
-- Why this is a problem:
-  - The highest-risk admin action in the image row still asks "Delete this image?" without naming the asset, even though neighboring admin delete flows now identify the target.
-- Concrete failure scenario:
-  - An admin opens a delete dialog from a dense table, is interrupted, then returns to a generic dialog and confirms deletion from memory rather than from visible target context.
-- Suggested fix:
-  - Track the selected image object for delete, not only the id, and interpolate a concise target label into both title and description: `Delete image "#JIHOON... #348"?`. Include filename/id fallback for untitled images.
+Severity: Medium
+Confidence: High
+Exact file/region: `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`; `apps/web/src/components/image-manager.tsx:427-591`
 
-### UIUX-C16-03 - Admin image management remains table-first instead of photo-workbench-first
+Why it is a real problem: The admin's core loop is reviewing finished images, fixing metadata, and checking color/GPS state. The table layout makes the photo a small cell and separates it from tags/actions across horizontal columns. This is functional but not ergonomic for repeat photo operations.
 
-- Severity: Medium
-- Confidence: Medium-High
-- Validation: Source-confirmed; authenticated browser validation not performed
-- Area: admin workflow, interaction design, responsive behavior
-- Evidence:
-  - Dashboard puts recent uploads in a constrained scroll region: `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-143`.
-  - `ImageManager` renders a horizontally scrollable table: `apps/web/src/components/image-manager.tsx:427-603`.
-  - Each row spreads preview, title, filename, topic, tags, gamut, date, and actions across nine columns: `apps/web/src/components/image-manager.tsx:431-451` and `apps/web/src/components/image-manager.tsx:473-589`.
-- Why this is a problem:
-  - Metadata cleanup is photo-first work. A table separates the image preview, editable tags, and actions across horizontal space, which is slow on laptop and mobile widths.
-- Concrete failure scenario:
-  - After uploading an event batch, an admin has to scan thumbnails, assign tags, check gamut/HDR, and edit titles while horizontally scrolling a table instead of selecting a photo and editing an inspector.
-- Suggested fix:
-  - Add a photo workbench mode: grid/list with persistent selection and a right or bottom inspector for title, description, topic, tags, gamut/HDR, date, sharing, and delete. Keep the table as an optional dense list view.
+Evidence: source shows `overflow-x-auto` table, `h-32 w-32` preview, `min-w-[220px]` tags column, and action buttons at the far-right table cell. Dashboard constrains the manager inside a viewport-height scroll region.
 
-### UIUX-C16-04 - Admin navigation is still a flat ten-link wrap
+Concrete failure scenario: on a tablet or small laptop, an admin sees the preview and title, then must scroll horizontally to reach tags/actions. While editing several similar images, row context is easy to lose.
 
-- Severity: Low-Medium
-- Confidence: High from source; admin browser validation not performed
-- Validation: Likely issue
-- Area: information architecture, responsive behavior, repeat admin efficiency
-- Evidence:
-  - `AdminNav` defines ten peer destinations in one array: `apps/web/src/components/admin-nav.tsx:15-26`.
-  - It renders them as a single wrapping horizontal nav: `apps/web/src/components/admin-nav.tsx:28-49`.
-  - `AdminHeader` places this wrap beside the brand and logout action in one flex header: `apps/web/src/components/admin-header.tsx:13-27`.
-- Why this is a problem:
-  - Content, publishing, security, operations, and analytics all compete at the same level. Wrapped positions change by viewport and locale, weakening spatial memory.
-- Concrete failure scenario:
-  - On a narrow admin viewport or Korean labels, `Tokens`, `Users`, `DB`, and `Analytics` wrap into new positions, so repeat operational tasks require re-scanning the header.
-- Suggested fix:
-  - Group destinations into stable sections: Content, Publishing, Access, Operations, Insights. Use a sectioned drawer/menu at narrow widths instead of allowing every destination to wrap.
+Suggested fix: introduce a responsive image-workbench layout for non-wide desktop: card/list rows with larger previews, metadata/action grouping near the image, and inline status chips. Preserve the table as a dense desktop mode.
 
-### UIUX-C16-05 - Desktop info-sidebar animation is slow for a high-frequency viewer toggle
+### UIUX-C18-03 - Admin navigation lacks stable information architecture
 
-- Severity: Low
-- Confidence: Medium
-- Validation: Source-confirmed; not timing-measured locally due dev-server blocker
-- Area: interaction design, perceived performance
-- Evidence:
-  - The `I` shortcut toggles the desktop info sidebar: `apps/web/src/components/photo-viewer.tsx:410-418`.
-  - The sidebar uses a 500 ms opacity/transform transition: `apps/web/src/components/photo-viewer.tsx:747-756`.
-  - Global reduced-motion CSS collapses transition duration for users who request it: `apps/web/src/app/[locale]/globals.css:253-261`, so this is normal-mode perceived performance, not a reduced-motion failure.
-- Why this is a problem:
-  - Metadata inspection is a common photo-viewing task. A half-second transition makes the UI feel slower than the keypress that requested it.
-- Concrete failure scenario:
-  - A desktop visitor or admin presses `I` repeatedly while checking camera, lens, color, and map metadata across photos; the UI spends visible time animating instead of feeling instant.
-- Suggested fix:
-  - Reduce the sidebar transition to 150-200 ms, or make the grid snap and only fade small internal metadata. Keep the existing reduced-motion override.
+Severity: Low-Medium
+Confidence: High
+Exact file/region: `apps/web/src/components/admin-nav.tsx:15-49`; `apps/web/src/components/admin-header.tsx:13-26`
 
-### UIUX-C16-06 - RTL support is only structural, not design-validated
+Why it is a real problem: Publishing, taxonomy, site settings, access control, credentials, DB operations, and analytics all appear as peer links in one wrapping row. Touch targets are acceptable, but the IA does not separate routine workflows from sensitive/operator workflows.
 
-- Severity: Low
-- Confidence: Medium
-- Validation: Manual-validation risk, not a current en/ko defect
-- Area: i18n/RTL, layout resilience
-- Evidence:
-  - Layout emits `dir={getLocaleDirection(locale)}` and comments that this future-proofs RTL: `apps/web/src/app/[locale]/layout.tsx:101-107`.
-  - Only LTR locales are shipped: `apps/web/src/lib/constants.ts:1-4`.
-  - `RTL_LOCALES` is empty and unsupported locale strings fall back to LTR: `apps/web/src/lib/locale-path.ts:37-40`; tests assert `getLocaleDirection('ar')` returns `ltr`: `apps/web/src/__tests__/locale-path.test.ts:73-81`.
-  - Many UI regions still use physical left/right utilities and icons, e.g. nav margins `apps/web/src/components/nav-client.tsx:100,112,148,180`, lightbox controls `apps/web/src/components/lightbox.tsx:582-670`, and admin header spacing `apps/web/src/components/admin-header.tsx:15-21`.
-- Why this is a problem:
-  - There is no current RTL locale bug because GalleryKit only supports English and Korean. The risk is that the HTML-level `dir` hook can make RTL look supported before physical positioning, icon direction, and focus order have been audited.
-- Concrete failure scenario:
-  - A future Arabic locale is added to `LOCALES`; `dir="rtl"` flips text flow, but left/right-positioned controls, chevrons, margins, and admin table alignment remain LTR.
-- Suggested fix:
-  - Treat adding an RTL locale as a design task: replace physical classes with logical utilities where possible, mirror directional icons, and add RTL Playwright screenshots for home, photo, search, admin dashboard, and forms.
+Evidence: `links` contains ten peers and renders `flex flex-wrap`. The header then wraps brand, nav, and logout together, so viewport width and locale length change link placement.
 
-## Coverage By Requested Area
+Concrete failure scenario: a Korean admin on a narrow viewport sees "토큰", "비밀번호", "사용자", "DB", and "분석" wrapped among daily publishing pages. Finding the common upload/edit path takes more scanning, and destructive DB operations are visually normalized.
 
-- Information architecture: C16-01, C16-03, C16-04.
-- Visual design: public gallery remains coherent; no new color-token or spacing-system defect found. Mobile first viewport hierarchy remains weak due C16-01.
-- Interaction/workflow: C16-03 and C16-05 cover admin/photo workflow speed; photo viewer shortcuts are present on live `/en/p/348`.
-- Accessibility: focused touch/focus/i18n/password/theme/lightbox/source tests passed. C16-02 is an error-prevention issue, not a raw WCAG control-name failure.
-- Responsive behavior: C16-01 and C16-04.
-- Dark/light: theme tokens and reduced-motion CSS are present; dark photo viewer smoke checked on live `/en/p/348`.
-- i18n/RTL: en/ko parity passed; RTL is documented as a future/manual risk in C16-06.
-- Loading/empty/error states: loading, empty, and route-error surfaces exist and were source-reviewed; no new source-backed defect filed.
-- Focus/keyboard: skip link, focus-visible checks, lightbox shortcuts, and normal viewer shortcut metadata are in place; no reopened mobile nav focus-order issue.
-- Touch targets: audit passed; tag chips, nav controls, and image-manager row controls meet the 44 px floor in source/tests.
-- Perceived performance: C16-05; masonry uses `content-visibility` and sized derivatives, so no new grid-performance finding filed.
+Suggested fix: group navigation into sections and use a mobile/tablet drawer or section selector. Keep Operations/Access visually separated from Publish/Organize.
 
-## Verified Good / Not Reopened
+## Likely Issues
 
-- Mobile nav focus order is fixed in source: controls render before the expand toggle, with comments at `apps/web/src/components/nav-client.tsx:145-174`.
-- Settings has both top and bottom save actions now: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:339-350` and `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:878-891`.
-- Tag and category delete dialogs now name the target: `tag-manager.tsx:145-148`, `topic-manager.tsx:331-334`.
-- Search result ids were previously fixed and source keeps structured `role="option"` rows; I did not get a stable agent-browser search-dialog interaction this pass, so I did not re-file or close anything new there.
-- Normal photo viewer previous/next controls expose `aria-keyshortcuts`: `apps/web/src/components/photo-navigation.tsx:313-329`.
-- Reduced-motion CSS globally reduces animation/transition duration and suppresses masonry hover scale: `apps/web/src/app/[locale]/globals.css:253-279`.
+None filed. I checked the previous likely issues and found current fixes:
 
-## Competitive UX Comparison
+- Token revoke confirmation now interpolates the token label.
+- Alias deletion confirmation now names the alias and category.
+- Analytics country display uses `Intl.DisplayNames`.
+- Semantic-search Settings copy no longer says the panel enables production search.
 
-| Feature | Lightroom / Photo Mechanic baseline | GalleryKit current | Verdict |
-| --- | --- | --- | --- |
-| Mobile browse-first hierarchy | Photos first, filters secondary | Full tag wall before first photo | Worse |
-| Admin batch metadata workflow | Grid/filmstrip plus inspector | Horizontal table with inline controls | Missing workbench |
-| Destructive confirmation | Names target or scope | Image delete is generic; tag/category fixed | Partial |
-| Keyboard photo navigation | Arrow keys discoverable | Arrow shortcuts work and are exposed | Same for basic viewing |
-| Metadata panel toggle | Fast, stable panel behavior | 500 ms sidebar transition | Slower |
-| RTL readiness | Requires explicit localized design pass | Structural `dir` hook only; no RTL locale | Manual risk |
+## Manual-Validation Risks
 
-## Design System Assessment
+### UIUX-C18-RISK-01 - Authenticated admin responsive behavior needs a credentialed browser pass
 
-GalleryKit has a real design-system layer: shadcn/Radix primitives, Tailwind tokens, button variants with enforced 44 px floors, theme tokens, focus-visible patterns, and source tests. The main system gaps are product-level composition, not component primitives: mobile filters need a compact pattern, admin needs grouped navigation and a photo workbench pattern, and destructive dialogs should consistently name targets.
+Severity: Low-Medium
+Confidence: Medium
+Exact file/region: admin protected pages under `apps/web/src/app/[locale]/admin/(protected)` and `apps/web/src/components/image-manager.tsx`
 
-## Prioritized Recommendations
+Why it matters: source strongly indicates table/navigation ergonomics issues, but runtime validation of protected pages needs a seeded local DB and admin credentials.
 
-- Tier 0: None found that blocks public browsing or basic admin operation.
-- Tier 1: Fix mobile tag-filter hierarchy; name the individual image in delete confirmations; design an admin photo workbench.
-- Tier 2: Group admin navigation into stable sections; shorten the desktop info sidebar transition.
-- Tier 3: Treat RTL as unsupported until a full logical-layout/icon/focus-order audit is done.
+Failure scenario: a responsive issue in settings, DB restore, or token flows could be missed because local DB-backed pages did not render in this pass.
 
-## Final Sweep
+Suggested validation: run `npm run test:e2e:admin --workspace=apps/web` with local e2e credentials, plus mobile/tablet Playwright snapshots and accessibility snapshots for dashboard, settings, DB, tokens, analytics.
 
-I swept ARIA/roles, focus indicators, keyboard shortcuts, touch targets, modal/focus-trap patterns, loading/empty/error states, public English/Korean routes, mobile responsiveness, theme/reduced-motion CSS, admin forms/tables/nav/settings/tokens/upload surfaces, prior UX reports, and common missed patterns (`role="button"`, `tabIndex`, physical direction classes, generic destructive copy). Authenticated admin browser validation was not performed because no credentials were used and local app validation was blocked by stale Next dev state.
+### UIUX-C18-RISK-02 - RTL is structurally signaled but not supported as a product surface
 
-Final verdict: the public gallery helps visitors browse photos once they reach the grid, but the mobile entry hierarchy still gets in the way. The admin UI is functional and increasingly accessible, but it needs photo-workbench IA before it feels designed for repeat photo operations rather than database maintenance.
+Severity: Low
+Confidence: Medium
+Exact file/region: `apps/web/src/app/[locale]/layout.tsx` root `dir` handling; physical left/right classes across nav/lightbox/admin components.
+
+Why it matters: only EN/KO ship now, so this is not a live defect. If an RTL locale is added, physical `left/right`, chevron direction, and row/table alignment need a dedicated pass.
+
+Failure scenario: Arabic/Hebrew is added to locale config and `dir="rtl"` changes text flow while controls and icons remain LTR.
+
+Suggested validation/fix: declare RTL unsupported until an RTL Playwright matrix exists, or replace physical positioning with logical utilities and mirrored icons before adding an RTL locale.
+
+## Coverage Map
+
+- Information architecture: UIUX-C18-01, UIUX-C18-03.
+- Affordances/admin ergonomics: UIUX-C18-02, UIUX-C18-03.
+- Focus/keyboard/touch: admin login measured 44 px; existing source uses skip links and focus-visible rings; no new control-size defect filed.
+- WCAG 2.2 contrast/ARIA/focus traps/reduced motion: no confirmed current defect found in this lane; reduced-motion CSS and Radix dialogs are present.
+- Responsive breakpoints: UIUX-C18-01, UIUX-C18-02, UIUX-C18-03.
+- Loading/empty/error states: local error shell is usable; no new issue filed.
+- Forms/validation: prior token/alias/analytics copy defects are fixed.
+- Dark/light: live admin login and photo page dark probes had no console/page errors.
+- i18n/RTL: EN/KO checked; RTL is a future risk only.
+- Perceived performance/LCP/CLS/INP: UIUX-C18-01 is the main perceived-content delay; no CLS/INP claim made without lab metrics.

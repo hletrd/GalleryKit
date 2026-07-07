@@ -21,7 +21,7 @@
 import path from 'path';
 import { statfs } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuthToken, withAdminAuth } from '@/lib/api-auth';
+import { getAdminAuthToken, markAdminAuthTokenUsed, withAdminAuth } from '@/lib/api-auth';
 import { db, topics, images } from '@/db';
 import { eq } from 'drizzle-orm';
 import { saveOriginalAndGetMetadata, extractExifForDb, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
@@ -156,6 +156,8 @@ export const POST = withAdminAuth(
                 { status: 429, headers: NO_CACHE },
             );
         }
+
+        await markAdminAuthTokenUsed(request);
 
         tracker.count += 1;
         tracker.bytes += declaredUploadBytes;

@@ -14,9 +14,17 @@ const NO_STORE_HEADERS = {
 
 const TOKEN_HEADER = 'x-gallerykit-token';
 const requestTokenContext = new WeakMap<NextRequest, VerifiedToken>();
+const requestTokenUsageMarked = new WeakSet<NextRequest>();
 
 export function getAdminAuthToken(request: NextRequest): VerifiedToken | undefined {
     return requestTokenContext.get(request);
+}
+
+export async function markAdminAuthTokenUsed(request: NextRequest): Promise<void> {
+    const verified = requestTokenContext.get(request);
+    if (!verified || requestTokenUsageMarked.has(request)) return;
+    requestTokenUsageMarked.add(request);
+    await markTokenUsed(verified.id);
 }
 
 export interface WithAdminAuthOptions {
@@ -81,13 +89,13 @@ export function withAdminAuth<T extends unknown[]>(
                 }
                 const verified = await verifyToken(presented);
                 if (verified && tokenHasScope(verified.scopes, options.allowTokenScope)) {
-                    await markTokenUsed(verified.id);
                     requestTokenContext.set(request, verified);
                     const response = await (async () => {
                         try {
                             return await handler(...args);
                         } finally {
                             requestTokenContext.delete(request);
+                            requestTokenUsageMarked.delete(request);
                         }
                     })();
                     // R4C3 SEC-R4C3-04: mirror the cookie path's C7-SEC-02

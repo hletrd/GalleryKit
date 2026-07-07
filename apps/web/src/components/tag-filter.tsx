@@ -59,8 +59,8 @@ export function TagFilter({
     // produce the same humanized output.
     const displayName = humanizeTagLabel;
 
-    return (
-        <div className="flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
+    const chips = (
+        <>
             <Badge
                 asChild
                 variant={canonicalTags.length === 0 ? "default" : "outline"}
@@ -119,6 +119,27 @@ export function TagFilter({
                     </button>
                 </Badge>
             ))}
+        </>
+    );
+
+    return (
+        <div className="w-full sm:w-auto">
+            <details className="group sm:hidden">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-md border bg-background px-3 text-sm font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
+                    <span>{t('home.tagFilter')}</span>
+                    {canonicalTags.length > 0 && (
+                        <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                            {canonicalTags.length}
+                        </span>
+                    )}
+                </summary>
+                <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
+                    {chips}
+                </div>
+            </details>
+            <div className="hidden flex-wrap gap-2 sm:flex" role="group" aria-label={t('home.tagFilter')}>
+                {chips}
+            </div>
         </div>
     );
 }

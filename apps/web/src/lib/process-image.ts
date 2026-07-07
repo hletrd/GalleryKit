@@ -368,32 +368,9 @@ export const MAX_INPUT_PIXELS_TOPIC = (() => {
         : 64 * 1024 * 1024;
 })();
 
-/**
- * Color-pipeline version. Bumped whenever the encoder semantics change so
- * downstream caches (browser, CDN, service worker) can re-fetch automatically
- * via the ETag emitted by serve-upload.ts. Skip 1 to mark the cutover from
- * pre-fix bytes (any version < 2 is the un-versioned legacy output).
- *
- * History:
- *   2 — first versioned cut: failOn:'error', autoOrient, ETag-based cache,
- *       strict P3 detection, toColorspace + withIccProfile encode chain.
- *   3 — perf + bit-depth tuning: pipelineColorspace('rgb16') for wide-gamut,
- *       10-bit AVIF for wide-gamut, 4:4:4 JPEG chroma for wide-gamut,
- *       AVIF effort:6, sharp.cache(false), per-image concurrency divided
- *       by format fan-out.
- *   4 — DCI-P3 white-point Bradford adaptation (WI-12). DCI-P3 sources
- *       skip rgb16 whether the source carries an ICC profile (preserved for
- *       toColorspace('p3') Bradford D63→D65 adaptation) or is NCLX-only
- *       (primaries identical to Display P3, white-point difference only).
- *   5 — 50 MP wide-gamut downscale gate (WI-15) + lazy 10-bit AVIF probe.
- *       Sources beyond WIDE_GAMUT_MAX_SOURCE_PIXELS pass through a one-shot
- *       resize to keep the rgb16 pipeline within memory; the 10-bit probe
- *       runs once per process to avoid encoder thrash.
- *   6 — tunable encoder parameters (P3-20 / P3-21): wide_gamut_jpeg_chroma
- *       and avif_effort are now admin-configurable instead of hardcoded.
- */
-// IMAGE_PIPELINE_VERSION is defined in gallery-config-shared.ts (client-safe)
-// and re-exported here for backward compatibility.
+// IMAGE_PIPELINE_VERSION and its current history live in
+// gallery-config-shared.ts (client-safe). Re-export here for backward
+// compatibility with older process-image imports.
 export { IMAGE_PIPELINE_VERSION } from '@/lib/gallery-config-shared';
 
 const ALLOWED_EXTENSIONS = new Set([

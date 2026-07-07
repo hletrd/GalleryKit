@@ -72,6 +72,7 @@ describe('cycle 17 sidecar backfill contracts', () => {
         expect(source).toContain('SEMANTIC_SCAN_LIMIT - attemptedEmbeddings');
         expect(source).toContain('if (!filenameOriginal) { failed++; failedImageIds.push(id); return; }');
         expect(source).toContain('if (!originalPath) { failed++; failedImageIds.push(id); return; }');
+        expect(source).toContain('Missing-original rows advance the keyset cursor without');
         expect(source).toContain('attemptedEmbeddings++');
         expect(source).toContain('if (attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT)');
     });

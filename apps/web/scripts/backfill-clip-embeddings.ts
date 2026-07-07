@@ -43,11 +43,13 @@
  * embedding after the real-CLIP rollout.
  *
  * Idempotent: a second run at the same target version selects nothing. If the
- * script logs that it reached SEMANTIC_SCAN_LIMIT, repeat the same command
- * until it finishes without that message.
+ * script logs that it reached SEMANTIC_SCAN_LIMIT, the embedding-attempt budget
+ * for this run is exhausted; repeat the same command until it finishes without
+ * that message. Missing-original rows advance the keyset cursor without
+ * consuming the embedding-attempt budget.
  *
- * Concurrency is capped at BATCH_CONCURRENCY=2 as specified in US-P51.
- * Operators can raise this once the real ONNX inference ships.
+ * Concurrency is fixed at BATCH_CONCURRENCY=2 for this sidecar. Add a bounded
+ * env/CLI knob with tests before making it operator-tunable.
  *
  * NOTE: stub embeddings are NOT semantically meaningful — cosine similarity
  * results will be essentially random. Run `--production` (after seeding the CLIP

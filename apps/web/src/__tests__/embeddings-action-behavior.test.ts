@@ -105,7 +105,9 @@ function makePendingSelectChain<T>(result: T) {
     return {
         from: vi.fn().mockReturnValue({
             where: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue(result),
+                orderBy: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockResolvedValue(result),
+                }),
             }),
         }),
     };
@@ -230,6 +232,26 @@ describe('backfillClipEmbeddings', () => {
 
         expect(embedImageRealMock).not.toHaveBeenCalled();
         expect(insertMock).not.toHaveBeenCalled();
+    });
+
+    it('continues past skipped production rows to later valid rows in the same run', async () => {
+        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
+        const conn = makeLockConnection(1);
+        getConnectionMock.mockResolvedValue(conn);
+        selectMock.mockReturnValue(makePendingSelectChain([
+            { id: 20, filenameOriginal: null },
+            { id: 21, filenameOriginal: 'valid.jpg' },
+        ]));
+        resolveOriginalUploadPathMock.mockResolvedValue('/data/uploads/original/valid.jpg');
+        embedImageRealMock.mockResolvedValue(new Float32Array([4, 5, 6]));
+        const valuesMock = vi.fn().mockReturnValue({ onDuplicateKeyUpdate: vi.fn().mockResolvedValue(undefined) });
+        insertMock.mockReturnValue({ values: valuesMock });
+
+        await expect(backfillClipEmbeddings()).resolves.toEqual({ status: 'ok', processed: 1, skipped: 1 });
+
+        expect(resolveOriginalUploadPathMock).toHaveBeenCalledWith('valid.jpg');
+        expect(embedImageRealMock).toHaveBeenCalledWith('/data/uploads/original/valid.jpg');
+        expect(valuesMock).toHaveBeenCalledWith(expect.objectContaining({ imageId: 21, modelVersion: 'prod-v1' }));
     });
 
     it('counts a row as skipped when the real encoder throws (failure path)', async () => {

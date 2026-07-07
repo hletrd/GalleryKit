@@ -43,15 +43,18 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
     });
 
     async function importWrapper() {
-        const { withAdminAuth, getAdminAuthToken } = await import('@/lib/api-auth');
-        return { withAdminAuth, getAdminAuthToken };
+        const { withAdminAuth, getAdminAuthToken, markAdminAuthTokenUsed } = await import('@/lib/api-auth');
+        return { withAdminAuth, getAdminAuthToken, markAdminAuthTokenUsed };
     }
 
     it('token branch: applies no-store/no-cache + Pragma + nosniff defaults', async () => {
         verifyTokenMock.mockResolvedValue({ id: 1, userId: 7, scopes: ['lr:upload'] });
-        const { withAdminAuth } = await importWrapper();
+        const { withAdminAuth, markAdminAuthTokenUsed } = await importWrapper();
         const wrapped = withAdminAuth(
-            async (_req: NextRequest) => NextResponse.json({ ok: true }),
+            async (req: NextRequest) => {
+                await markAdminAuthTokenUsed(req);
+                return NextResponse.json({ ok: true });
+            },
             { allowTokenScope: 'lr:upload' },
         );
 
@@ -63,13 +66,29 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
         expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     });
 
-    it('token branch: preserves handler-set Cache-Control (has() guard)', async () => {
+    it('token branch: does not mark usage until the handler admits the token-backed request', async () => {
         verifyTokenMock.mockResolvedValue({ id: 1, userId: 7, scopes: ['lr:upload'] });
         const { withAdminAuth } = await importWrapper();
         const wrapped = withAdminAuth(
-            async (_req: NextRequest) => NextResponse.json({ ok: true }, {
-                headers: { 'Cache-Control': 'private, max-age=1' },
-            }),
+            async (_req: NextRequest) => NextResponse.json({ ok: true }),
+            { allowTokenScope: 'lr:upload' },
+        );
+
+        const response = await wrapped(fakeRequest({ 'x-gallerykit-token': 'gk_test' }));
+        expect(response.status).toBe(200);
+        expect(markTokenUsedMock).not.toHaveBeenCalled();
+    });
+
+    it('token branch: preserves handler-set Cache-Control (has() guard)', async () => {
+        verifyTokenMock.mockResolvedValue({ id: 1, userId: 7, scopes: ['lr:upload'] });
+        const { withAdminAuth, markAdminAuthTokenUsed } = await importWrapper();
+        const wrapped = withAdminAuth(
+            async (req: NextRequest) => {
+                await markAdminAuthTokenUsed(req);
+                return NextResponse.json({ ok: true }, {
+                    headers: { 'Cache-Control': 'private, max-age=1' },
+                });
+            },
             { allowTokenScope: 'lr:upload' },
         );
 
@@ -130,12 +149,14 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
     it('token branch: exposes verified token context only while the handler runs', async () => {
         const verified = { id: 3, userId: 11, scopes: ['lr:upload'] };
         verifyTokenMock.mockResolvedValue(verified);
-        const { withAdminAuth, getAdminAuthToken } = await importWrapper();
+        const { withAdminAuth, getAdminAuthToken, markAdminAuthTokenUsed } = await importWrapper();
         const request = fakeRequest({ 'x-gallerykit-token': 'gk_upload' });
         const seenUserIds: Array<number | undefined> = [];
         const wrapped = withAdminAuth(
             async (req: NextRequest) => {
                 seenUserIds.push(getAdminAuthToken(req)?.userId);
+                await markAdminAuthTokenUsed(req);
+                await markAdminAuthTokenUsed(req);
                 return NextResponse.json({ ok: true });
             },
             { allowTokenScope: 'lr:upload' },
@@ -145,6 +166,7 @@ describe('withAdminAuth response-header defaults (R4C3 SEC-R4C3-04)', () => {
 
         expect(response.status).toBe(200);
         expect(seenUserIds).toEqual([11]);
+        expect(markTokenUsedMock).toHaveBeenCalledTimes(1);
         expect(getAdminAuthToken(request)).toBeUndefined();
     });
 });
