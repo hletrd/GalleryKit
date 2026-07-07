@@ -16,7 +16,15 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c18):** no newly deferred Cycle 18 High-severity row is a
+**Age-budget check (run-10 c19):** no newly deferred Cycle 19 High-severity row is a
+direct unpatched correctness/security/data-loss bug; direct correctness items
+`AGG-C19-01` and `AGG-C19-02` are scheduled in `cycle-19-2026-07-08-plan.md`.
+The newly deferred High rows are broad architecture/performance/test-design items
+with explicit exit criteria in `cycle-19-2026-07-08-deferred.md`. Security/availability
+deferrals rely on the single-web-instance and nginx-edge operator boundaries
+documented in `CLAUDE.md`.
+
+**Previous check (run-10 c18):** no newly deferred Cycle 18 High-severity row is a
 correctness/security/data-loss issue; the two High rows are performance/architecture
 items with explicit exit criteria in `cycle-18-2026-07-08-deferred.md`.
 Older High-severity carry-forward rows with correctness implications were already
@@ -35,7 +43,7 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 
 ## Open carry-forward rows
 
-| ID | Sev/Conf | Home register | First deferred | Age @ r10c4 | Exit criterion (short) |
+| ID | Sev/Conf | Home register | First deferred | Age @ r10c19 | Exit criterion (short) |
 |----|---------|---------------|----------------|-------------|------------------------|
 | C96-04 | MED/High | cycle-96-2026-07-01 | c96 | ~7 | Feed maintenance/caching policy decision for restore windows |
 | C96-07 | MED/High | cycle-96-2026-07-01 | c96 | ~7 | nginx template parameterizes the demo domain (operator template pass) |
@@ -131,6 +139,17 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C18-18 | LOW/High | cycle-18-2026-07-08 | r10c18 | 0 | Live semantic/proxy/deploy claim requires host evidence |
 | C18-21 | LOW-MED/Medium | cycle-18-2026-07-08 | r10c18 | 0 | Credentialed protected-admin responsive validation pass |
 | C18-22 | LOW/Medium | cycle-18-2026-07-08 | r10c18 | 0 | Any RTL locale addition |
+| C19-03r | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Streaming upload/restore ingestion OR production RSS breach |
+| C19-04 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Shared DB background budget scheduled OR measured queue/backfill pool starvation |
+| C19-05 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Semantic traffic/gallery size exceeds scan limits OR vector indexing/caching scheduled |
+| C19-06r | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Map clustering/viewport pagination scheduled OR map trace proves thousands-marker jank |
+| C19-07 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Next migration/schema cycle OR DB-backed reconcile convergence gate |
+| C19-08 | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Next high-risk source-contract-only finding OR behavior-test hardening cycle |
+| C19-09 | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Browser-specific regression OR Playwright mobile/WebKit/Firefox matrix scheduled |
+| C19-10 | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Admin-flow regression OR admin E2E expansion cycle |
+| C19-11 | MED/High-Med | cycle-19-2026-07-08 | r10c19 | 0 | Operator applies/verifies nginx zones OR app-layer public page limiter project |
+| C19-12 | LOW/High | cycle-19-2026-07-08 | r10c19 | 0 | Style nonce/hash path lands OR CSP hardening cycle |
+| C19-13..34 | mixed, up to High | cycle-19-2026-07-08 | r10c19 | 0 | See `cycle-19-2026-07-08-deferred.md` for preserved citations, reasons, and exit criteria |
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |
