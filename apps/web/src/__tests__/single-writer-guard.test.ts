@@ -331,6 +331,182 @@ describe("held connection 'error' event after acquisition", () => {
     });
 });
 
+describe('post-lapse re-acquire loop (C4-06 / CRIT4-03)', () => {
+    it('re-acquires on a fresh connection after a keepalive failure and re-arms the keepalive', async () => {
+        vi.useFakeTimers();
+        try {
+            const conn1 = makeConn(1);
+            const conn2 = makeConn(1);
+            createConnectionMock.mockResolvedValueOnce(conn1).mockResolvedValueOnce(conn2);
+
+            const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
+
+            conn1.query.mockImplementation(async (sql: string) => {
+                if (String(sql).includes('SELECT 1')) throw new Error('server has gone away');
+                return [[], undefined];
+            });
+
+            // Keepalive tick fails -> lapse warned once, re-acquire scheduled.
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(consoleWarnSpy).toHaveBeenCalledTimes(1);
+            expect(conn1.end).toHaveBeenCalled();
+
+            // 60s later the re-acquire loop succeeds on a fresh connection —
+            // quiet re-arm (one informational warn), NO loud topology error.
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(createConnectionMock).toHaveBeenCalledTimes(2);
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
+            expect(conn2.end).not.toHaveBeenCalled();
+            const reacquiredWarn = consoleWarnSpy.mock.calls.map((c) => c.join(' ')).find((m) => /re-acquired/i.test(m));
+            expect(reacquiredWarn).toBeTruthy();
+
+            // The keepalive is re-armed on the NEW connection.
+            await vi.advanceTimersByTimeAsync(60_000);
+            const keepaliveCalls = conn2.query.mock.calls.filter((c) => String(c[0]).includes('SELECT 1'));
+            expect(keepaliveCalls.length).toBeGreaterThanOrEqual(1);
+
+            // A subsequent lapse warns again (lapseWarned was reset on re-arm).
+            conn2.query.mockImplementation(async (sql: string) => {
+                if (String(sql).includes('SELECT 1')) throw new Error('gone again');
+                return [[], undefined];
+            });
+            const warnsBefore = consoleWarnSpy.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(consoleWarnSpy.mock.calls.length).toBeGreaterThan(warnsBefore);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('emits the loud topology error (once per lapse) when the re-acquire finds the lock held by another instance', async () => {
+        vi.useFakeTimers();
+        try {
+            const conn1 = makeConn(1);
+            const conn2 = makeConn(0);
+            const conn3 = makeConn(0);
+            createConnectionMock
+                .mockResolvedValueOnce(conn1)
+                .mockResolvedValueOnce(conn2)
+                .mockResolvedValueOnce(conn3);
+
+            const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
+
+            conn1.query.mockImplementation(async (sql: string) => {
+                if (String(sql).includes('SELECT 1')) throw new Error('server has gone away');
+                return [[], undefined];
+            });
+            await vi.advanceTimersByTimeAsync(60_000); // lapse
+            await vi.advanceTimersByTimeAsync(60_000); // re-acquire #1: contention
+
+            // Someone ELSE took the freed lock — that IS the second-instance
+            // detection: loud error fires.
+            expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+            expect(consoleErrorSpy.mock.calls[0].join(' ').toLowerCase()).toMatch(/another live gallerykit instance/);
+            expect(conn2.end).toHaveBeenCalledTimes(1);
+
+            // Retry continues quietly — no loud-error spam on later attempts.
+            await vi.advanceTimersByTimeAsync(60_000); // re-acquire #2: still contended
+            expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+            expect(conn3.end).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('stopSingleWriterGuard during the re-probe window prevents any later connection or ownership (TEST4-06)', async () => {
+        vi.useFakeTimers();
+        try {
+            const conn1 = makeConn(0);
+            createConnectionMock.mockResolvedValue(makeConn(1));
+            createConnectionMock.mockResolvedValueOnce(conn1);
+
+            const { startSingleWriterGuard, stopSingleWriterGuard } = await import('@/lib/single-writer-guard');
+            await startSingleWriterGuard();
+            expect(createConnectionMock).toHaveBeenCalledTimes(1);
+
+            // Shutdown lands INSIDE the 25s reprobe window.
+            await stopSingleWriterGuard();
+            await vi.advanceTimersByTimeAsync(120_000);
+
+            // The reprobe never opened a second connection after stop.
+            expect(createConnectionMock).toHaveBeenCalledTimes(1);
+            expect(consoleErrorSpy).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('suppresses the lapse warning when the connection drops during a clean shutdown (TRC4-03)', async () => {
+        const conn = makeConn(1);
+        createConnectionMock.mockResolvedValue(conn);
+
+        const { startSingleWriterGuard, stopSingleWriterGuard } = await import('@/lib/single-writer-guard');
+        await startSingleWriterGuard();
+
+        const errorHandler = conn.on.mock.calls.find((c) => c[0] === 'error')?.[1] as (err: Error) => void;
+        await stopSingleWriterGuard();
+
+        // A fatal error delivered while shutdown tears the connection down
+        // must not read as an alarming lapse.
+        errorHandler(new Error('PROTOCOL_CONNECTION_LOST'));
+        const lapseWarns = consoleWarnSpy.mock.calls.map((c) => c.join(' ')).filter((m) => /lapsed/i.test(m));
+        expect(lapseWarns).toHaveLength(0);
+    });
+
+    it('unrefs every timer it arms (keepalive, reprobe, re-acquire) so the process can exit (TEST4-06)', async () => {
+        vi.useFakeTimers();
+        try {
+            const realSetInterval = globalThis.setInterval;
+            const realSetTimeout = globalThis.setTimeout;
+            const unrefSpies: Array<ReturnType<typeof vi.fn>> = [];
+            const wrap = (t: NodeJS.Timeout) => {
+                const spy = vi.fn(() => t);
+                (t as unknown as { unref: () => NodeJS.Timeout }).unref = spy;
+                unrefSpies.push(spy);
+                return t;
+            };
+            const setIntervalSpy = vi
+                .spyOn(globalThis, 'setInterval')
+                .mockImplementation(((fn: () => void, ms?: number) =>
+                    wrap(realSetInterval(fn, ms))) as typeof globalThis.setInterval);
+            const setTimeoutSpy = vi
+                .spyOn(globalThis, 'setTimeout')
+                .mockImplementation(((fn: () => void, ms?: number) =>
+                    wrap(realSetTimeout(fn, ms))) as typeof globalThis.setTimeout);
+
+            try {
+                const conn1 = makeConn(1);
+                createConnectionMock.mockResolvedValueOnce(conn1);
+                const { startSingleWriterGuard } = await import('@/lib/single-writer-guard');
+                await startSingleWriterGuard();
+
+                // Keepalive interval armed on acquisition.
+                expect(unrefSpies.length).toBeGreaterThanOrEqual(1);
+
+                // Lapse -> re-acquire timer armed too.
+                conn1.query.mockImplementation(async (sql: string) => {
+                    if (String(sql).includes('SELECT 1')) throw new Error('gone');
+                    return [[], undefined];
+                });
+                createConnectionMock.mockRejectedValue(new Error('still down'));
+                await vi.advanceTimersByTimeAsync(60_000);
+
+                expect(unrefSpies.length).toBeGreaterThanOrEqual(2);
+                for (const spy of unrefSpies) {
+                    expect(spy).toHaveBeenCalled();
+                }
+            } finally {
+                setIntervalSpy.mockRestore();
+                setTimeoutSpy.mockRestore();
+            }
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
 describe('stopSingleWriterGuard', () => {
     it('releases the lock and closes the connection after a successful acquisition', async () => {
         const conn = makeConn(1);
