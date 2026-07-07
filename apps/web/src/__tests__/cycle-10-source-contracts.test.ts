@@ -9,14 +9,31 @@ function src(path: string) {
 describe('cycle 10 source contracts', () => {
     it('charges public analytics rate limits before public-target DB lookups', () => {
         const code = src('app/actions/public.ts');
+        const admissionIdx = code.indexOf('async function buildRequestViewParams()');
+        const rateLimitIdx = code.indexOf('checkViewRecordRateLimit', admissionIdx);
+        expect(rateLimitIdx).toBeGreaterThan(admissionIdx);
 
         for (const fnName of ['recordPhotoView', 'recordTopicView', 'recordSharedGroupView']) {
             const start = code.indexOf(`export async function ${fnName}`);
             const end = code.indexOf('\n}\n', start);
             const body = code.slice(start, end);
-            expect(body.indexOf('checkViewRecordRateLimit')).toBeGreaterThan(0);
+            expect(body.indexOf('buildRequestViewParams')).toBeGreaterThan(0);
+            expect(body.indexOf('checkViewRecordRateLimit')).toBeGreaterThan(body.indexOf('buildRequestViewParams'));
             expect(body.indexOf('checkViewRecordRateLimit')).toBeLessThan(body.indexOf('db.select'));
         }
+    });
+
+    it('captures public analytics request metadata before queueing background writes', () => {
+        const code = src('app/actions/public.ts');
+        expect(code).toContain('async function buildRequestViewParams()');
+        expect(code).toContain('const requestHeaders = await headers();');
+        expect(code).toContain('return buildViewParams(requestHeaders);');
+        expect(code).toContain('trackAnalyticsDbWrite(async () => {');
+
+        const firstQueueIdx = code.indexOf('trackAnalyticsDbWrite(async () => {');
+        const queuedBody = code.slice(firstQueueIdx, code.indexOf('}).catch', firstQueueIdx));
+        expect(queuedBody).not.toContain('await headers()');
+        expect(queuedBody).not.toContain('checkViewRecordRateLimit');
     });
 
     it('restores pre-existing derivative files when a re-encode fails mid-run', () => {

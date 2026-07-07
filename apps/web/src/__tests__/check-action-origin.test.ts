@@ -1150,6 +1150,24 @@ describe('checkActionSource — public analytics actions', () => {
         expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
     });
 
+    it('allows an exempt public mutation inside trackAnalyticsDbWrite when admission is rate-limited before queueing', () => {
+        const src = `
+            import { trackAnalyticsDbWrite } from '@/lib/background-db-writes';
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                const limitResult = await checkViewRecordRateLimit(params.ip, Date.now());
+                if (limitResult.status === 'rateLimited') return;
+                trackAnalyticsDbWrite(async () => {
+                    await db.insert(imageViews).values({ imageId: id });
+                }).catch(console.warn);
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
+    });
+
     it('fails an exempt trackAnalyticsDbWrite public mutation when the callback lacks a limiter', () => {
         const src = `
             import { trackAnalyticsDbWrite } from '@/lib/background-db-writes';

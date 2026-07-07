@@ -425,6 +425,13 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
     };
 }
 
+type ViewRecordParams = Awaited<ReturnType<typeof buildViewParams>>;
+
+async function buildRequestViewParams(): Promise<ViewRecordParams> {
+    const requestHeaders = await headers();
+    return buildViewParams(requestHeaders);
+}
+
 /**
  * Record a photo view event. Intentionally fire-and-forget: the INSERT
  * is NOT awaited so analytics never blocks the page render. Errors are
@@ -436,11 +443,17 @@ async function buildViewParams(requestHeaders: Awaited<ReturnType<typeof headers
 export async function recordPhotoView(imageId: number): Promise<void> {
     if (typeof imageId !== 'number' || !Number.isInteger(imageId) || imageId <= 0) return;
     if (isRestoreMaintenanceActive()) return;
+    let params: ViewRecordParams;
+    try {
+        params = await buildRequestViewParams();
+        const limitResult = await checkViewRecordRateLimit(params.ip, Date.now());
+        if (limitResult.status === 'rateLimited') return;
+    } catch (err) {
+        console.warn('[analytics] recordPhotoView failed:', err);
+        return;
+    }
     trackAnalyticsDbWrite(async () => {
         try {
-            const requestHeaders = await headers();
-            const params = await buildViewParams(requestHeaders);
-            if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
             const [visibleImage] = await db.select({ id: images.id })
                 .from(images)
                 .where(and(eq(images.id, imageId), eq(images.processed, true)))
@@ -470,11 +483,17 @@ export async function recordTopicView(topicSlug: string): Promise<void> {
     // and keeps the validation posture identical across the public actions.
     if (!isValidSlug(topicSlug)) return;
     if (isRestoreMaintenanceActive()) return;
+    let params: ViewRecordParams;
+    try {
+        params = await buildRequestViewParams();
+        const limitResult = await checkViewRecordRateLimit(params.ip, Date.now());
+        if (limitResult.status === 'rateLimited') return;
+    } catch (err) {
+        console.warn('[analytics] recordTopicView failed:', err);
+        return;
+    }
     trackAnalyticsDbWrite(async () => {
         try {
-            const requestHeaders = await headers();
-            const params = await buildViewParams(requestHeaders);
-            if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
             const [visibleTopic] = await db.select({ slug: topics.slug })
                 .from(topics)
                 .where(eq(topics.slug, topicSlug))
@@ -501,11 +520,17 @@ export async function recordSharedGroupView(groupId: number, groupKey: string): 
     const trimmedGroupKey = typeof groupKey === 'string' ? groupKey.trim() : '';
     if (!isBase56(trimmedGroupKey, 10)) return;
     if (isRestoreMaintenanceActive()) return;
+    let params: ViewRecordParams;
+    try {
+        params = await buildRequestViewParams();
+        const limitResult = await checkViewRecordRateLimit(params.ip, Date.now());
+        if (limitResult.status === 'rateLimited') return;
+    } catch (err) {
+        console.warn('[analytics] recordSharedGroupView failed:', err);
+        return;
+    }
     trackAnalyticsDbWrite(async () => {
         try {
-            const requestHeaders = await headers();
-            const params = await buildViewParams(requestHeaders);
-            if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
             const [visibleGroup] = await db.select({ id: sharedGroups.id })
                 .from(sharedGroups)
                 .innerJoin(sharedGroupImages, eq(sharedGroupImages.groupId, sharedGroups.id))

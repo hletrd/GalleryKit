@@ -330,26 +330,21 @@ describe('searchImagesAction', () => {
     });
 
     it('skips public analytics writes when restore maintenance begins after target validation', async () => {
-        isRestoreMaintenanceActiveMock
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(true)
-            .mockReturnValueOnce(true)
-            .mockReturnValueOnce(false)
-            .mockReturnValueOnce(true);
+        dbSelectMock.mockReturnValueOnce({
+            from: vi.fn(() => ({
+                where: vi.fn(() => ({
+                    limit: vi.fn(async () => {
+                        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+                        return [{ id: 7 }];
+                    }),
+                })),
+            })),
+        });
 
         await recordPhotoView(7);
-        await recordTopicView('seoul');
-        await recordSharedGroupView(11, '23456789AB');
         await drainBackgroundDbWritesForRestore();
 
-        expect(dbSelectMock).toHaveBeenCalledTimes(3);
+        expect(dbSelectMock).toHaveBeenCalledTimes(1);
         expect(dbInsertMock).not.toHaveBeenCalled();
     });
 

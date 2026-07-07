@@ -985,6 +985,9 @@ function publicActionCallsRateLimitBeforeMutation(
 
         const analyticsCallback = trackedAnalyticsCallbackBody(statement);
         if (analyticsCallback) {
+            if (sawRateLimitGate) {
+                return;
+            }
             restoreOnlyRateLimitState();
             for (const nested of analyticsCallback.statements) processStatement(nested);
             return;
