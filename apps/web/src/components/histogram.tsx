@@ -11,6 +11,24 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 
 type HistogramMode = 'luminance' | 'rgb' | 'r' | 'g' | 'b';
 
+/**
+ * AGG8b-29 / PERF-REACT-01 (run-10 c8b): decide whether an image URL needs
+ * `crossOrigin='anonymous'` for canvas reads. Same-origin URLs (the normal
+ * relative `/uploads/...` derivatives) never taint the canvas, and loading
+ * them in no-CORS mode matches the gallery's own `<img>` fetches so the
+ * HTTP cache entry is reused. Only a genuinely cross-origin URL
+ * (IMAGE_BASE_URL CDN) needs CORS mode; an unparseable URL conservatively
+ * requests it (the load will fail either way, but never taints).
+ */
+function needsCrossOriginForCanvas(url: string): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+        return new URL(url, window.location.href).origin !== window.location.origin;
+    } catch {
+        return true;
+    }
+}
+
 interface HistogramData {
     r: number[];
     g: number[];
@@ -552,7 +570,15 @@ export function Histogram({ imageUrl, avifUrl, fallbackImageUrl, colorPrimaries,
         const abortController = new AbortController();
 
         const img = new Image();
-        img.crossOrigin = 'anonymous';
+        // AGG8b-29 / PERF-REACT-01 (run-10 c8b): request CORS mode only when
+        // the derivative actually lives on another origin (IMAGE_BASE_URL
+        // CDN case). Same-origin canvas reads never taint, and the no-CORS
+        // request mode matches the gallery's <img> fetches, so the browser
+        // reuses the already-HTTP-cached bytes instead of re-downloading the
+        // sized JPEG under a separate CORS cache key.
+        if (needsCrossOriginForCanvas(effectiveUrl)) {
+            img.crossOrigin = 'anonymous';
+        }
         img.onload = () => {
             if (aborted) return;
             const worker = workerRef.current;
