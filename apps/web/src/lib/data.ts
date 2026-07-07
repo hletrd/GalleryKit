@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import { db, images, topics, topicAliases, tags, imageTags, sharedGroups, sharedGroupImages, adminSettings, smartCollections } from '@/db';
-import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, isNull, isNotNull } from 'drizzle-orm';
+import { eq, desc, asc, and, gt, lt, or, inArray, notInArray, isNull, isNotNull, exists } from 'drizzle-orm';
 import { sql, type SQL } from 'drizzle-orm';
 import { isBase56 } from './base56';
 import { SEO_SETTING_KEYS } from './gallery-config-shared';
@@ -1679,7 +1679,27 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     const remainingLimit = effectiveLimit - results.length;
     const mainIds = results.map(r => r.id);
 
-    const tagConditions: SQL[] = [eq(images.processed, true) as SQL, containsLike(tags.name, searchTerm)];
+    // C7-09 (run-10 cycle 7b): filter tag matches via EXISTS instead of a
+    // WHERE condition on the aggregation join. The prior shape (INNER JOIN
+    // tags + `tags.name LIKE …` in WHERE) filtered the joined rows BEFORE
+    // GROUP_CONCAT ran, so `tag_names` silently contained only the MATCHING
+    // tag(s) — while the identical `tagNamesAgg` expression means "all tags
+    // for the image" at every other call site (and in CLAUDE.md). Result
+    // labels/alt text derived from tag_names then dropped the photo's other
+    // tags on the search surface only. The aggregation below now uses the
+    // standard unfiltered LEFT JOINs; this EXISTS subquery does the matching.
+    // (Deliberately NOT a raw-SQL correlated scalar subquery for tag_names —
+    // that exact shape broke production once; see the tagNamesAgg note.)
+    const tagMatchExists = exists(
+        db.select({ one: sql`1` })
+            .from(imageTags)
+            .innerJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(and(
+                eq(imageTags.imageId, images.id),
+                containsLike(tags.name, searchTerm),
+            )),
+    );
+    const tagConditions: SQL[] = [eq(images.processed, true) as SQL, tagMatchExists];
     if (mainIds.length > 0) {
         tagConditions.push(notInArray(images.id, mainIds));
     }
@@ -1690,27 +1710,32 @@ export async function searchImages(query: string, limit: number = 20): Promise<S
     }
     const aliasRemainingLimit = remainingLimit;
 
-    const [tagResults, aliasResults] = remainingLimit <= 0
-        ? [[], []] as [SearchResult[], SearchResult[]]
-        : await Promise.all([
-            db.select(searchFieldsWithTagNames)
-                .from(images)
-                .leftJoin(topics, eq(images.topic, topics.slug))
-                .innerJoin(imageTags, eq(images.id, imageTags.imageId))
-                .innerJoin(tags, eq(imageTags.tagId, tags.id))
-                .where(and(...tagConditions))
-                .groupBy(...searchGroupByColumns)
-                .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
-                .limit(remainingLimit),
-            aliasRemainingLimit <= 0 ? [] : db.select(searchFieldsWithNoTags)
-                .from(images)
-                .leftJoin(topics, eq(images.topic, topics.slug))
-                .innerJoin(topicAliases, eq(images.topic, topicAliases.topicSlug))
-                .where(and(...aliasConditions))
-                .groupBy(...searchGroupByColumns)
-                .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
-                .limit(aliasRemainingLimit),
-        ]);
+    // C7-23 (run-10 cycle 7b): the former `remainingLimit <= 0` /
+    // `aliasRemainingLimit <= 0` ternaries here were provably unreachable —
+    // the short-circuit return above guarantees remainingLimit > 0.
+    const [tagResults, aliasResults] = await Promise.all([
+        db.select(searchFieldsWithTagNames)
+            .from(images)
+            .leftJoin(topics, eq(images.topic, topics.slug))
+            // C7-09: UNFILTERED aggregation joins (matching every other
+            // tagNamesAgg consumer) — the tag-match filter lives in the
+            // EXISTS subquery inside tagConditions, so tag_names carries the
+            // photo's FULL tag set, not just the matching tag.
+            .leftJoin(imageTags, eq(images.id, imageTags.imageId))
+            .leftJoin(tags, eq(imageTags.tagId, tags.id))
+            .where(and(...tagConditions))
+            .groupBy(...searchGroupByColumns)
+            .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
+            .limit(remainingLimit),
+        db.select(searchFieldsWithNoTags)
+            .from(images)
+            .leftJoin(topics, eq(images.topic, topics.slug))
+            .innerJoin(topicAliases, eq(images.topic, topicAliases.topicSlug))
+            .where(and(...aliasConditions))
+            .groupBy(...searchGroupByColumns)
+            .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
+            .limit(aliasRemainingLimit),
+    ]);
 
     const seen = new Set<number>();
     const combined: SearchResult[] = [];

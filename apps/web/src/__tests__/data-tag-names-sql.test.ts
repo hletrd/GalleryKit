@@ -231,6 +231,22 @@ describe('getImagesLite tag_names SQL shape', () => {
         expect(searchFnBody).not.toMatch(/const\s+searchGroupByColumns\s*=\s*\[/);
     });
 
+    it('searchImages keeps tag matching separate from tag_names aggregation', () => {
+        const source = readSource();
+        const searchFnBody = extractFunctionBody(source, 'searchImages');
+        const tagSearchStart = searchFnBody.indexOf('db.select(searchFieldsWithTagNames)');
+        const aliasSearchStart = searchFnBody.indexOf('db.select(searchFieldsWithNoTags)', tagSearchStart);
+        const tagSearchQuery = searchFnBody.slice(tagSearchStart, aliasSearchStart);
+
+        expect(searchFnBody).toContain('const tagMatchExists = exists(');
+        expect(searchFnBody).toContain('const tagConditions: SQL[] = [eq(images.processed, true) as SQL, tagMatchExists]');
+        expect(tagSearchQuery).toContain('.leftJoin(imageTags');
+        expect(tagSearchQuery).toContain('.leftJoin(tags');
+        expect(tagSearchQuery).not.toContain('.innerJoin(imageTags');
+        expect(tagSearchQuery).not.toContain('.innerJoin(tags');
+        expect(tagSearchQuery).toContain('.where(and(...tagConditions))');
+    });
+
     it('Drizzle compiled LIKE predicates use a MariaDB-safe escape marker', async () => {
         const { drizzle: drizzleProxy } = await import('drizzle-orm/mysql-proxy');
         const { images } = await import('../db/schema');
