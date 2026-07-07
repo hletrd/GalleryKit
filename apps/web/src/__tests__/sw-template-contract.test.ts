@@ -341,10 +341,23 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
 
     // C4-26 / TRC4-08 (run-10 c4): the eviction-decision meta READ must go
     // through the mutation queue so it cannot race a queued touch write.
-    it('evictExpiredCachedImage reads recency through the meta-mutation queue', () => {
+    // TRC9-01 / AGG9B-03 (loop-B cycle 9b): strengthened — the whole
+    // read → decide → delete sequence is ONE queued operation, so a
+    // same-URL touchMeta can no longer commit between the stale read and
+    // the delete. Meta ops are inlined (getMeta/setMeta, not deleteMeta)
+    // because the promise-chain queue is non-reentrant.
+    it('evictExpiredCachedImage decides and deletes inside one meta-mutation queue op', () => {
         for (const src of [TEMPLATE, GENERATED_SW]) {
-            expect(src).toMatch(/async function readMetaForUrl\(url\) \{\s*\n\s*return withMetaMutation\(/);
-            expect(src).toMatch(/const metaEntry = await readMetaForUrl\(url\);/);
+            expect(src).toMatch(/async function evictExpiredCachedImage\(imageCache, cacheKey, url, cached\) \{[\s\S]{0,900}?return withMetaMutation\(async \(\) => \{/);
+            const fnIdx = src.indexOf('async function evictExpiredCachedImage(imageCache, cacheKey, url, cached)');
+            expect(fnIdx).toBeGreaterThan(-1);
+            const fn = src.slice(fnIdx, src.indexOf('async function staleWhileRevalidateImage'));
+            // The stale branch deletes cache bytes first, then the meta
+            // record from the SAME snapshot, inside the queued callback.
+            expect(fn).toMatch(/await imageCache\.delete\(cacheKey\);\s*\n\s*if \(entries\.delete\(url\)\) \{\s*\n\s*await setMeta\(entries\);/);
+            // No nested queued op (deleteMeta/readMetaForUrl) inside — the
+            // queue is non-reentrant.
+            expect(fn).not.toMatch(/deleteMeta\(|readMetaForUrl\(/);
         }
     });
 
@@ -415,12 +428,13 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         const evictFnIdx = TEMPLATE.indexOf('async function evictExpiredCachedImage(imageCache, cacheKey, url, cached)');
         expect(evictFnIdx).toBeGreaterThan(-1);
         const evictFn = TEMPLATE.slice(evictFnIdx, TEMPLATE.indexOf('async function staleWhileRevalidateImage'));
-        // C4-26 (run-10 c4): the read now goes through the mutation queue via
-        // readMetaForUrl (still meta-first, header only as fallback).
-        expect(evictFn).toMatch(/const metaEntry = await readMetaForUrl\(url\);/);
+        // C4-26 (run-10 c4) → TRC9-01 (loop-B c9b): the read now happens
+        // INSIDE the single queued eviction op (still meta-first, header
+        // only as fallback).
+        expect(evictFn).toMatch(/const metaEntry = entries\.get\(url\);/);
         expect(evictFn).toMatch(/metaEntry && Number\.isFinite\(metaEntry\.timestamp\)\s*\n\s*\? Date\.now\(\) - metaEntry\.timestamp\s*\n\s*: cachedImageAge\(cached\)/);
         expect(TEMPLATE).toMatch(/age > IMAGE_MAX_STALE_MS/);
-        expect(TEMPLATE).toMatch(/await imageCache\.delete\(cacheKey\);\s*\n\s*await deleteMeta\(url\);/);
+        expect(evictFn).toMatch(/await imageCache\.delete\(cacheKey\);\s*\n\s*if \(entries\.delete\(url\)\) \{\s*\n\s*await setMeta\(entries\);/);
         const expiryIdx = fn.indexOf('evictExpiredCachedImage(imageCache, cacheKey, request.url, cached)');
         expect(expiryIdx).toBeGreaterThan(-1);
         const expiryBranch = fn.slice(expiryIdx, expiryIdx + 260);
@@ -433,7 +447,7 @@ describe('sw.template.js lazy image revalidation (PERF-R4C9-02)', () => {
         expect(GENERATED_SW).toMatch(/headers\.set\('sw-cached-at', String\(Date\.now\(\)\)\)/);
         expect(GENERATED_SW).toMatch(/imageCache\.put\(cacheKey, responseWithCacheTimestamp\(networkResponse\)\)/);
         expect(GENERATED_SW).toMatch(/evictExpiredCachedImage\(imageCache, cacheKey, request\.url, cached\)/);
-        expect(GENERATED_SW).toMatch(/const metaEntry = await readMetaForUrl\(url\);/);
+        expect(GENERATED_SW).toMatch(/const metaEntry = entries\.get\(url\);/);
     });
 
     it('evicts stale derivative cache entries when the server returns 404 or 410', () => {

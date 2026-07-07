@@ -262,30 +262,36 @@ function cachedImageAge(response) {
 // meta record (a pre-change entry, or a meta read racing a missing/corrupt
 // record); using it unconditionally would age out entries the server keeps
 // confirming as fresh on every revalidation.
-// C4-26 / TRC4-08 (run-10 c4): serialize the recency READ behind any queued
-// touchMeta/recordAndEvict writes. A bare getMeta() here could observe a
-// pre-touch snapshot while another request's touch write for the same URL is
-// queued but uncommitted, and evict an entry that was just confirmed fresh at
-// the staleness boundary. Reading through the mutation queue closes that race.
-async function readMetaForUrl(url) {
+// C4-26 / TRC4-08 (run-10 c4): the recency read must be serialized behind any
+// queued touchMeta/recordAndEvict writes so the decision cannot observe a
+// pre-touch snapshot.
+// TRC9-01 / AGG9B-03 (loop-B cycle 9b): reading through the queue alone was
+// not enough — the age DECISION and the delete ran OUTSIDE the queue, so a
+// concurrent same-URL touchMeta (a confirmed-fresh 304/ETag view dispatched
+// via extendLifetime) could commit between the stale read and the
+// unconditional delete, and the just-refreshed entry plus its cached bytes
+// were evicted anyway. The whole read → decide → delete sequence now runs as
+// ONE queued operation; meta ops are inlined (getMeta/setMeta) because the
+// promise-chain queue is non-reentrant. Cache bytes are deleted before the
+// meta record so a crash between the two leaves a counted phantom (paid down
+// by the eviction walk, C4-02), never uncounted bytes.
+async function evictExpiredCachedImage(imageCache, cacheKey, url, cached) {
   return withMetaMutation(async () => {
     const entries = await getMeta();
-    return entries.get(url);
+    const metaEntry = entries.get(url);
+    const age =
+      metaEntry && Number.isFinite(metaEntry.timestamp)
+        ? Date.now() - metaEntry.timestamp
+        : cachedImageAge(cached);
+    if (!Number.isNaN(age) && age > IMAGE_MAX_STALE_MS) {
+      await imageCache.delete(cacheKey);
+      if (entries.delete(url)) {
+        await setMeta(entries);
+      }
+      return true;
+    }
+    return false;
   });
-}
-
-async function evictExpiredCachedImage(imageCache, cacheKey, url, cached) {
-  const metaEntry = await readMetaForUrl(url);
-  const age =
-    metaEntry && Number.isFinite(metaEntry.timestamp)
-      ? Date.now() - metaEntry.timestamp
-      : cachedImageAge(cached);
-  if (!Number.isNaN(age) && age > IMAGE_MAX_STALE_MS) {
-    await imageCache.delete(cacheKey);
-    await deleteMeta(url);
-    return true;
-  }
-  return false;
 }
 
 // C4-42 (run-10 c4): keep a background write lifetime-covered WITHOUT gating

@@ -556,4 +556,32 @@ describe('sw-cache: evictIfExpired', () => {
     expect(evicted).toBe(true);
     expect(cache.deleted).toContain(url);
   });
+
+  it('never discards a concurrent same-URL touch (TRC9-01: atomic read-decide-delete)', async () => {
+    // Regression for the TOCTOU the pre-9b shape had: the eviction read went
+    // through the queue but the decision + delete ran OUTSIDE it, so a
+    // touchMeta enqueued between the read and the delete committed a fresh
+    // timestamp that the unconditional delete then silently discarded.
+    // With the atomic op, the two operations serialize whole-op: the stale
+    // eviction runs first (it was enqueued first), then the touch re-creates
+    // the entry — the confirmed-fresh touch must SURVIVE, whichever side of
+    // the eviction it lands on.
+    const url = 'http://localhost/uploads/avif/a.avif';
+    await meta.setAll(new Map([[url, { url, size: 10, timestamp: 0 }]]));
+
+    const evictPromise = evictIfExpired(url, cache, meta, 1_000, null, 10_000);
+    // Enqueued synchronously right behind the eviction op — exactly the
+    // interleaving position that used to land BETWEEN the read and delete.
+    const touchPromise = touchMeta(url, 10, meta);
+    const [evicted] = await Promise.all([evictPromise, touchPromise]);
+
+    expect(evicted).toBe(true);
+    // The touch's committed write survives the eviction instead of being
+    // silently discarded (the entry is re-tracked with a fresh timestamp;
+    // its bytes refetch on next load — a counted phantom, never a lost
+    // confirmed-fresh record).
+    const entry = meta.snapshot().get(url);
+    expect(entry).toBeDefined();
+    expect(entry!.timestamp).toBeGreaterThan(0);
+  });
 });

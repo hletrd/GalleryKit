@@ -289,17 +289,26 @@ export async function evictIfExpired(
   headerTimestamp: number | null = null,
   now: number = Date.now(),
 ): Promise<boolean> {
-  // C4-26 / TRC4-08 (run-10 c4): read the meta snapshot THROUGH the mutation
-  // queue so the eviction decision cannot observe a pre-touch snapshot while
-  // a touchMeta write for the same URL is queued but uncommitted. Mirrors the
-  // template's readMetaForUrl. (Do not nest further queue ops inside — the
-  // promise-chain queue is non-reentrant.)
-  const metaEntry = await withMetaMutation(async () => (await meta.getAll()).get(url));
-  const age = resolveCachedEntryAge(metaEntry, headerTimestamp, now);
-  if (age > maxAgeMs) {
-    await cache.delete(url);
-    await removeEntry(url, meta);
-    return true;
-  }
-  return false;
+  // C4-26 / TRC4-08 (run-10 c4): the meta snapshot must be read THROUGH the
+  // mutation queue so the decision cannot observe a pre-touch snapshot.
+  // TRC9-01 / AGG9B-03 (loop-B cycle 9b): the queued read alone was not
+  // enough — the age decision and delete ran OUTSIDE the queue, so a
+  // concurrent same-URL touchMeta could commit between the stale read and
+  // the unconditional delete, evicting a just-refreshed entry. The whole
+  // read → decide → delete now runs as ONE queued operation; meta ops are
+  // inlined (getAll/setAll, not removeEntry) because the promise-chain queue
+  // is non-reentrant. Mirrors the template's evictExpiredCachedImage.
+  return withMetaMutation(async () => {
+    const entries = await meta.getAll();
+    const metaEntry = entries.get(url);
+    const age = resolveCachedEntryAge(metaEntry, headerTimestamp, now);
+    if (age > maxAgeMs) {
+      await cache.delete(url);
+      if (entries.delete(url)) {
+        await meta.setAll(entries);
+      }
+      return true;
+    }
+    return false;
+  });
 }
