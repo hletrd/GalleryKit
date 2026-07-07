@@ -33,8 +33,13 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 9/100 Implementation Plan - active: schedules migration compatibility, semantic embedding contract honesty, public privacy alias guards, maintenance single-flight, cursor normalizer coverage, doc/copy drift, explicit admin/CLIP proof commands, and PostCSS audit remediation attempt (`cycle-9-2026-07-07-plan.md`)
-- Run-10 Cycle 9/100 Deferred Findings - active deferred register with preserved severity/confidence and exit criteria for broader performance/UI/operator/upstream findings (`cycle-9-2026-07-07-deferred.md`)
+- Run-10 Cycle 10/100 Implementation Plan - active: schedules dependency/native-build drift, archive query shape, embedding schema/reconcile coverage, scheduler shutdown, analytics queue request context, topic deletion fail-closed behavior, public accessibility/search labels, and stale wiki claims (`cycle-10-2026-07-07-plan.md`)
+- Run-10 Cycle 10/100 Deferred Findings - active deferred register with preserved severity/confidence and exit criteria for map/on-this-day/CLIP/default-gate/UI-test/operator-nginx/design-cleanup findings (`cycle-10-2026-07-07-deferred.md`)
+
+## Recently Completed Current-Cycle Plans
+
+- Run-10 Cycle 9/100 Implementation Plan - completed locally, pending commit/deploy ledger in current review-plan-fix run: migration compatibility, semantic embedding contract honesty, public privacy alias guards, maintenance single-flight, cursor normalizer coverage, doc/copy drift, explicit admin/CLIP proof commands, and PostCSS audit remediation attempt (`cycle-9-2026-07-07-plan.md`)
+- Run-10 Cycle 9/100 Deferred Findings - deferred register with preserved severity/confidence and exit criteria for broader performance/UI/operator/upstream findings (`cycle-9-2026-07-07-deferred.md`)
 
 ## Recent Plans
 
