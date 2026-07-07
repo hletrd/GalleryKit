@@ -16,8 +16,16 @@ describe('cycle 20 source contracts', () => {
         expect(watchdog).not.toContain('if (!child.killed)');
         expect(watchdog.indexOf("child.kill('SIGTERM')")).toBeLessThan(watchdog.indexOf('onTimeout(err)'));
         expect(watchdog.indexOf("child.kill('SIGKILL')")).toBeLessThan(watchdog.indexOf('onTimeout(err)'));
-        expect(watchdog).toContain('if (!fired) markSettled()');
-        expect(watchdog).not.toMatch(/\n\s*markSettled\(\);\n\s*child\.off/);
+        // AGG8b-14 (run-10 c8b) strengthened the cleanup: it is a no-op once
+        // the timeout fired — markSettled/child.off are only reachable behind
+        // the early-return guard, so kill escalation survives a late cleanup
+        // AND the settle listeners stay attached to cancel the SIGKILL grace
+        // timer on a late child exit. This preserves the intent originally
+        // pinned here (no unconditional settle-in-cleanup after fire).
+        const cleanupBody = watchdog.slice(watchdog.indexOf('return () => {'));
+        expect(cleanupBody).toContain('if (fired) return;');
+        expect(cleanupBody.indexOf('if (fired) return;')).toBeLessThan(cleanupBody.indexOf('markSettled()'));
+        expect(cleanupBody.indexOf('if (fired) return;')).toBeLessThan(cleanupBody.indexOf("child.off('exit', markSettled)"));
     });
 
     it('keeps visitor keyword search imported directly from the public server-action module', () => {
