@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { buildCspSafely as BuildCspSafely } from '@/lib/content-security-policy';
+import type {
+  buildCspSafely as BuildCspSafely,
+  sanitizeImageBaseUrlSafely as SanitizeImageBaseUrlSafely,
+} from '@/lib/content-security-policy';
 
 // C2-37 (run-10 c2): buildContentSecurityPolicy's imageBaseUrl default parses
 // IMAGE_BASE_URL synchronously and throws on a malformed/credential-bearing
@@ -15,10 +18,11 @@ import type { buildCspSafely as BuildCspSafely } from '@/lib/content-security-po
 describe('buildCspSafely', () => {
   const originalImageBaseUrl = process.env.IMAGE_BASE_URL;
   let buildCspSafely: typeof BuildCspSafely;
+  let sanitizeImageBaseUrlSafely: typeof SanitizeImageBaseUrlSafely;
 
   beforeEach(async () => {
     vi.resetModules();
-    ({ buildCspSafely } = await import('@/lib/content-security-policy'));
+    ({ buildCspSafely, sanitizeImageBaseUrlSafely } = await import('@/lib/content-security-policy'));
   });
 
   afterEach(() => {
@@ -86,5 +90,18 @@ describe('buildCspSafely', () => {
 
     expect(csp).toContain("img-src 'self' data: blob:");
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs sanitizer fallback failures once on the server side', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect(sanitizeImageBaseUrlSafely('https://user:pass@cdn.example.com')).toBe('');
+    expect(sanitizeImageBaseUrlSafely('https://user:pass@cdn.example.com')).toBe('');
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('IMAGE_BASE_URL rejected by the sanitizer'),
+      expect.any(Error),
+    );
   });
 });

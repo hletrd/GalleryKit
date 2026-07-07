@@ -15,9 +15,10 @@ describe('cycle 21 source contracts', () => {
         expect(resultMapBody).toContain('const label = getPhotoResultLabel(item, `${tCommon(\'photo\')} ${item.imageId}`)');
         expect(resultMapBody).toContain('label={label}');
         expect(resultMapBody).toContain('`${tCommon(\'photo\')} ${item.imageId}`');
-        expect(thumbBody).toContain('title={label}');
-        expect(thumbBody).toContain('aria-label={label}');
-        expect(thumbBody).toContain('alt={label}');
+        expect(thumbBody).toContain('const resultLabel = `${label} #${imageId}`');
+        expect(thumbBody).toContain('title={resultLabel}');
+        expect(thumbBody).toContain('aria-label={resultLabel}');
+        expect(thumbBody).toContain('alt={resultLabel}');
         expect(resultMapBody).not.toContain("?? tCommon('photo');");
         expect(resultMapBody).not.toContain('item.title ?? item.description');
     });

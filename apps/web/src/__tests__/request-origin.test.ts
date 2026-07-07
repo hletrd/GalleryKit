@@ -4,6 +4,7 @@ import { getTrustedRequestProtocol, hasTrustedSameOrigin, hasTrustedSameOriginWi
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 const originalBaseUrl = process.env.BASE_URL;
+const originalNodeEnv = process.env.NODE_ENV;
 
 function makeHeaders(values: Record<string, string | undefined>) {
     return {
@@ -24,6 +25,11 @@ describe('hasTrustedSameOrigin', () => {
             delete process.env.BASE_URL;
         } else {
             process.env.BASE_URL = originalBaseUrl;
+        }
+        if (originalNodeEnv === undefined) {
+            delete process.env.NODE_ENV;
+        } else {
+            process.env.NODE_ENV = originalNodeEnv;
         }
     });
 
@@ -100,6 +106,26 @@ describe('hasTrustedSameOrigin', () => {
         expect(hasTrustedSameOrigin(makeHeaders({
             host: 'gallery.atik.kr',
             'x-forwarded-host': 'attacker.invalid',
+            'x-forwarded-proto': 'https',
+            origin: 'https://attacker.invalid',
+        }))).toBe(false);
+    });
+
+    it('uses site-config url as the production canonical origin when BASE_URL is unset', () => {
+        delete process.env.BASE_URL;
+        process.env.NODE_ENV = 'production';
+        process.env.TRUST_PROXY = 'true';
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'attacker.invalid',
+            'x-forwarded-host': 'attacker.invalid',
+            'x-forwarded-proto': 'https',
+            origin: 'https://gallery.atik.kr',
+        }))).toBe(true);
+
+        expect(hasTrustedSameOrigin(makeHeaders({
+            host: 'gallery.atik.kr',
+            'x-forwarded-host': 'gallery.atik.kr',
             'x-forwarded-proto': 'https',
             origin: 'https://attacker.invalid',
         }))).toBe(false);

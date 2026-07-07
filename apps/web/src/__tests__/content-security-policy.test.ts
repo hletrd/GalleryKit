@@ -73,4 +73,13 @@ describe('buildContentSecurityPolicy', () => {
     expect(source).toContain('Production still allows inline styles');
     expect(source).toContain('Scripts remain nonce-only in production');
   });
+
+  it('stays safe for next-config, server runtime, and client bundle imports', () => {
+    const source = readFileSync(join(__dirname, '../lib/content-security-policy.ts'), 'utf8');
+
+    expect(source).toContain('MODULE BOUNDARY');
+    expect(source).not.toMatch(/from\s+['"]node:/);
+    expect(source).not.toMatch(/from\s+['"]server-only['"]/);
+    expect(source).not.toMatch(/from\s+['"]next\//);
+  });
 });

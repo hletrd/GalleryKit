@@ -72,6 +72,7 @@ describe('client component source contracts', () => {
     const code = source('components/search.tsx');
     expect(code).toContain("const showSearchLabel = semanticSearchMode === 'production'");
     expect(code).toContain("size={showSearchLabel ? 'default' : 'icon'}");
+    expect(code).toContain('className={showSearchLabel ? "h-11 min-w-11 gap-2 px-3" : "h-11 w-11"}');
     expect(code).toContain("{showSearchLabel && <span className=\"hidden lg:inline\">{t('aria.searchPhotos')}</span>}");
   });
 

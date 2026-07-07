@@ -19,6 +19,7 @@ describe('imageUrl base resolution (COR-R4C16-03)', () => {
     });
 
     it('browser: uses the data-image-base attribute stamped on <html>', () => {
+        vi.stubGlobal('window', {});
         vi.stubGlobal('document', {
             documentElement: { dataset: { imageBase: 'https://cdn.example.com' } },
         });
@@ -26,6 +27,7 @@ describe('imageUrl base resolution (COR-R4C16-03)', () => {
     });
 
     it('browser: normalizes trailing slashes on the stamped base', () => {
+        vi.stubGlobal('window', {});
         vi.stubGlobal('document', {
             documentElement: { dataset: { imageBase: 'https://cdn.example.com/' } },
         });
@@ -33,15 +35,27 @@ describe('imageUrl base resolution (COR-R4C16-03)', () => {
     });
 
     it('browser: falls back to relative paths when the attribute is absent (env unset)', () => {
+        vi.stubGlobal('window', {});
         vi.stubGlobal('document', { documentElement: { dataset: {} } });
         expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('/uploads/jpeg/a.jpg');
     });
 
     it('browser: ignores malformed or credential-bearing stamped bases', () => {
+        vi.stubGlobal('window', {});
         vi.stubGlobal('document', {
             documentElement: { dataset: { imageBase: 'https://user:pass@cdn.example.com?token=x' } },
         });
         expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('/uploads/jpeg/a.jpg');
+    });
+
+    it('browser: recomputes the cached base when the stamped raw value changes', () => {
+        const dataset = { imageBase: 'https://cdn-a.example.com' };
+        vi.stubGlobal('window', {});
+        vi.stubGlobal('document', { documentElement: { dataset } });
+
+        expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('https://cdn-a.example.com/uploads/jpeg/a.jpg');
+        dataset.imageBase = 'https://cdn-b.example.com';
+        expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('https://cdn-b.example.com/uploads/jpeg/a.jpg');
     });
 
     it('server: reads the IMAGE_BASE_URL env via the module constant', async () => {
