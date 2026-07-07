@@ -91,7 +91,7 @@ git values must be treated as compromised and must not be reused.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DB_SSL` | auto | TLS is auto-enabled for non-localhost `DB_HOST`; set to `false` to disable (e.g., VPC-internal) |
-| `DB_SSL_CA` | — | CA path for verified MySQL runtime + CLI TLS when `DB_HOST` is non-local and `DB_SSL` is not `false` |
+| `DB_SSL_CA` | — | CA path for verified MySQL runtime + CLI TLS. **MANDATORY when `DB_HOST` is non-local and `DB_SSL` is not `false`**: `db/index.ts` / `mysql-connection-options.js` THROW at import if it is unset for a non-local host (fail-closed — importing `@/db` then 500s every route until the CA is provided or `DB_SSL=false` is set). Pins that exact CA (Node no longer trusts the system store on this path), so a managed/public-CA MySQL provider requires extracting + pinning its CA (C6-06) |
 | `BASE_URL` | — | Public URL for sitemap, OpenGraph, and RSS feeds (e.g., `https://gallery.example.com`) |
 | `IMAGE_BASE_URL` | — | Optional CDN origin/prefix for uploaded assets; must be absolute HTTPS without credentials |
 | `TRUST_PROXY` | — | Set to `true` behind nginx/reverse proxy so per-IP rate limiting sees the real client IP |
@@ -109,6 +109,7 @@ git values must be treated as compromised and must not be reused.
 | `BACKFILL_CONCURRENCY` | `2` | Sidecar `--rm` backfill concurrency (default 2, max 8; separate MySQL pool, not capped by the live web pool-budget formula) |
 | `IMAGE_CLEANUP_CONCURRENCY` | `5` | Post-DB image-file cleanup concurrency for deletes (max 32); tune for NAS/high-latency storage, not upload processing |
 | `UPLOAD_ORIGINAL_ROOT` | — | Override path for private original uploads (used by sidecar scripts) |
+| `UPLOAD_ROOT`, `TOPIC_RESOURCES_ROOT`, `TOPIC_RESOURCES_TMP_ROOT` | cwd-derived | Test/sandbox path overrides mirroring the `UPLOAD_ORIGINAL_ROOT` pattern (`lib/upload-paths.ts`, `lib/process-topic-image.ts`) so tests can redirect the derivative / topic-cover / topic-tmp roots. Production normally leaves these unset (C6-15) |
 | `RESTORE_MAINTENANCE_DIR` | `/app/data` (prod) / `data` (dev) | Directory holding the durable restore-maintenance marker file (`restore-maintenance-durable.ts`). Must live on the persisted `./data` bind mount so the marker survives process restarts during a restore window (C4-38) |
 | `SEMANTIC_SEARCH_ALLOW_PRODUCTION` | — | Operator-only opt-in for production CLIP semantic search (requires model weights) |
 | `CLIP_MODELS_ROOT` | cwd-relative `data/models/clip` in code; `/app/data/models/clip` in production env | CLIP model weights root. Absolute paths are honored verbatim; relative/unset values resolve against cwd. Production should set the absolute bind-mount path so the seed script and runtime encoder agree |
@@ -245,6 +246,7 @@ The `images` table has composite indexes optimized for query patterns:
 - `(processed, capture_date, created_at)` — homepage and gallery listing sort
 - `(processed, created_at)` — prev/next navigation
 - `(topic, processed, capture_date, created_at)` — topic-filtered listings
+- `(processed, updated_at, created_at, id)` and `(topic, processed, updated_at, created_at, id)` — `updated_at`-ordered feed/sitemap listings so admin edits advance the entry's freshness instant (`idx_images_processed_updated_at` / `idx_images_topic_updated_at`, migration 0029)
 - `(user_filename)` — upload deduplication
 - `(uploaded_by)` — admin upload-attribution queries
 - `image_tags(tag_id)` — tag JOIN performance
@@ -261,7 +263,16 @@ live requests — a concurrent topic route-segment mutation transiently pins 1 e
 connection (`withTopicRouteMutationLock` + its transaction), and an in-flight DB restore pins 2
 (the chained-locks connection + the upload-contract lock connection) for the restore-preparation
 window. Rare/short at the documented single-admin scale, but count them when reasoning about pool
-headroom during simultaneous admin maintenance operations.
+headroom during simultaneous admin maintenance operations. **Mutual over-subscription (C6-04, run-10
+c6):** the image-queue (`resolveImageQueueConcurrency`) and admin-backfill (`resolveBackfillConcurrency`)
+resolvers EACH reserve `max(3, ceil(pool/2))` = 5 "for live traffic" and each cap at 2 workers, but
+neither subtracts the OTHER background consumer. They run under DIFFERENT locks (per-image processing
+claim vs the global color-pipeline-backfill lock), so an admin-triggered re-encode and active
+upload-queue processing can run SIMULTANEOUSLY — pinning ~1 (lock) + 2×2 backfill + 2×2 queue = 9 of
+10, leaving 1 free, not the 5 each formula independently "proves". A concurrent live `getImage()`
+fan-out then queues behind encode-duration holds against `queueLimit=20`. The two formulas are the
+LARGEST overlap not enumerated above; treat "re-encode while uploads process" as a near-saturation
+window until a shared background-connection budget lands.
 
 ## Image Processing Pipeline
 
@@ -274,6 +285,10 @@ headroom during simultaneous admin maintenance operations.
 7. Conditional UPDATE marks as processed; if image was deleted mid-processing, orphaned files are cleaned up
 8. EXIF extracted with **bounds-checked ICC profile parsing** (capped tagCount, string lengths)
 9. Blur placeholder generated at 16px for instant loading. The `blur_data_url` is rendered by `apps/web/src/components/photo-viewer.tsx` as the inner `motion.div` background-image preview during AVIF/WebP/JPEG decode. Values flow through `apps/web/src/lib/blur-data-url.ts` (`isSafeBlurDataUrl` / `assertBlurDataUrl`) at producer (`lib/process-image.ts` blur builder), write time (`uploadImages` in `apps/web/src/app/actions/images.ts`), and read time (photo viewer) so a `data:image/{jpeg,png,webp};base64,…` contract is enforced and the payload is capped at 4096 chars (~3 KB decoded; `MAX_BLUR_DATA_URL_LENGTH` in `blur-data-url.ts`). The producer-side wrap (cycle 4 RPF loop AGG4-L01) closes the symmetric defense — a future MIME drift in the producer is caught at the source rather than masked by the consumer-side validation. Locked by fixture tests `__tests__/process-image-blur-wiring.test.ts` and `__tests__/images-action-blur-wiring.test.ts`
+
+### Failed-image retry (C6-08)
+
+The queue (`apps/web/src/lib/image-queue.ts`) retries a failing conversion up to `MAX_RETRIES` (3) with exponential backoff. After the final failure it persists the truncated error to the `images` row's `processing_error` (varchar 512) + `failed_at` (datetime) columns and adds the job id to a bounded in-memory `permanentlyFailedIds` set (FIFO-evicted at `MAX_PERMANENTLY_FAILED_IDS`) so the bootstrap/continuation scan skips it instead of retrying forever. That set is process-local and resets on restart — a container restart therefore grants a permanently-failed image a fresh `MAX_RETRIES` budget. The admin dashboard (`app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx`) surfaces `processing_error` per failed row and offers a **Retry** button (`retryFailedImage` in `app/actions/images.ts`) that clears `processing_error` / `failed_at` / `processing_settings_json` and re-claims the row under the per-image processing advisory lock. `processing_error`, `failed_at`, and `processing_settings_json` are admin-only (in `_PrivacySensitiveKeys`). Locked by `__tests__/failed-image-retry.test.ts` and `__tests__/image-queue-permanent-failure.test.ts`.
 
 ## Color & HDR Pipeline (photographer-intent surface)
 

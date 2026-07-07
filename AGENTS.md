@@ -34,7 +34,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 - `npm run lint:public-route-rate-limit --workspace=apps/web` — every PUBLIC API route exporting a mutating handler (POST/PUT/PATCH/DELETE) or expensive GET handler must call a rate-limit pre-increment helper before mutation/expensive work (or carry an explicit `@public-no-rate-limit-required: <reason>` comment); cheap operational GET handlers are not scanned
 - `npm run typecheck --workspace=apps/web` — `typecheck:app` (tsc against `tsconfig.typecheck.json`, which INCLUDES `src/__tests__/`) + `typecheck:scripts`; test-file type errors only surface here, not through the build
 - `npm run build --workspace=apps/web` — Next.js + tsc
-- `npm test --workspace=apps/web` — Vitest 2000+ unit tests including the touch-target audit (≥ 44 px) and the `_PrivacySensitiveKeys` symmetric privacy guard
+- `npm test --workspace=apps/web` — Vitest 3000+ unit tests including the touch-target audit (≥ 44 px) and the `_PrivacySensitiveKeys` symmetric privacy guard
 - `npm run test:e2e --workspace=apps/web` — Playwright end-to-end tests in `apps/web/e2e/` when browser-flow coverage is required
 
 ## Plans, reviews, conventions
