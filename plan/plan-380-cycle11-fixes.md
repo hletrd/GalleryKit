@@ -154,7 +154,7 @@ Acceptance:
   - `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
   - `npm run typecheck --workspace=apps/web`: passed.
   - `BASE_URL=https://gallery.atik.kr npm run build --workspace=apps/web`: passed. Build logged the existing sitemap fallback because no local MySQL was listening on `127.0.0.1:3306`; static generation completed successfully.
-  - `npm test --workspace=apps/web`: passed 344 files / 3185 tests, with 2 skipped files / 4 skipped tests.
+  - `npm test --workspace=apps/web`: passed 345 files / 3185 tests, with 2 skipped files / 4 skipped tests.
   - `npm run test:e2e --workspace=apps/web`: not required for this cycle because no browser-flow behavior was changed beyond source/unit-covered labels and shortcut metadata; skipped to avoid starting more local DB/browser infrastructure under the cycle-11 MySQL container constraint.
 - [ ] Commit/push complete.
 - [ ] Per-cycle deploy complete.
