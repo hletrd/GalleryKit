@@ -12,29 +12,34 @@ Scope covered: `apps/web/src/lib/{process-image.ts, color-detection.ts, image-qu
 settings-hash.ts, data.ts, view-retention.ts, maintenance-scheduler.ts,
 admin-backfill-runner.ts, image-url.ts, constants.ts}` (no separate `image-base-url.ts`
 file exists — that logic lives in `image-url.ts`/`constants.ts`/`content-security-policy.ts`),
-`apps/web/src/app/actions/*`, `apps/web/scripts/*`, plus deep extra-scrutiny reads of the
-diffs for all seven freshly-landed peer commits (`14d31ea4`, `9cd8d3e8`, `d8fcb3d6`,
-`57e2c5d3`, `4d37daa4`, `05fa5cd1`, `3acf638a`) and their touched files
+`apps/web/src/app/actions/*` (all 13 files), `apps/web/scripts/*`, plus deep extra-scrutiny
+reads of the diffs for all seven freshly-landed peer commits (`14d31ea4`, `9cd8d3e8`,
+`d8fcb3d6`, `57e2c5d3`, `4d37daa4`, `05fa5cd1`, `3acf638a`) and their touched files
 (`request-origin.ts`, `db/index.ts`, `content-security-policy.ts`, `drizzle.config.ts`,
-`run-e2e-server.mjs`, `auth.ts`, `topics.ts`).
+`run-e2e-server.mjs`, `auth.ts`, `topics.ts`). Two full-file deep-dive passes were delegated
+to forked sub-reviews (inheriting this session's context) covering, respectively,
+`{image-queue.ts, admin-backfill-runner.ts, process-image.ts, color-detection.ts}` and the
+remaining 11 `app/actions/*` files not read personally; every finding they surfaced was
+independently re-verified against the actual source before inclusion below (none taken on
+faith) — see the "Final sweep" section for what was confirmed vs. found clean.
 
 Sanity-checked every finding below against `.context/plans/deferred-carry-forward.md`,
-`.context/plans/cycle-{1..98}-*-deferred.md` (grep sweep), and the sibling
+a full-text grep across all `.context/plans/cycle-*-deferred.md` files, and the sibling
 `cycle-7-2026-07-07/{security-reviewer,document-specialist,perf-reviewer,verifier}.md`
-reports already in this folder — none of the four findings below overlap or duplicate an
-already-known/deferred item.
+reports already in this folder — none of the findings below overlap or duplicate an
+already-known/deferred item or another specialist's report in this cycle.
 
 Tooling note: `lsp_diagnostics` (typescript-language-server) is not installed in this
 environment; substituted the project's own blocking type gate, `npm run typecheck
 --workspace=apps/web` (from `apps/web/`), which passed with exit 0 (both `typecheck:app`
-and `typecheck:scripts`, including `next typegen`) — no type errors on the full tree,
+and `typecheck:scripts`, including `next typegen`) — no type errors anywhere in the tree,
 which includes every file cited below.
 
 ## By Severity
 
 - CRITICAL: 0
 - HIGH: 1
-- MEDIUM: 2
+- MEDIUM: 3
 - LOW: 2
 - INFO: 0
 
@@ -93,15 +98,13 @@ the function. Apply the same change to `dumpDatabase()`'s single-lock finally bl
 
 Confidence: High — confirmed by direct read of every `RELEASE_LOCK`/`conn.release()` call
 site in the file; the unsafe pattern is 100% consistent throughout, and the fix pattern to
-mirror already exists (and was reviewed) elsewhere in this exact commit batch.
-Needs-manual-validation: none — this is a straightforward code-reading confirmation, not a
-runtime-dependent hypothesis.
+mirror already exists (and was reviewed) elsewhere in this exact commit batch. Confirmed,
+not a hypothesis.
 
 ### C7-CQ2 — `logout()` skips server-side session revocation during a restore-maintenance window; only the cookie is cleared
 [SEV: MEDIUM | CONF: High | logic/security edge case]
 
-File: `apps/web/src/app/actions/auth.ts:279-294` (introduced/changed by peer commit
-`3acf638a`).
+File: `apps/web/src/app/actions/auth.ts:279-294` (changed by peer commit `3acf638a`).
 
 Issue:
 ```
@@ -122,8 +125,8 @@ redirect(localizePath(locale, '/admin'));
 Prior to `3acf638a`, `logout()` always attempted `db.delete(sessions)...` for the presented
 token. Now, whenever `isRestoreMaintenanceActive()` is true (restore in progress) — or, more
 narrowly, whenever `acquireAdminMutationSlot()` returns `acquired: false` (which per
-`admin-mutation-barrier.ts` only happens while `state.exclusiveActive` is set, i.e. exactly
-during that same restore window) — the whole block is skipped: no audit log, and critically,
+`admin-mutation-barrier.ts` only happens while `state.exclusiveActive` is set, i.e. during
+that same restore window) — the whole block is skipped: no audit log, and critically,
 **no `DELETE FROM sessions`**. The cookie is still cleared and the browser is still
 redirected, so the user *believes* they are logged out.
 
@@ -132,37 +135,139 @@ stateful: after the HMAC/timing-safe signature check, it does
 `db.query.sessions.findFirst({ where: eq(sessions.id, tokenHash) })` and only rejects the
 token if that DB row is absent or expired. The DB row — not the cookie — is what a "logout"
 is supposed to invalidate. During a restore-maintenance window, the raw session token value
-(if an attacker or a second browser/device already captured it, e.g. via device access,
-un-encrypted network capture, or a browser-extension/log leak — the `httpOnly` cookie
-attribute blocks JS-based XSS reads but not these other vectors) remains valid for
-admin-authenticated requests server-side for up to 24 hours (the token's own max age),
-completely independent of the user having just clicked "Logout." This is exactly the
-scenario a manual "someone may have my session, log me out now" logout is meant to close,
-and it silently no-ops during the one window (an active DB restore) where an admin is most
-likely to be paying close attention to the system's state.
+(if an attacker or a second browser/device already captured it — the `httpOnly` cookie
+attribute blocks JS-based XSS reads but not device access, unencrypted-network capture, or a
+browser-extension/log leak) remains valid for admin-authenticated requests server-side for
+up to 24 hours (the token's own max age), completely independent of the user having just
+clicked "Logout." This is exactly the scenario a manual "someone may have my session, log me
+out now" logout is meant to close, and it silently no-ops during the one window (an active
+DB restore) where an admin is most likely to be paying close attention to the system's
+state.
 
 Fix: `logout()`'s session *deletion* doesn't need the admin-mutation-barrier's "whole body
 must complete before the restore imports" guarantee the way a multi-statement CREATE/UPDATE
-does — it's a single idempotent `DELETE ... WHERE id = ?` against a table that is not
-being restructured mid-restore in a way that a delete would corrupt (unlike, say, a topic
-rename). Consider deleting the session unconditionally (matching pre-`3acf638a` behavior)
-while still gating only the *audit log write* (or nothing) behind the maintenance check, or
-at minimum, if the mutation slot is unavailable, still perform the single-row session
-delete outside the barrier (it's a delete of a row the restore doesn't reference), and log
-an explicit warning so the gap is at least observable in production logs rather than
-silent.
+does — it's a single idempotent `DELETE ... WHERE id = ?` against a table the restore does
+not restructure in a way a delete could corrupt (unlike a topic rename). Consider deleting
+the session unconditionally (matching pre-`3acf638a` behavior) while still gating only the
+*audit log write* behind the maintenance check, or at minimum, if the mutation slot is
+unavailable, still perform the single-row session delete outside the barrier and log an
+explicit warning so the gap is at least observable in production rather than silent.
 
-Confidence: High that this is the code's actual behavior (read directly, confirmed
-`verifySessionToken`'s DB-authoritative check, confirmed `acquireAdminMutationSlot`'s
-`acquired: false` only occurs during `exclusiveActive`, i.e. restore). Medium on real-world
-exploitability given the narrow, operator-initiated, short-lived window this requires — but
-the failure mode (a security control silently no-ops with no error surfaced) is real
-regardless of the window's rarity. Not previously reported by the sibling
-`security-reviewer.md`/`document-specialist.md` reports in this same cycle folder (checked;
-they note the mutation-barrier ordering is doc-consistent but don't examine the DB-deletion
-skip itself).
+Confidence: High that this is the code's actual behavior (read directly; confirmed
+`verifySessionToken`'s DB-authoritative check; confirmed `acquireAdminMutationSlot`'s
+`acquired: false` only occurs during `exclusiveActive`, i.e. restore). Independently
+cross-found by a second, separately-dispatched review pass over the `app/actions/` files,
+which strengthens confidence this is a real, non-hypothetical gap rather than a misreading.
+Real-world exploitability is bounded by the narrow, operator-initiated, short-lived window
+this requires — but a security control silently no-op'ing with no error surfaced is real
+regardless of the window's rarity.
 
-### C7-CQ3 — `restore-maintenance-recovery.ts` is dead code, duplicating (and risking silent drift from) the shipped `.mjs` recovery CLI and the canonical `restore-maintenance-durable.ts` logic
+### C7-CQ3 — `searchImages()`'s tag-match branch returns an incomplete `tag_names` aggregate (only the matching tag, not the image's full tag set)
+[SEV: MEDIUM | CONF: High | logic/SQL-semantics bug]
+
+File: `apps/web/src/lib/data.ts:1693-1704`.
+
+Issue: the tag-match branch of the search fan-out is:
+```
+db.select(searchFieldsWithTagNames)   // tag_names: tagNamesAgg = GROUP_CONCAT(DISTINCT tags.name ORDER BY tags.name)
+    .from(images)
+    .leftJoin(topics, eq(images.topic, topics.slug))
+    .innerJoin(imageTags, eq(images.id, imageTags.imageId))
+    .innerJoin(tags, eq(imageTags.tagId, tags.id))
+    .where(and(
+        eq(images.processed, true),
+        containsLike(tags.name, searchTerm),   // <-- filters the SAME `tags` join used for aggregation
+        ...
+    ))
+    .groupBy(...searchGroupByColumns)   // groups by images.id (+ its scalar columns); does not include tags.name
+    ...
+```
+`tagNamesAgg`'s contract everywhere else it's used (`getImagesLite`, `getImagesLitePage`,
+`getAdminImagesLite`, `getImages` — the "Perf/tag_names aggregation" note in CLAUDE.md and
+the `data-tag-names-sql.test.ts` fixture) is "the full, alphabetically-ordered list of every
+tag on this image." Here, the `WHERE tags.name LIKE searchTerm` clause filters the
+`imageTags`/`tags` JOIN rows themselves *before* `GROUP BY images.id` runs — so only the
+tag row(s) that matched the search term survive into the join result, and `GROUP_CONCAT`
+aggregates over that already-filtered set. For an image with tags `beach, sunset, vacation`
+searched via the term `"beach"`, this branch's `tag_names` for that row will be exactly
+`"beach"`, not `"beach,sunset,vacation"` — silently diverging from what the exact same
+image would return via any other listing query.
+
+This is user-visible: `getPhotoResultLabel()` (`apps/web/src/lib/photo-title.ts:85-100`),
+which builds both the visible label AND the `aria-label` for each search result
+(`apps/web/src/components/search.tsx:71-72,85`), falls back to a tag-derived humanized title
+via `getPhotoDisplayTitleFromTagNames({ tag_names: image.tag_names })` whenever a photo has
+no meaningful title. An untitled photo found via this branch (i.e. it matched *because* one
+of its tags matched the search term) gets a needlessly truncated result label/aria-label
+showing only the matching tag, not its full tag set — a real, if narrow, regression in
+result-label completeness/accessibility, notably in the same area (`4d37daa4`,
+"clarify search and collection cues... make duplicate search results distinguishable") this
+review batch was actively improving.
+
+Fix: decouple the tag-name filter from the tag-name aggregation, the same way
+`buildTagFilterCondition` does it for the main gallery listings — match candidate image ids
+via a subquery/`EXISTS` on `tags.name LIKE searchTerm` (or a separate first-pass id lookup),
+then LEFT JOIN the full `imageTags`/`tags` set (unfiltered) for the `GROUP_CONCAT` so
+`tag_names` always reflects the complete tag list regardless of which tag caused the match.
+
+Confidence: High — confirmed via direct SQL-semantics trace of the JOIN/WHERE/GROUP BY
+shape (the `WHERE` predicate on `tags.name` runs before `GROUP BY`, restricting which tag
+rows are visible to the aggregate for that group) and via the concrete consumer path
+(`getPhotoResultLabel` → `search.tsx`) that renders the truncated value to real users.
+
+### C7-CQ4 — CSRF-hardening `getConfiguredBaseOrigin()` only reads `process.env.BASE_URL`; misses the `site-config.json` fallback the rest of the app treats as equally canonical
+[SEV: MEDIUM | CONF: Medium-High | inconsistent-invariant / config-drift]
+
+Files: `apps/web/src/lib/request-origin.ts:45-48` vs. `apps/web/src/lib/constants.ts:26` and
+`apps/web/scripts/ensure-site-config.mjs:12,23`.
+
+Issue: `request-origin.ts`'s new same-origin hardening (added in `57e2c5d3`) is:
+```
+function getConfiguredBaseOrigin() {
+    const configured = process.env.BASE_URL?.trim();
+    return configured ? toOrigin(configured) : null;
+}
+```
+— it only consults the `BASE_URL` environment variable. Everywhere else the app resolves its
+"canonical base URL," it treats `BASE_URL` and `site-config.json`'s `url` field as
+equally-valid, interchangeable sources: `constants.ts:26` —
+`export const BASE_URL = process.env.BASE_URL || siteConfig.url;` — and the production
+build-time gate itself, `ensure-site-config.mjs:12,23` —
+`const configuredUrl = String(process.env.BASE_URL || siteConfig.url || '').trim(); ...
+if (isProductionBuild && !configuredUrl) { ...exit(1) }` — which only requires *one* of the
+two to be set, and CLAUDE.md's deployment checklist documents `site-config.json`'s `url`
+field as "canonical base URL used when `BASE_URL` is unset" without flagging that the newer
+CSRF hardening specifically needs the env var, not the file.
+
+Concrete failure scenario: an operator follows the documented, supported path of setting
+only `src/site-config.json`'s `url` field (not the `BASE_URL` env var) — this passes the
+production build gate cleanly and every other canonical-URL consumer (OG, JSON-LD, sitemap)
+resolves correctly. But `hasTrustedSameOrigin()`'s new BASE_URL-preferred check silently
+never engages for that deployment; the app falls through to the pre-`57e2c5d3` Host/
+X-Forwarded-Host-header-based origin resolution instead. This is not a new hole — the
+security reviewer's own analysis in this cycle already establishes the fallback path is
+still correct under the shipped nginx topology — but it means the specific hardening this
+commit's own directive calls for ("Keep BASE_URL configured on production deploys so
+same-origin checks do not depend on forwarded host/proto headers") silently does not apply
+to a deployment configured exactly as CLAUDE.md's own checklist describes, with no build-time
+warning that the two "canonical URL" notions have diverged for this one code path.
+
+Fix: either make `getConfiguredBaseOrigin()` fall back to `siteConfig.url` the same way
+`constants.ts`'s `BASE_URL` does (importing the shared site-config value, mirroring the
+`sanitizeImageBaseUrlSafely` shared-helper pattern already used for `IMAGE_BASE_URL`), or —
+if the env var is intentionally required specifically for this hardening (e.g. to avoid a
+build-time-inlined value being wrong post-deploy) — add an explicit `console.warn` at
+startup when `siteConfig.url` is configured but `process.env.BASE_URL` is not, so an
+operator relying on the file-only path knows the origin-check hardening is not active for
+their deployment.
+
+Confidence: Medium-High — the code divergence itself is confirmed directly (two different
+"is BASE_URL configured" predicates with different fallback behavior); the severity is
+capped at MEDIUM (not HIGH) because the fallback path remains fail-closed/correct per the
+security reviewer's independent analysis, so this is a missed-hardening/inconsistency
+finding rather than a new exploitable hole.
+
+### C7-CQ5 — `restore-maintenance-recovery.ts` is dead code, duplicating (and risking silent drift from) the shipped `.mjs` recovery CLI and the canonical `restore-maintenance-durable.ts` logic
 [SEV: MEDIUM | CONF: High | dead-code / DRY-drift-risk]
 
 Files:
@@ -170,15 +275,15 @@ Files:
   delegates to `restore-maintenance-durable.ts`'s real functions, but is **never invoked by
   anything**: not `package.json`'s `restore:maintenance` script (which runs
   `restore-maintenance-recovery.mjs` instead), not the Dockerfile, not any test. Confirmed
-  via `grep -rn "restore-maintenance-recovery"` across the whole repo — only the `.mjs`
-  sibling and its own tests reference it.
+  via a repo-wide `grep -rn "restore-maintenance-recovery"` — only the `.mjs` sibling and
+  its own tests reference it.
 - `apps/web/scripts/restore-maintenance-recovery.mjs` (96 lines) — the file actually wired
   up in `package.json` (`"restore:maintenance": "node scripts/restore-maintenance-recovery.mjs"`)
   and cited by CLAUDE.md's incident-recovery runbook. It hand-reimplements the exact marker
   path resolution, existence check, and clear logic that already lives in
   `apps/web/src/lib/restore-maintenance-durable.ts:16-30` (`getRestoreMaintenanceMarkerLocation`)
   — presumably because a plain `node scripts/*.mjs` invocation can't import TypeScript
-  without a build/tsx step, mirroring the same "no tsx in the production runtime container"
+  without a build/tsx step, mirroring the "no tsx in the production runtime container"
   constraint documented elsewhere in CLAUDE.md for the backfill sidecars.
 
 Issue: the `.mjs` and the `.ts` copies currently match byte-for-byte in logic (same
@@ -188,7 +293,7 @@ the canonical intent is not the one actually shipped/run. The only existing regr
 `cycle-72-source-contracts.test.ts`, pins the `.mjs`'s content via a handful of `expect(source
 ).toContain(...)` substring checks (env var names, one ternary literal) — it does not import
 both implementations and assert behavioral equivalence across inputs. A future change to
-`restore-maintenance-durable.ts`'s path/filename/fail-open-vs-closed logic (the file every
+`restore-maintenance-durable.ts`'s path/filename/fail-open-vs-closed logic (the version every
 other consumer — `assertNoDurableRestoreMaintenanceForScript`, the restore flow itself —
 actually uses) is very likely to be made there and NOT mirrored into the standalone `.mjs`,
 since the `.ts` sibling (which a maintainer might reasonably edit first, assuming it's live)
@@ -208,20 +313,20 @@ CI instead of failing silently in production.
 
 Confidence: High — confirmed dead via exhaustive repo-wide grep (only self-references and
 the wired `.mjs`'s own test reference it); confirmed the `.mjs`/`.ts`/`durable.ts` logic is
-presently identical via direct line-by-line comparison. The DRY-drift risk is a forward-looking
-maintainability concern (not a currently-manifesting bug), rated MEDIUM because the blast
-radius (a mis-targeted incident-recovery command with no error) matches an area CLAUDE.md
-itself flags as previously having caused real operational pain.
+presently identical via direct line-by-line comparison. The DRY-drift risk is a
+forward-looking maintainability concern (not a currently-manifesting bug), rated MEDIUM
+because the blast radius (a mis-targeted incident-recovery command with no error) matches an
+area CLAUDE.md itself flags as previously having caused real operational pain.
 
 Related, smaller-scale instance of the same "same logic, hand-copied across files" pattern
 (not separately filed, noise-reduction): the exact "is this DB host local" +
 "DB_SSL_CA required for non-local TLS" check is now independently duplicated in three
 places — `apps/web/src/db/index.ts`, `apps/web/drizzle.config.ts`, and
 `apps/web/scripts/mysql-connection-options.js` — all three currently agree, but nothing
-enforces that beyond manual review (the `05fa5cd1` commit added the drizzle-config copy
-using the same handwritten predicate rather than importing a shared helper).
+enforces that beyond manual review (`05fa5cd1` added the drizzle-config copy using the same
+handwritten predicate rather than importing a shared helper).
 
-### C7-CQ4 — Dead/unreachable branches in `searchImages()`'s tag/alias fan-out
+### C7-CQ6 — Dead/unreachable branches in `searchImages()`'s tag/alias fan-out
 [SEV: LOW | CONF: High | dead-code]
 
 File: `apps/web/src/lib/data.ts:1660-1713`.
@@ -242,11 +347,11 @@ const [tagResults, aliasResults] = remainingLimit <= 0
     ...]);
 ```
 unreachable dead code. It doesn't cause incorrect output (the `Promise.all` branch always
-runs, which is in fact always correct given the guard above), but it's confusing:
-a future maintainer editing this function may reasonably assume `remainingLimit` can be
-`<= 0` here and preserve/extend dead logic, or — worse — may assume the early-return guard
-at 1660 is *not* exhaustive and waste time looking for a path that reaches the dead branch.
-The separate `aliasRemainingLimit` variable (identical to `remainingLimit` in every case)
+runs, which is in fact always correct given the guard above), but it's confusing: a future
+maintainer editing this function may reasonably assume `remainingLimit` can be `<= 0` here
+and preserve/extend dead logic, or — worse — may assume the early-return guard at 1660 is
+*not* exhaustive and waste time looking for a path that reaches the dead branch. The
+separate `aliasRemainingLimit` variable (identical to `remainingLimit` in every case)
 compounds the confusion; it reads as if it were meant to diverge from `remainingLimit` (per
 the adjacent `C3-PR-01` comment discussing the two queries' limits), but never does.
 
@@ -278,18 +383,20 @@ guard at line 1660 makes both dead branches provably unreachable, not just unlik
 ## Final sweep for commonly-missed issues
 
 Confirmed read/checked (not just grepped) for correctness issues, with no NEW findings
-beyond the four above:
+beyond the six above:
 
 - `apps/web/src/lib/{image-queue.ts, admin-backfill-runner.ts, process-image.ts,
-  color-detection.ts}` — full deep-dive delegated to a forked sub-review (same model,
-  inherited context) covering retry/backoff off-by-ones, concurrency-clamp arithmetic
-  (independently re-verified `resolveImageQueueConcurrency`/`IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS`
-  myself: `reserved = max(3, ceil(10/2)) = 5`, `cap = max(1, floor((10-5)/2)) = 2`, matching
-  CLAUDE.md's documented "effective cap 2 at pool 10" exactly, including the small-pool
-  edge case `poolLimit<=2` which still clamps to a safe minimum of 1, never negative/NaN),
-  Promise handling, resource cleanup, the NCLX ISOBMFF box-walker's bounds/depth safety, and
-  dead code. Result: no new substantive findings — this code carries per-line citations to
-  the specific prior review cycle that hardened it, and the lineage holds.
+  color-detection.ts}` — full deep-dive delegated to a forked sub-review, then spot-verified
+  personally on the highest-risk areas (the atomic-write/rollback machinery in
+  `processImageFormats`, `saveOriginalAndGetMetadata`, the GPS-strip fail-closed tiers in
+  `stripGpsFromOriginal`, and independently re-derived the concurrency-clamp arithmetic
+  myself: `IMAGE_QUEUE_RESERVED_LIVE_CONNECTIONS(10) = max(3, ceil(10/2)) = 5`,
+  `resolveImageQueueConcurrency` cap `= max(1, floor((10-5)/2)) = 2`, matching CLAUDE.md's
+  documented "effective cap 2 at pool 10" exactly, including the small-pool edge case
+  (`poolLimit<=2`) which still clamps to a safe minimum of 1, never negative/NaN). Also
+  independently checked the NCLX ISOBMFF walker's `MAX_DEPTH = 5` / `depth > MAX_DEPTH`
+  bound. Result: no new substantive findings — this code carries per-line citations to the
+  specific prior review cycle that hardened it, and the lineage holds.
 - `apps/web/src/lib/{settings-hash.ts, view-retention.ts, maintenance-scheduler.ts}` — read
   in full personally. All three are correct: the settings-hash single-authoritative-mapper
   refactor (`C6-02`) is sound; view-retention's chunked-delete retention sweep has no
@@ -299,19 +406,21 @@ beyond the four above:
 - `apps/web/src/lib/data.ts` — read the cursor-pagination helpers
   (`normalizeImageListCursor`, `buildCursorCondition`), the prev/next adjacency query
   builder (`getImageWithSelectFields`), `getImagesLitePage`, `getSharedGroup`,
-  `getImageByShareKey`, and `searchImages` in full. Only the one dead-code finding above;
-  everything else (including the deliberate rows/totalCount race documented at `C2-36`) is
-  correct as designed.
+  `getImageByShareKey`, and `searchImages` in full personally. Two findings above
+  (C7-CQ3, C7-CQ6); everything else (including the deliberate rows/totalCount race
+  documented at `C2-36`) is correct as designed.
 - `apps/web/src/app/actions/{auth.ts, topics.ts}` — read in full personally (the two files
-  touched by the freshly-landed `3acf638a`). One HIGH-adjacent finding above (C7-CQ2) plus
-  the two minor observations. The `withTopicRouteMutationLock` connection-destroy-on-failure
-  fix itself is correct and was the template for the C7-CQ1 gap found in its sibling file.
+  touched by the freshly-landed `3acf638a`). One finding above (C7-CQ2) plus the two minor
+  observations. The `withTopicRouteMutationLock` connection-destroy-on-failure fix itself is
+  correct and was the template used to find the C7-CQ1 gap in its sibling file.
 - `apps/web/src/app/actions/{images.ts, tags.ts, admin-users.ts, public.ts, sharing.ts,
   seo.ts, collections.ts, embeddings.ts, lr-tokens.ts, settings.ts, admin-backfill.ts}` —
-  delegated to a second forked sub-review for full-file reads; `admin-backfill.ts` also
-  spot-checked personally (clean — correctly delegates DB-mutation fencing to
+  delegated to a second forked sub-review for full-file reads (11 files); `admin-backfill.ts`
+  also spot-checked personally (clean — correctly delegates DB-mutation fencing to
   `admin-backfill-runner.ts`'s own advisory lock, doesn't need the foreground mutation-slot
-  guard since the actual writes happen in the background runner).
+  guard since the actual writes happen in the background runner). No findings reported in
+  this batch beyond confirming the upload-quota TOCTOU claim/rollback ordering in
+  `images.ts` is correct on every early-return path.
 - `apps/web/src/lib/{request-origin.ts, constants.ts, image-url.ts,
   content-security-policy.ts}`, `apps/web/src/db/index.ts`, `apps/web/drizzle.config.ts` —
   read in full personally (all touched by peer commits `d8fcb3d6`/`57e2c5d3`/`05fa5cd1`/
@@ -321,13 +430,10 @@ beyond the four above:
   between server (`constants.ts`, stamped verbatim into `data-image-base`) and client
   (`image-url.ts` re-sanitizing the already-clean value, a harmless idempotent no-op), and
   matches the pre-existing `buildCspSafely` degrade-not-500 design philosophy — not a new
-  gap. `request-origin.ts`'s `BASE_URL`-preferred-origin logic traced end-to-end; no logic
-  bug (this is more the security reviewer's lane and their report already covers it in depth
-  with no disagreement from this read).
+  gap. One finding above (C7-CQ4) on `request-origin.ts`'s `BASE_URL`-only check.
 - `apps/web/scripts/{run-e2e-server.mjs, restore-maintenance-recovery.mjs,
-  restore-maintenance-recovery.ts, mysql-connection-options.js, ensure-site-config.mjs,
-  admin-backfill.ts (action, not script — see above)}` — read in full personally. One
-  MEDIUM finding above (C7-CQ3); the rest are clean.
+  restore-maintenance-recovery.ts, mysql-connection-options.js, ensure-site-config.mjs}` —
+  read in full personally. One finding above (C7-CQ5); the rest are clean.
 - Did not deep-read `apps/web/scripts/{check-action-origin.ts, check-api-auth.ts,
   check-public-route-rate-limit.ts}` line-by-line (1463/208/998 lines of lint-gate meta-
   tooling with their own dedicated fixture test suites per CLAUDE.md, and none were touched
@@ -340,7 +446,9 @@ beyond the four above:
 
 ## Recommendation
 
-**REQUEST CHANGES** — one HIGH-confidence HIGH-severity finding (C7-CQ1) plus a
-HIGH-confidence MEDIUM-severity finding (C7-CQ2) that should be fixed before this batch is
-considered fully hardened; the two LOW/MEDIUM dead-code/duplication items (C7-CQ3, C7-CQ4)
-are good opportunistic cleanup but not release-blocking on their own.
+**REQUEST CHANGES** — one HIGH-confidence HIGH-severity finding (C7-CQ1: leaked advisory
+lock on transient RELEASE_LOCK failure in the backup/restore path) plus three
+HIGH/Medium-High-confidence MEDIUM-severity findings (C7-CQ2 session-revocation gap,
+C7-CQ3 incomplete search tag_names, C7-CQ4 CSRF-hardening config mismatch) should be fixed
+before this batch is considered fully hardened. The two dead-code/duplication items
+(C7-CQ5, C7-CQ6) are good opportunistic cleanup but not release-blocking on their own.
