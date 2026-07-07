@@ -1,79 +1,147 @@
-# GalleryKit Product Marketer Reviewer - Cycle 9
+# GalleryKit Product Marketer Reviewer - Cycle 11
 
 Date: 2026-07-07
 Reviewed workspace: `/Users/hletrd/flash-shared/gallery`
 Lane: product-marketer-reviewer
-Prompt: PROMPT 1 deep review from product messaging, user-facing copy, information scent, positioning consistency, docs/readme communication, onboarding, and photographer/operator expectations.
-
-The local reviewer prompt at `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` was used for its evidence-first product review posture. Its BurstPick-specific product assumptions were not applied to GalleryKit.
+Prompt adaptation: used `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` only for its evidence-first product/positioning skepticism. BurstPick-specific market, pricing, AI-culling, and desktop-app assumptions were not applied.
 
 ## Scope And Inventory
 
-I built the review inventory before filing findings.
+I inventoried the claim surfaces before filing findings.
 
-- Control docs read: `AGENTS.md`, `CLAUDE.md`.
-- Product docs read: `README.md`, `apps/web/README.md`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`.
-- README inventory checked from tracked files: `README.md`, `apps/web/README.md`, `apps/web/__test_fixtures__/color/README.md`, `.context/plans/README.md`, `.context/plans/photographer-r22/README.md`.
-- Localized copy read: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-- Public UI/source reviewed: localized public home/topic/photo/share/group-share/smart-collection/map/timeline/year/privacy/about pages under `apps/web/src/app/[locale]/(public)/`, public metadata/manifest/robots/sitemap/feed/OG routes, and public components including `search.tsx`, `similar-photos.tsx`, `photo-viewer.tsx`, `footer.tsx`, `nav.tsx`, `map/*`, `masonry-card.tsx`, and `wide-gamut-hint.tsx`.
-- Admin/operator UI/source reviewed: admin login, dashboard, categories, tags, SEO, settings, tokens, password, users, DB, analytics, protected shell, and admin nav under `apps/web/src/app/[locale]/admin/` plus `apps/web/src/components/admin-*`, `image-manager.tsx`, `upload-dropzone.tsx`, `bulk-edit-dialog.tsx`, and related server actions.
-- Product-claim source truth reviewed: semantic search routes/config/model/backfill, similar-photo route/UI, upload-token route/actions, DB backup/restore actions, analytics data/view tracking, SEO/OG data, privacy-sensitive data guards, smart-collection parser/data/routes/actions, storage abstraction, deploy scripts, and site config.
+- Control docs: `AGENTS.md`, `CLAUDE.md`.
+- Public/operator docs: `README.md`, `apps/web/README.md`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`.
+- Visible product copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, live demo pages at `https://gallery.atik.kr/en`, `/en/map`, `/en/timeline`, `/en/about-gallerykit`, `/en/privacy`.
+- Public UI/source: `apps/web/src/app/[locale]/(public)/**`, `components/nav-client.tsx`, `footer.tsx`, `search.tsx`, `photo-viewer.tsx`, `info-bottom-sheet.tsx`, `similar-photos.tsx`, `on-this-day-widget.tsx`, map/timeline components.
+- Admin/operator UI/source: admin nav, categories, settings, tokens, DB, analytics, topic actions, semantic-search settings, deploy/init scripts.
+- Claim verification paths: semantic search routes/config/model gates/backfill, similar-photo route/UI, upload-token API, privacy/analytics data access, smart-collection routes/actions, site config, deploy docs.
 
-The review was repository-wide for files relevant to product promise, user-facing copy, operator guidance, onboarding, SEO/OG, i18n, and support expectations. Generated/vendor outputs (`node_modules`, `.next`, `.git`, `.claude/worktrees`) were not treated as live product surfaces.
+Generated/vendor outputs and unrelated dirty review/plan files already present in the worktree were not treated as live product surfaces.
 
 ## Findings
 
-### PMR-C9-01 - Smart-collection delete guidance points admins to a nonexistent remediation path
+### PMR-C11-01 - Map and timeline are marketed as visitor experiences but are effectively undiscoverable
 
 Severity: Medium
 Confidence: High
-Status: Confirmed
+Validation: Confirmed
 
 Evidence:
 
-- `CLAUDE.md:162` says smart collections have a public read route and hardened server actions, but "no admin UI or API surface invokes them yet"; rows are currently authored by direct DB insert and the docs warn not to document authoring as an operable admin feature.
-- `apps/web/src/app/actions/topics.ts:461-470` scans every `smart_collections.query_json` row while deleting a category and throws `TopicReferencedBySmartCollectionError` when a smart-collection predicate references the category slug.
-- `apps/web/src/app/actions/topics.ts:508-514` maps that exception to `t('cannotDeleteCategoryReferencedByCollection')`.
-- `apps/web/messages/en.json:505-506` tells admins: "Remove this category from smart collections before deleting it."
-- `apps/web/messages/ko.json:505-506` tells Korean admins: "이 카테고리를 참조하는 스마트 컬렉션을 먼저 수정해 주세요."
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:127-138` displays the returned error directly as a toast; there is no additional remediation link or operator context.
-- `apps/web/src/components/admin-nav.tsx:15-25` exposes Dashboard, Categories, Tags, SEO, Settings, Tokens, Password, Users, DB, and Analytics, but no Collections entry.
+- `README.md:36` promises the visitor experience includes "map/timeline browsing."
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:68-115` implements a public map page.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:61-238` implements a public timeline page.
+- `apps/web/src/components/nav-client.tsx:128-164` renders only topic links in the primary public navigation.
+- `apps/web/src/components/nav-client.tsx:167-191` renders only search, theme, and locale controls after the topics.
+- `apps/web/src/components/footer.tsx:42-60` links About, Privacy, GitHub, and Admin, but not Map or Timeline.
+- `apps/web/src/components/on-this-day-widget.tsx:24` returns `null` when there are no same-day historical photos; its Timeline link exists only inside that optional widget at `on-this-day-widget.tsx:39-44`.
+- Live demo check on 2026-07-07: `https://gallery.atik.kr/en` returned 200, while selectors `a[href="/en/map"]` and `a[href="/en/timeline"]` were absent from the rendered HTML. `/en/map` and `/en/timeline` themselves returned 200.
+
+Failure scenario / user impact:
+
+A README or demo visitor sees "map/timeline browsing" positioned as a visitor capability, opens the live gallery, and has no visible path to either feature. Timeline may appear only on calendar days where `OnThisDayWidget` has matching photos; Map has no normal public entry point at all. That makes the feature claim look aspirational even though the routes work.
+
+Concrete fix:
+
+Add persistent public navigation affordances for Map and Timeline. A low-risk option is footer links beside GalleryKit/Privacy, with optional primary-nav links when data exists. If the intent is to keep them secondary, mention them on `/about-gallerykit` with direct links and clarify that the map only shows admin-published GPS topics.
+
+### PMR-C11-02 - The production semantic-search differentiator is buried behind an unlabeled icon
+
+Severity: Medium
+Confidence: High
+Validation: Confirmed
+
+Evidence:
+
+- `README.md:48` positions semantic search as a notable feature: natural-language search in English and Korean plus similar photos.
+- `apps/web/README.md:67-78` repeats the production CLIP capability and operator activation requirements.
+- `apps/web/messages/en.json:826-830` says GalleryKit offers "operator-controlled search" and names semantic search as an operator-controlled feature.
+- `apps/web/src/components/search.tsx:369-383` renders the closed search affordance as an icon-only button; "Search photos" is only an `aria-label`.
+- `apps/web/src/components/search.tsx:519-555` shows the "Semantic search" switch and production caveat only after the user opens the modal.
+- Live demo check on 2026-07-07: POST `https://gallery.atik.kr/api/search/semantic` with `Origin: https://gallery.atik.kr` and `{"query":"TWS","topK":5}` returned HTTP 200 with real photo results, confirming the demo supports the feature. The home page still exposes no visible "Search" or "Semantic search" text until the icon modal is opened.
+
+Failure scenario / user impact:
+
+The most differentiated visitor feature is working on the demo, but a first-time evaluator has to infer that a small icon opens search and then notice a switch inside the modal. Product-market fit suffers because the strongest "why this gallery is different" proof is hidden behind an expert-interface pattern.
+
+Concrete fix:
+
+When `semanticSearchMode === 'production'`, make the nav control visibly say `Search` or `Search photos`, and add a compact hint in the open modal before typing, such as `Keyword or semantic search`. A stronger product-marketing fix is an empty-query suggestion row with example Korean/English prompts drawn from real gallery content.
+
+### PMR-C11-03 - "Similar photos" is documented as a visitor feature but is missing from the mobile photo surface
+
+Severity: Medium
+Confidence: High
+Validation: Confirmed
+
+Evidence:
+
+- `README.md:48` and `apps/web/README.md:67` advertise `"similar photos"` as part of the semantic-search feature.
+- `apps/web/messages/en.json:830` describes "similar photos" as an operator-controlled feature.
+- `apps/web/src/components/photo-viewer.tsx:747-755` states the info sidebar is hidden on mobile and only shown at `lg+`.
+- `apps/web/src/components/photo-viewer.tsx:797-800` mounts `<SimilarPhotos>` only inside that desktop info sidebar.
+- `apps/web/src/components/info-bottom-sheet.tsx:353-560` is the mobile expanded info surface; it includes tags, description, color details, histogram, EXIF, capture time, GPS/admin rows, and downloads, but there is no `<SimilarPhotos>` mount.
+- `rg -n "SimilarPhotos|similarPhotos|semanticSearchMode" apps/web/src/components/info-bottom-sheet.tsx apps/web/src/components/lightbox.tsx apps/web/src/components/photo-viewer.tsx` finds `SimilarPhotos` only in `photo-viewer.tsx`.
+
+Failure scenario / user impact:
+
+A mobile visitor opens a photo on a production semantic-search gallery and taps Info. They can inspect metadata, histogram, and downloads, but the advertised image-to-image discovery feature is not present. For a photo gallery, mobile visitors are a major consumption surface; hiding "similar photos" there undercuts the public feature claim.
+
+Concrete fix:
+
+Pass `semanticSearchMode` into `InfoBottomSheet` and render `<SimilarPhotos>` in the mobile expanded sheet near color/histogram or immediately below the description. If the endpoint is too expensive for mobile, document it as desktop-only; otherwise the UI should match the docs.
+
+### PMR-C11-04 - Smart-collection delete guidance points admins to a non-existent remediation UI
+
+Severity: Medium
+Confidence: High
+Validation: Confirmed
+
+Evidence:
+
+- `CLAUDE.md:162` says smart collections have public read routes and hardened server actions, but no admin UI or API surface invokes them yet; rows are currently authored via direct DB insert.
+- `apps/web/src/app/actions/topics.ts:464-483` scans `smart_collections.query_json` while deleting a category and blocks deletion when a predicate references the category slug.
+- `apps/web/src/app/actions/topics.ts:516-520` maps that block to `cannotDeleteCategoryReferencedByCollection` or `cannotDeleteCategoryDueToInvalidCollectionQuery`.
+- `apps/web/messages/en.json:506-507` tells admins to "Update the collection query directly before deleting this category."
+- `apps/web/src/components/admin-nav.tsx:15-25` exposes Dashboard, Categories, Tags, SEO, Settings, Tokens, Password, Users, DB, and Analytics, with no Collections route.
 - `apps/web/src/app/[locale]/admin/(protected)/` contains no collections page.
 
-Why this is a product/support issue:
+Failure scenario / user impact:
 
-The copy describes an in-product task ("remove this category from smart collections" / "modify the smart collection") as if the admin can complete it from the dashboard. The product currently does not expose a smart-collection authoring or editing surface, and the only supported authoring path documented in the repo is direct DB insertion. This violates information scent at the exact moment an operator is blocked from deleting a category.
+An operator who previously seeded a smart collection tries to delete an empty category. The admin UI blocks deletion and tells them to update a collection query, but provides no collection editor, row id, name, or documented path from the dashboard. The support path becomes source-code or MySQL inspection at the moment the UI implies an ordinary admin workflow exists.
 
-Concrete failure scenario:
+Concrete fix:
 
-An operator previously seeded a smart collection via DB, later opens Admin -> Categories, and tries to delete an empty category. The deletion fails with a toast telling them to remove the category from smart collections. They search the admin UI for "Collections" and find no route, no nav item, no query editor, and no collection identifier. The support path becomes "read source/docs or inspect MySQL manually" even though the user-facing message implied an ordinary dashboard workflow.
+Until a Collections UI ships, change the toast copy to name the operator-level path explicitly and return blocking collection ids/names from the server action. Example: `This category is referenced by smart collection(s) not editable in the admin UI yet: {ids}. Update or remove the matching smart_collections query_json row before deleting it.`
 
-Suggested fix:
+## Positioning Notes
 
-Change the localized error to be explicit about the current operator path until a Collections UI ships. For example:
+GalleryKit's current documentation is notably more honest than most photo-tool marketing: it clearly says no editing, culling, scoring, payment, hosted SaaS, full offline sync, bundled Lightroom plugin, or one-click production semantic search. The remaining product-marketing gap is not overclaiming core infrastructure; it is under-presenting the features that would make an evaluator understand the product's shape from the demo.
 
-- English: `This category is referenced by a smart collection that is not editable in the admin UI yet. Update or remove the matching smart_collections query_json row before deleting it.`
-- Korean: `이 카테고리는 아직 관리자 화면에서 편집할 수 없는 스마트 컬렉션에서 참조하고 있습니다. 삭제하려면 smart_collections의 해당 query_json을 먼저 수정하거나 제거하세요.`
+Best one-sentence positioning based on verified source:
 
-If feasible, include the blocking collection id/name/count in the server action result so the toast can point the operator at the exact row. A broader product fix is to ship a Collections admin surface and then update the copy to link there.
+> GalleryKit is a self-hosted finished-photo gallery for photographers who want private originals, color-aware public derivatives, first-party analytics, and optional on-host semantic discovery without a hosted SaaS.
+
+Avoid leading with "AI" alone. The credible phrasing is "operator-enabled, self-hosted CLIP search" because the implementation is gated, offline-weighted, and bounded rather than magic-caption marketing.
 
 ## Non-Findings Verified During Final Sweep
 
-- Finished-photo positioning is consistent: `README.md` and in-app About copy avoid editor/culling/scoring/proofing/payment promises.
-- Semantic search copy is appropriately gated: root/app READMEs, settings copy, `search.tsx`, semantic/similar routes, and `gallery-config.ts` align on disabled-by-default, stub-vs-production honesty, env opt-in, model weights, and backfill requirements.
-- The historical CLIP spec/plan under `docs/superpowers/` is clearly labeled as historical and points readers back to `CLAUDE.md` and `apps/web/README.md` for live runbooks.
-- Upload-token copy does not overclaim a bundled Lightroom Classic plugin; docs and UI describe a PAT-authenticated upload API.
-- DB backup/restore copy correctly says SQL rows only and calls out missing original files, derivatives, and resources.
-- SEO/OG copy and source align on runtime DB-editable fields versus build-time `site-config.json` fields.
-- Privacy copy covers processed derivatives, optional Google Analytics, local analytics, IP rate-limit buckets, public map tile requests, and GPS visibility in a way that matches reviewed source.
-- No supported S3/MinIO, hosted SaaS, payment, proofing, or full offline-gallery-sync promise was found in live user/operator docs.
+- Install/init docs are supported: `npm run init` calls `scripts/init-db.ts`, which runs `scripts/migrate.js`; `migrate.js:976-1017` seeds an admin if missing and requires `ADMIN_PASSWORD`.
+- Deploy docs align with source: root `npm run deploy` maps to `scripts/deploy-remote.sh`; README warnings about `.env.deploy`, host-network Docker, build-time `site-config.json`, proxy trust, and Docker pruning match the inspected scripts/config.
+- Semantic search honesty holds at the route and UI level: default disabled, stub disclosed as non-meaningful, production env-gated, model-version-filtered, bounded scan, and 503 rather than fake production results when embeddings are missing.
+- Upload-token docs and UI avoid claiming a bundled Lightroom Classic plugin; they describe a PAT-authenticated multipart upload API.
+- Public About and README correctly reject editor/culling/scoring/proofing/payment positioning.
+- Privacy copy matches inspected source boundaries: public pages exclude GPS except explicit map visibility, Google Analytics is config-gated, local analytics are first-party, and OSM map tiles are disclosed.
+- S3/MinIO storage is not marketed as supported; `CLAUDE.md` correctly quarantines it as not integrated.
+- PWA docs are appropriately scoped as installable plus visited-image/offline fallback, not full gallery sync.
 
 ## Verification Notes
 
-No application code was changed. This review artifact is the only intended file modification.
+No application source, plans, or unrelated review files were edited. Only this assigned review artifact was written.
 
-Validation performed:
+Validation evidence collected:
 
-- Read control docs, product docs, localized messages, public/admin UI copy, and product-claim source paths listed above.
-- Cross-checked the finding against source behavior, i18n strings, admin navigation, and the documented smart-collection product boundary.
-- Final sweep specifically checked semantic search, similar photos, upload API tokens, DB backups, SEO/OG, privacy/analytics, storage claims, and no-edit/no-culling positioning for additional substantiated product communication defects.
+- Read the control docs and relevant public/operator docs.
+- Inspected public/admin source where claims needed verification.
+- Checked live demo reachability and selectors for home/map/timeline plus a production semantic-search API smoke request.
+- Ran a final claim sweep for semantic search, similar photos, map/timeline, smart collections, upload API, privacy/analytics, storage, PWA/offline, install/init, and deploy claims.
