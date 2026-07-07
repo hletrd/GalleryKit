@@ -97,8 +97,7 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C4-10 | MED/Med | cycle-4-2026-07-07 | r10c4 | 0 | Concurrent-upload UX report OR parallel-external-client product decision (reader/writer lock split) |
 | C4-11 | MED/Med | cycle-4-2026-07-07 | r10c4 | 0 | C1-33 RSS trace lands OR RSS/OOM incident during LR uploads (retention-window fix) |
 | C4-13 | MED/Med | cycle-4-2026-07-07 | r10c4 | 0 | Sequenced behind C3-08op: after operator applies nginx zones, add the read-only >burst 429 probe |
-| C4-16 | LOW-MED/High | cycle-4-2026-07-07 | r10c4 | 0 | Next image-queue-touching cycle folds the {durable\|transient} state partition + single reset helper, OR a 5th lifecycle-reset bug lands |
-| C4-17 | LOW-MED/High | cycle-4-2026-07-07 | r10c4 | 0 | **SCHEDULED-NEXT (cycle 5):** extract `startMaintenanceScheduler()` owned by `instrumentation.ts` from the image-queue bootstrap |
+| C4-16 | LOW-MED/High | cycle-4-2026-07-07 | r10c4 | 0 | Next image-queue-touching cycle folds the {durable\|transient} state partition + single reset helper, OR a 5th lifecycle-reset bug lands. NOTE (c8b): the ARCH8-02 near-miss (embeddingScanModelVersion missed by the restore-quiesce reset, healed at HEAD) is evidence FOR this partition |
 | C4-18 | LOW-MED/High | cycle-4-2026-07-07 | r10c4 | 0 | Next component-behavior-only source-pin must evaluate a minimal RTL/jsdom harness (adopt or record why not) |
 | C4-22 | LOW/Med-High | cycle-4-2026-07-07 | r10c4 | 0 | Hairpin-DNS/self-origin OG incident OR measured cold-OG latency (fs-read transport + containment) |
 | C4-24 | LOW/Med-High | cycle-4-2026-07-07 | r10c4 | 0 | Admin bulk-upload perceived-lag report OR next admin-surface perf cycle (fold with C2-28) |
@@ -122,6 +121,23 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C6-27 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Next bulk-edit cycle OR a maintainer trips on the `titlePrefix` exact-set naming |
 | C6-28 | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | On-this-day made client-driven, OR a `TZ` operator-config note ships, OR a wrong-day report |
 | C7b-06code | MED/High | cycle-7b-2026-07-07 | r10c7(loop-B) | 0 | `IMAGE_BASE_URL` configured in production (decide the boot-validation story once with C4-25/C2-37res), OR an operator restart-without-rebuild thumbnail incident (boot-time remotePatterns-vs-runtime probe; doc half shipped c7b WP14) |
+| C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
+| C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
+| C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |
+| C8b-04 / PERF8-BF-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next schema/migration-authoring cycle folds a `(pipeline_version, id)` index for backfill candidate scans (rides the next journal entry, same treatment as C2-21) |
+
+Cycle-8 (loop-B) age-budget check: four new rows (C8b-01..04; the HIGH row C8b-02 is a
+test-design gap — the underlying upload-quota code is verified correct, and its stronger
+static pin shipped in c8b WP7). No open High-severity CODE finding crosses the 8-cycle
+budget: all loop-B cycle-1 rows reaching age 8 this cycle (C1-11/13/25a/31/32/33/36b) are
+MED-or-lower, so the README's High rule triggers no mandatory scheduling. MED 16-cycle
+checkpoint: `C80-06` (~16) re-justified — the build-time `site-config.json` contract is
+documented (CLAUDE.md ARCH-03); the row remains ONLY the product/operator decision on
+runtime-editable file config, and its exit criterion has not fired (no operator request).
+Housekeeping: `C4-17` REMOVED from the open table — implemented in run-10 cycle 5
+(`maintenance-scheduler.ts` owned by `instrumentation.ts`), verified by the c8 architect
+lane (AGG8b-38). Fold notes: PERF-F1 → C6-04c; TEST8-05 residual → C6-12 (the
+watchdog-primitive tests do NOT close C6-12); TEST8-06 → C4-18.
 
 Cycle-7 (loop-B) age-budget check: one new row (C7b-06code, MED, age 0). No open High-severity
 carry-forward crosses the 8-cycle budget (C7-02/HIGH was SCHEDULED, not deferred, in
@@ -134,6 +150,10 @@ register; each per-cycle `cycle-N-*-deferred.md` remains the authoritative detai
 
 ## Rows that left a register recently (for lineage continuity)
 
+- `C4-17` (maintenance-scheduler extraction): IMPLEMENTED in run-10 cycle 5 — removed from
+  the open table at c8b (loop-B) after the cycle-8 architect lane verified
+  `instrumentation.ts` wires `maintenance-scheduler.ts` directly (the row was doc-lag, not
+  open code work).
 - `C77-ARCH-01` (High): scheduled run-10 c1 (WP3) after 8+ cycles — the age budget's first application.
 - `C94-11`: re-opened + scheduled run-10 c1 (WP6) on two-lane agreement.
 - `C2-31` concrete instance: scheduled + landed run-10 c3 (WP12, nginx-test block parser); remainder row above.
