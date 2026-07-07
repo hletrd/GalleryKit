@@ -20,6 +20,11 @@ describe('backfill re-embed contract', () => {
     expect(src).toContain('SELECT GET_LOCK(?, 0) AS acquired');
     expect(src).toContain('SELECT RELEASE_LOCK(?)');
   });
+  it('keeps SQL page size independent from the remaining embedding-attempt budget', () => {
+    expect(src).toContain('.limit(BATCH_SIZE)');
+    expect(src).not.toContain('.limit(Math.min(BATCH_SIZE, remainingEmbeddingBudget))');
+    expect(src).toMatch(/if \(attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT\) return;\s+attemptedEmbeddings\+\+/);
+  });
 });
 
 // AGG-C8-05 (run-6 cycle-8): the unwired backfillClipEmbeddings server action must
@@ -44,6 +49,11 @@ describe('backfillClipEmbeddings action — model_version-aware selection', () =
     expect(actionSrc).toMatch(/gt\(\s*images\.id\s*,\s*cursor\s*\)/);
     expect(actionSrc).toContain('orderBy(asc(images.id))');
     expect(actionSrc).toContain('SEMANTIC_SCAN_LIMIT - attemptedEmbeddings');
+  });
+  it('keeps action SQL page size independent from remaining attempt budget', () => {
+    expect(actionSrc).toContain('.limit(BACKFILL_BATCH_SIZE)');
+    expect(actionSrc).not.toContain('.limit(Math.min(BACKFILL_BATCH_SIZE, remainingEmbeddingBudget))');
+    expect(actionSrc).toMatch(/if \(attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT\) return;\s+attemptedEmbeddings\+\+/);
   });
   it('serializes the server action against restore with the semantic backfill advisory lock', () => {
     expect(actionSrc).toContain('LOCK_SEMANTIC_EMBEDDING_BACKFILL');

@@ -165,7 +165,7 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                     ),
                 )
                 .orderBy(asc(images.id))
-                .limit(Math.min(BACKFILL_BATCH_SIZE, remainingEmbeddingBudget));
+                .limit(BACKFILL_BATCH_SIZE);
 
             if (pending.length === 0) break;
             cursor = pending[pending.length - 1].id;
@@ -180,9 +180,11 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                             if (!filenameOriginal) { skipped++; return; }
                             const originalPath = await resolveOriginalUploadPath(filenameOriginal);
                             if (!originalPath) { skipped++; return; }
+                            if (attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT) return;
                             attemptedEmbeddings++;
                             embedding = await embedImageReal(originalPath);
                         } else {
+                            if (attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT) return;
                             attemptedEmbeddings++;
                             embedding = embedImageStub(id);
                         }
@@ -207,6 +209,8 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                     }
                 }));
             }
+
+            if (attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT) break;
 
             if (pending.length < BACKFILL_BATCH_SIZE) break;
         }

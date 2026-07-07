@@ -234,6 +234,29 @@
   content-visibility: auto;
 }
 
+/* C19: Leaflet renders controls and marker hit areas outside the component
+   touch-target scanner. Keep /map controls at the repo's 44 px floor without
+   changing Leaflet globally. */
+.gallery-map .leaflet-control-zoom a,
+.gallery-map .leaflet-control-attribution a,
+.gallery-map .leaflet-popup-close-button {
+  min-width: 44px !important;
+  min-height: 44px !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.gallery-map .leaflet-control-zoom a {
+  line-height: 44px !important;
+}
+
+.gallery-map .leaflet-marker-icon {
+  min-width: 44px !important;
+  min-height: 44px !important;
+  object-fit: contain;
+}
+
 /* Ken Burns pan/zoom for lightbox slideshow mode.
    Two variants alternate direction per photo based on image.id parity.
    The --kb-start / --kb-end custom properties are set inline per image

@@ -92,7 +92,7 @@ vi.mock('@/lib/clip-embeddings', () => ({
     embeddingToBuffer: vi.fn(() => Buffer.from('stub-embedding')),
     STUB_MODEL_VERSION: 'stub-v1',
     PRODUCTION_MODEL_VERSION: 'prod-v1',
-    SEMANTIC_SCAN_LIMIT: 2000,
+    SEMANTIC_SCAN_LIMIT: 1,
 }));
 
 vi.mock('@/lib/upload-paths', () => ({
@@ -101,12 +101,16 @@ vi.mock('@/lib/upload-paths', () => ({
 
 import { backfillClipEmbeddings } from '@/app/actions/embeddings';
 
-function makePendingSelectChain<T>(result: T) {
+function makePendingSelectChain<T>(result: T | ((limitValue: number) => T)) {
     return {
         from: vi.fn().mockReturnValue({
             where: vi.fn().mockReturnValue({
                 orderBy: vi.fn().mockReturnValue({
-                    limit: vi.fn().mockResolvedValue(result),
+                    limit: vi.fn(async (limitValue: number) => (
+                        typeof result === 'function'
+                            ? (result as (limitValue: number) => T)(limitValue)
+                            : result
+                    )),
                 }),
             }),
         }),
@@ -251,6 +255,29 @@ describe('backfillClipEmbeddings', () => {
 
         expect(resolveOriginalUploadPathMock).toHaveBeenCalledWith('valid.jpg');
         expect(embedImageRealMock).toHaveBeenCalledWith('/data/uploads/original/valid.jpg');
+        expect(valuesMock).toHaveBeenCalledWith(expect.objectContaining({ imageId: 21, modelVersion: 'prod-v1' }));
+    });
+
+    it('fetches a full page even when the remaining embedding-attempt budget is one', async () => {
+        getGalleryConfigMock.mockResolvedValue({ semanticSearchMode: 'production' });
+        const conn = makeLockConnection(1);
+        getConnectionMock.mockResolvedValue(conn);
+        selectMock.mockReturnValue(makePendingSelectChain((limitValue) => (
+            limitValue === 1
+                ? [{ id: 20, filenameOriginal: null }]
+                : [
+                    { id: 20, filenameOriginal: null },
+                    { id: 21, filenameOriginal: 'valid.jpg' },
+                ]
+        )));
+        resolveOriginalUploadPathMock.mockResolvedValue('/data/uploads/original/valid.jpg');
+        embedImageRealMock.mockResolvedValue(new Float32Array([4, 5, 6]));
+        const valuesMock = vi.fn().mockReturnValue({ onDuplicateKeyUpdate: vi.fn().mockResolvedValue(undefined) });
+        insertMock.mockReturnValue({ values: valuesMock });
+
+        await expect(backfillClipEmbeddings()).resolves.toEqual({ status: 'ok', processed: 1, skipped: 1 });
+
+        expect(embedImageRealMock).toHaveBeenCalledTimes(1);
         expect(valuesMock).toHaveBeenCalledWith(expect.objectContaining({ imageId: 21, modelVersion: 'prod-v1' }));
     });
 

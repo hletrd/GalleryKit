@@ -186,7 +186,7 @@ async function main(): Promise<number> {
                     ),
                 )
                 .orderBy(asc(images.id))
-                .limit(Math.min(BATCH_SIZE, remainingEmbeddingBudget));
+                .limit(BATCH_SIZE);
 
             if (rows.length === 0) break;
             cursor = rows[rows.length - 1].id;
@@ -202,9 +202,11 @@ async function main(): Promise<number> {
                             if (!filenameOriginal) { failed++; failedImageIds.push(id); return; }
                             const originalPath = await resolveOriginalUploadPath(filenameOriginal);
                             if (!originalPath) { failed++; failedImageIds.push(id); return; }
+                            if (attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT) return;
                             attemptedEmbeddings++;
                             embedding = await embedImageReal(originalPath);
                         } else {
+                            if (attemptedEmbeddings >= SEMANTIC_SCAN_LIMIT) return;
                             attemptedEmbeddings++;
                             embedding = embedImageStub(id);
                         }

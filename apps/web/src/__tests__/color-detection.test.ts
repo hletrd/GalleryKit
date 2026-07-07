@@ -123,6 +123,32 @@ describe('detectColorSignals', () => {
         expect(signals.isHdr).toBe(true);
     });
 
+    // AGG9B-26 (loop-B cycle 9b): description-style hints with spaces or
+    // hyphenated words match NEITHER the previous name-normalized checks
+    // (normalizeName strips separators: "SMPTE 2084" -> "smpte2084", no
+    // "st2084"/"pq" substring) NOR the desc checks, because the only call
+    // site passed `null` for iccDescription. These pin the wired desc path.
+    it('detects HDR from a description-style SMPTE 2084 hint (desc branch)', async () => {
+        const meta = makeMockMeta({ icc: 'SMPTE 2084 Master Profile' as unknown as Buffer });
+        const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
+        expect(signals.transferFunction).toBe('pq');
+        expect(signals.isHdr).toBe(true);
+    });
+
+    it('detects HDR from a description-style Hybrid Log-Gamma hint (desc branch)', async () => {
+        const meta = makeMockMeta({ icc: 'Hybrid Log-Gamma BT.2100' as unknown as Buffer });
+        const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
+        expect(signals.transferFunction).toBe('hlg');
+        expect(signals.isHdr).toBe(true);
+    });
+
+    it('detects HDR from an ARIB STD-B67 description hint (desc branch)', async () => {
+        const meta = makeMockMeta({ icc: 'ARIB STD-B67 Broadcast' as unknown as Buffer });
+        const signals = await detectColorSignals('/tmp/fake.jpg', {}, meta);
+        expect(signals.transferFunction).toBe('hlg');
+        expect(signals.isHdr).toBe(true);
+    });
+
     it('reads iccProfileName from Buffer via embedded parser', async () => {
         // Build a minimal ICC header + tag table with a 'desc' tag.
         // ICC header: 128 bytes

@@ -361,7 +361,16 @@ export async function detectColorSignals(
     }
 
     let colorPrimaries = inferColorPrimaries(iccName);
-    let transferFunction = inferTransferFunction(iccName, null, bitDepth);
+    // AGG9B-26 / CR9-S6 (loop-B cycle 9b): pass the extracted descriptor as
+    // BOTH arguments. The `iccDescription` parameter was always `null` here,
+    // which left every description-style check in inferTransferFunction
+    // ("smpte 2084", "hybrid log", "arib", "gamma 2.2", "linear") dead code:
+    // normalizeName() strips spaces/punctuation, so descriptors like
+    // "SMPTE 2084" or "Hybrid Log-Gamma" matched NEITHER form and HDR
+    // sources labeled only in the description slipped past the
+    // allow_hdr_ingest gate. The extracted ICC descriptor IS the description
+    // string — run both the raw-lowercase and normalized checks over it.
+    let transferFunction = inferTransferFunction(iccName, iccName, bitDepth);
     let matrixCoefficients = inferMatrixCoefficients(iccName);
 
     // P4-A2 / R4-H2: ICC chromaticity-based detection upgrades primaries when

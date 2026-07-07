@@ -16,4 +16,11 @@ describe('PasswordForm accessibility source contract', () => {
         expect(source).toContain('? `${passwordHelpId} confirmPassword-error`');
         expect(source).toContain(': passwordHelpId');
     });
+
+    it('moves focus to the confirm-password field on local mismatch validation', () => {
+        expect(source).toContain('const confirmPasswordRef = useRef<HTMLInputElement>(null)');
+        expect(source).toContain('confirmPasswordRef.current?.focus()');
+        expect(source).toContain('confirmPasswordRef.current?.select()');
+        expect(source).toContain('ref={confirmPasswordRef}');
+    });
 });

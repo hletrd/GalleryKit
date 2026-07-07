@@ -879,7 +879,8 @@ export async function saveOriginalAndGetMetadata(file: File): Promise<ImageProce
     const filenameAvif = `${id}.avif`;
     const filenameJpeg = `${id}.jpg`;
 
-    // Stream to disk first to avoid materializing up to 200MB on the heap.
+    // After the framework has materialized the File, stream it to disk without
+    // creating an additional full-size heap copy.
     const originalPath = path.join(UPLOAD_DIR_ORIGINAL, filenameOriginal);
     try {
         const webStream = file.stream();

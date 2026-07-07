@@ -27,6 +27,7 @@ export function PasswordForm() {
     const { t } = useTranslation();
     const [confirmError, setConfirmError] = useState<string | null>(null);
     const submitButtonRef = useRef<HTMLButtonElement>(null);
+    const confirmPasswordRef = useRef<HTMLInputElement>(null);
     useRestoreFocusAfterPending(submitButtonRef, isPending);
     const passwordHelpId = 'password-min-length-help';
     const confirmPasswordDescription = confirmError
@@ -38,6 +39,8 @@ export function PasswordForm() {
         const confirmPw = formData.get('confirmPassword') as string;
         if (newPw !== confirmPw) {
             setConfirmError(t('password.mismatch'));
+            confirmPasswordRef.current?.focus();
+            confirmPasswordRef.current?.select();
             return;
         }
         setConfirmError(null);
@@ -96,6 +99,7 @@ export function PasswordForm() {
             <div className="space-y-2">
                 <Label htmlFor="confirmPassword">{t('password.confirm')}</Label>
                 <Input
+                    ref={confirmPasswordRef}
                     id="confirmPassword"
                     name="confirmPassword"
                     type="password"

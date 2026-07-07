@@ -263,16 +263,19 @@ describe('deploy script safety contract', () => {
         // stage. The pin contract on the package tokens is unchanged. The
         // literal `--include=optional --no-save` prefix still uniquely anchors
         // the deps stage (prod-deps uses `--omit=dev --include=optional`).
-        const nativeInstallBlock = dockerfile.match(/npm install --workspace=apps\/web --include=optional --no-save \\\n(?<body>[\s\S]*?)\n\n/);
-        expect(nativeInstallBlock?.groups?.body).toBeTruthy();
-        const packageTokens = nativeInstallBlock!.groups!.body
+        const nativeInstallBlocks = [
+            ...dockerfile.matchAll(/npm install --workspace=apps\/web (?:--omit=dev )?--include=optional --no-save \\\n(?<body>[\s\S]*?)(?:&& \\\n|\n\n)/g),
+        ];
+        expect(nativeInstallBlocks.length).toBeGreaterThanOrEqual(2);
+        const packageTokens = nativeInstallBlocks.flatMap((block) => block.groups!.body
             .split(/\\\n/)
             .map((line) => line.trim())
-            .filter(Boolean);
+            .filter((line) => line.startsWith('@') || line.startsWith('lightningcss')));
 
         for (const token of packageTokens) {
             expect(token, token).toMatch(/@\d+\.\d+\.\d+$/);
-            const match = token.match(/^(@(?:next|swc)\/[a-z0-9-]+\$\{npm_arch\}[a-z0-9-]*)@(\d+\.\d+\.\d+)$/);
+            const match = token.match(/^((?:@[a-z0-9-]+\/)?[a-z0-9-]+-\$\{npm_arch\}[a-z0-9-]*)@(\d+\.\d+\.\d+)$/);
+            expect(match, `unexpected native package token shape: ${token}`).toBeTruthy();
             if (!match) continue;
             for (const arch of ['arm64', 'x64']) {
                 const packageName = match[1].replace('${npm_arch}', arch);

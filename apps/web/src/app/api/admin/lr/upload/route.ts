@@ -157,12 +157,6 @@ export const POST = withAdminAuth(
             );
         }
 
-        await markAdminAuthTokenUsed(request);
-
-        tracker.count += 1;
-        tracker.bytes += declaredUploadBytes;
-        uploadTracker.set(trackerKey, tracker);
-
         let trackerSettled = false;
         const settleTrackerToActual = (success: boolean, actualBytes: number = 0) => {
             if (trackerSettled) return;
@@ -179,10 +173,18 @@ export const POST = withAdminAuth(
 
         let formData: FormData;
         try {
-            formData = await request.formData();
-        } catch {
-            settleTrackerToActual(false);
-            return NextResponse.json({ error: 'Invalid multipart body' }, { status: 400, headers: NO_CACHE });
+            await markAdminAuthTokenUsed(request);
+
+            tracker.count += 1;
+            tracker.bytes += declaredUploadBytes;
+            uploadTracker.set(trackerKey, tracker);
+
+            try {
+                formData = await request.formData();
+            } catch {
+                settleTrackerToActual(false);
+                return NextResponse.json({ error: 'Invalid multipart body' }, { status: 400, headers: NO_CACHE });
+            }
         } finally {
             releaseMultipartParseSlot();
         }

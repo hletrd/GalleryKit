@@ -82,4 +82,20 @@ describe('map popup thumbnail wiring (PERF-R4C15-02)', () => {
         expect(loader).toContain('{label}');
         expect(loader).toContain('animate-pulse');
     });
+
+    it('scopes Leaflet controls and marker hit areas to the 44 px touch-target floor', async () => {
+        const client = await read('components/map/map-client.tsx');
+        const globals = await read('app/[locale]/globals.css');
+        expect(client).toContain('className="gallery-map z-0"');
+        for (const selector of [
+            '.gallery-map .leaflet-control-zoom a',
+            '.gallery-map .leaflet-control-attribution a',
+            '.gallery-map .leaflet-popup-close-button',
+            '.gallery-map .leaflet-marker-icon',
+        ]) {
+            expect(globals).toContain(selector);
+        }
+        expect(globals).toContain('min-width: 44px !important');
+        expect(globals).toContain('min-height: 44px !important');
+    });
 });

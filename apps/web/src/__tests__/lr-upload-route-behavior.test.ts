@@ -287,6 +287,31 @@ describe('Lightroom upload route behavior', () => {
         expect(lockReleaseMock).toHaveBeenCalledOnce();
     });
 
+    it('releases the multipart parse slot when token finalization fails after acquisition', async () => {
+        markAdminAuthTokenUsedMock.mockRejectedValueOnce(new Error('token finalization failed'));
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const makeRequest = (filename: string) => {
+            const form = new FormData();
+            form.set('file', new File([new Uint8Array([1, 2, 3])], filename, { type: 'image/jpeg' }));
+            form.set('topic', 'seoul');
+            return new NextRequest('https://gallery.test/api/admin/lr/upload', {
+                method: 'POST',
+                headers: { 'content-length': '1024' },
+                body: form,
+            });
+        };
+
+        await expect(POST(makeRequest('first.jpg'))).rejects.toThrow('token finalization failed');
+        expect(settleUploadTrackerClaimMock).not.toHaveBeenCalled();
+
+        const response = await POST(makeRequest('second.jpg'));
+
+        expect(response.status).toBe(422);
+        await expect(response.json()).resolves.toEqual({ error: 'HDR ingest is disabled' });
+        expect(markAdminAuthTokenUsedMock).toHaveBeenCalledTimes(2);
+    });
+
     // C6-11 (run-10 cycle-6): drive the failure branches that were previously
     // pinned only by source-string assertions, asserting the real Response.
 
