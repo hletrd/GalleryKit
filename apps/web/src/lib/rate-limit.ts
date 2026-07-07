@@ -179,17 +179,28 @@ export function getClientIp(headerStore: HeaderLike): string {
         const xForwardedFor = headerStore.get('x-forwarded-for');
         if (xForwardedFor && xForwardedFor.length <= 512) {
             const parts = xForwardedFor.split(',').map(p => p.trim()).filter(Boolean);
-            // Select the client immediately before the trusted proxy suffix.
-            // For example, with "client, cdn, nginx" and
-            // TRUSTED_PROXY_HOPS=2, the trusted suffix is "cdn, nginx" and
-            // the client is the address just before it. Do not trust a chain
-            // that is shorter than or equal to the configured trusted suffix:
-            // there is no untrusted client slot to select.
-            const validParts = parts.map((part) => normalizeIp(part)).filter((part): part is string => Boolean(part));
+            // AGG9B-22 / CR9-S2 (loop-B cycle 9b): standard append-mode
+            // proxies (`$proxy_add_x_forwarded_for`) each append the PEER
+            // ADDRESS they accepted the connection from, so with `hopCount`
+            // trusted proxies the entry appended by the OUTERMOST trusted
+            // proxy — the true client as that proxy saw it — sits at raw
+            // position `parts.length - hopCount` (the hopCount-th entry from
+            // the right). Example: client → cdn → nginx (hops=2) yields
+            // "…client-sent junk…, client, cdn"; the client is 2nd from the
+            // right. The previous `- 1` selected one slot further left — an
+            // attacker-controllable leftover under append mode, and an
+            // always-out-of-range index under the shipped overwrite-mode
+            // nginx (which was only saved by the X-Real-IP fallback).
+            // Index on RAW right-anchored positions (not a normalize-filtered
+            // list) so an unparseable spoofed entry cannot shift the client
+            // slot; if the selected entry does not normalize, fall through to
+            // X-Real-IP rather than guessing. Chains shorter than hopCount
+            // (a trusted hop did not append) also fall through.
             const hopCount = getTrustedProxyHopCount();
-            const clientIndex = validParts.length - hopCount - 1;
+            const clientIndex = parts.length - hopCount;
             if (clientIndex >= 0) {
-                return validParts[clientIndex];
+                const clientIp = normalizeIp(parts[clientIndex]);
+                if (clientIp) return clientIp;
             }
         }
 

@@ -100,7 +100,10 @@ describe('isRateLimitExceeded', () => {
 });
 
 describe('getClientIp', () => {
-    it('uses the client before the nearest trusted proxy by default when TRUST_PROXY is enabled', () => {
+    it('selects the entry appended by the single trusted proxy (append mode, default hops)', () => {
+        // AGG9B-22: with one trusted append-mode proxy, the RIGHTMOST entry
+        // was appended by that proxy and IS the client; anything left of it
+        // is client-supplied (spoofable) and must never be selected.
         process.env.TRUST_PROXY = 'true';
 
         const headers = new Map<string, string>([
@@ -108,19 +111,58 @@ describe('getClientIp', () => {
             ['x-real-ip', '203.0.113.7'],
         ]);
 
-        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
     });
 
-    it('uses TRUSTED_PROXY_HOPS to select the client before a known trusted proxy chain', () => {
+    it('uses TRUSTED_PROXY_HOPS to select the entry appended by the outermost trusted proxy', () => {
+        // client → cdn → nginx (hops=2): "junk, client, cdn" — the client is
+        // the 2nd entry from the right (appended by the cdn), never the
+        // leftmost client-supplied value.
         process.env.TRUST_PROXY = 'true';
         process.env.TRUSTED_PROXY_HOPS = '2';
 
         const headers = new Map<string, string>([
             ['x-forwarded-for', '198.51.100.10, 203.0.113.7, 192.0.2.44'],
-            ['x-real-ip', '203.0.113.7'],
+            ['x-real-ip', '192.0.2.44'],
         ]);
 
-        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
+    });
+
+    it('selects the sole entry under the shipped overwrite-mode nginx (hops=1, one entry)', () => {
+        // Shipped nginx overwrites inbound XFF with $remote_addr, so the
+        // header carries exactly the client. hops=1 must select it directly
+        // instead of relying on the X-Real-IP fallback.
+        process.env.TRUST_PROXY = 'true';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '203.0.113.7'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
+    });
+
+    it('is not shifted by attacker-prepended entries (right-anchored selection)', () => {
+        process.env.TRUST_PROXY = 'true';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '10.9.9.9, 10.8.8.8, not-an-ip, 203.0.113.7'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
+    });
+
+    it('falls back to x-real-ip when the trusted-slot entry does not normalize', () => {
+        // Right-anchored raw indexing: if the entry at the trusted slot is
+        // unparseable, fall through instead of selecting a shifted neighbor.
+        process.env.TRUST_PROXY = 'true';
+
+        const headers = new Map<string, string>([
+            ['x-forwarded-for', '198.51.100.10, unknown'],
+            ['x-real-ip', '203.0.113.9'],
+        ]);
+
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.9');
     });
 
     it('falls back to one trusted hop when TRUSTED_PROXY_HOPS is invalid', () => {
@@ -132,7 +174,7 @@ describe('getClientIp', () => {
         ]);
 
         expect(getTrustedProxyHopCount()).toBe(1);
-        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('198.51.100.10');
+        expect(getClientIp({ get: (name) => headers.get(name) ?? null })).toBe('203.0.113.7');
     });
 
     it('R20C20: parses scientific-notation TRUSTED_PROXY_HOPS in full (1e1 -> 10, not 1)', () => {
