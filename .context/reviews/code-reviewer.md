@@ -1,88 +1,110 @@
-# Run-10 Cycle 5/100 — Code-Reviewer Lane
+# Run-10 Cycle 6/100 - Code-Reviewer Lane
 
-Date: 2026-07-07  
-Scope: code quality, logic bugs, maintainability, coupling, invalid assumptions, edge cases, and error handling.  
-Mode: read-only review except this artifact. No source files modified.
+Date: 2026-07-07
+Reviewer: code-reviewer
+HEAD reviewed: `423fa6c1f599a267d80738271152e7f6f7968598`
+Mode: repository-wide read-only review except this artifact. No source files were modified.
 
 ## Inventory First
 
-Repository inventory built before reviewing:
+Review-relevant inventory built before findings:
 
-- `apps/web/src`: 592 TypeScript/TSX files total, including 13 server-action files, 8 API route files, 58 app route/layout files, 60 component files, 110 `lib/` modules, 3 `db/` files, and 336 unit/fixture test files.
-- Other review-relevant groups: 29 `apps/web/scripts` files, 28 Drizzle SQL migrations plus journal metadata, 12 e2e/fixture files, `Dockerfile`, `docker-compose.yml`, `nginx/default.conf`, `next.config.ts`, `public/sw.template.js`, and generated `public/sw.js`.
-- Current context read: `AGENTS.md`, `CLAUDE.md`, current root review artifacts, cycle-4 aggregate/plan/deferred register, current git log/status.
+- Instructions and context: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.context/plans/README.md`, current `.context/reviews/_aggregate.md`, top-level reviewer mirrors, and Cycle 5 plan/deferred artifacts.
+- Source surface: 604 files under `apps/web/src`, including 344 unit/source-contract test files.
+- Operational surface: 29 `apps/web/scripts` files, 33 Drizzle migration/journal files, `Dockerfile`, `docker-compose.yml`, `nginx/default.conf`, `next.config.ts`, `public/sw.template.js`, generated `public/sw.js`, and 12 e2e/fixture files.
+- Recent implementation delta reviewed from Cycle 5 start `591b44bd` to current `423fa6c1`: maintenance scheduler extraction, background analytics queue, semantic embedding bootstrap cap, sidecar color-backfill paging, feed/sitemap indexes, service-worker lifetime coverage, LR upload route tests, CSP/docs dispositions, migration reconcile updates, and Cycle 5 ledgers.
+
+Static/code paths read in depth:
+
+- Restore and mutation fencing: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/instrumentation.ts`.
+- Queue/backfill/processing: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/process-image.ts` scan points.
+- Public/search/semantic/LR routes: `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, matching tests.
+- Schema/privacy/gates: `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js`, Drizzle journal, `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, security lint scripts.
+
+Validation run:
+
+- `git diff --check HEAD` - clean.
+- `npm run lint:api-auth --workspace=apps/web` - pass.
+- `npm run lint:action-origin --workspace=apps/web` - pass.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - pass.
+- `npm test --workspace=apps/web -- maintenance-scheduler-source background-db-writes image-queue-embedding-bootstrap-cap sw-template-contract migrate-reconcile-coverage migration-journal-monotonicity` - 6 files / 131 tests passed.
 
 ## Findings Summary
 
-- Confirmed issues: 1
+- Critical: 0
+- High: 0
+- Medium: 1 confirmed
+- Low: 0
 - Likely issues: 0
-- Risks needing manual validation: 0
-- Critical/High findings: 0
+- Risks needing validation: 3
 
 ## Confirmed Issues
 
-### CQR5-01 — Retention and cleanup scheduler is coupled to successful image-queue bootstrap
+### CQR6-01 - Independent maintenance sweeps can write during a DB restore window
 
-Severity: LOW-MED  
-Confidence: High  
-Location: `apps/web/src/lib/image-queue.ts:1117-1274`, `apps/web/src/instrumentation.ts:7-8`
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed source defect
+- Files/regions:
+  - `apps/web/src/lib/maintenance-scheduler.ts:13-26`
+  - `apps/web/src/lib/maintenance-scheduler.ts:28-36`
+  - `apps/web/src/instrumentation.ts:1-10`
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:538-556`
+  - `apps/web/src/lib/restore-maintenance.ts:21-26`
 
 Problem:
-`instrumentation.ts` starts background work by awaiting `bootstrapImageProcessingQueue()` during Node startup. Inside that image-queue bootstrap, after the pending-image scan and embedding retry kick, the module also runs and arms unrelated maintenance jobs: expired sessions, stale rate-limit buckets, audit-log retention, and anonymous view-event retention. The hourly timer is stored as `ProcessingQueueState.gcInterval` and is created only in the successful bootstrap path.
 
-Why this is a problem:
-These retention sweeps are not image-processing concerns. They bound growth in `sessions`, `rate_limit_buckets`, `audit_log`, and the analytics view tables, but their lifecycle depends on an unrelated queue bootstrap path that can return early or stay retrying. The code has explicit early returns before the timer path when the queue is already bootstrapped, shutting down, restore maintenance is active, or a continuation is scheduled (`image-queue.ts:1117-1119`). If image bootstrap is skipped during restore maintenance or remains stuck on DB/queue startup errors, the maintenance scheduler never gets an independent owner.
+Cycle 5 correctly moved session/rate-limit/audit/view-retention sweeps out of `image-queue.ts`, but the new `runMaintenanceSweep()` executes four DB-mutating purges without consulting `isRestoreMaintenanceActive()`. `instrumentation.register()` starts the scheduler before `bootstrapImageProcessingQueue()`, so the startup sweep and hourly interval are now independent of queue bootstrap and can run even while durable restore maintenance is active. The restore path drains shared-group view-count writes, image queue work, background DB writes, and foreground admin mutation slots before `runRestore()`, but it has no ownership of this scheduler and cannot drain or block its deletes.
 
 Concrete failure scenario:
-The app boots while restore maintenance is active, or a queue-bootstrap DB read keeps failing before the timer-arm block. Image processing correctly waits or retries, but session purge, rate-limit bucket purge, audit-log retention, and `purgeOldViewEvents()` also stop starting. On a host that keeps serving after partial recovery, view/audit/rate-limit rows can grow until the next successful image-queue bootstrap, even though those retention jobs should not depend on pending image work.
+
+1. A restore starts and sets the durable/process restore-maintenance marker.
+2. `restoreDatabase()` reaches the preparation section and drains queue/background/admin writes (`db-actions.ts:538-556`).
+3. The hourly scheduler fires, or a process boots during a stale/active restore marker and runs the startup sweep.
+4. `runMaintenanceSweep()` launches `DELETE` work against `sessions`, `rate_limit_buckets`, `audit_log`, and analytics view tables while the restore import expects an exclusive write window. At best this creates avoidable lock contention or deadlocks during import; at worst it mutates the just-restored snapshot outside the restore lifecycle and breaks the documented "no writes during restore" invariant.
 
 Suggested fix:
-Extract a small `lib/maintenance-scheduler.ts` with `startMaintenanceScheduler()` / `stopMaintenanceScheduler()` that owns:
 
-- `purgeExpiredSessions()`
-- `purgeOldBuckets()`
-- `purgeOldAuditLog()`
-- `purgeOldViewEvents()`
-- any retry-map pruning that truly belongs to queue state can remain queue-owned or be passed as an optional callback
-
-Start it from `instrumentation.ts` alongside, not inside, image-queue bootstrap. Add a unit/source-contract test proving retention starts even when `bootstrapImageProcessingQueue()` is skipped or rejects.
+Make maintenance restore-aware. Import `isRestoreMaintenanceActive()` into `maintenance-scheduler.ts` and return before scheduling purge work when maintenance is active. Re-check inside each purge or before each async call so a marker that flips after the sweep starts stops later writes. After restore completes, explicitly run or allow the next scheduler tick to run a catch-up sweep. Add a behavior/source test that fails if `runMaintenanceSweep()` lacks the restore-maintenance guard, not only the current ownership test that verifies the scheduler moved out of `image-queue.ts`.
 
 ## Likely Issues
 
-None at actionable confidence.
+None. I did not find another repository-wide code-quality or logic issue with enough evidence to classify as likely. The areas that looked suspicious from stale Cycle 5 text were rechecked against current HEAD and are either fixed or intentionally tracked as risks below.
 
-## Risks Needing Manual Validation
+## Risks Needing Validation
 
-None from this pass. The remaining cycle-4 deferred rows I re-checked are design/performance trade-offs or already documented operational boundaries, not code-quality defects at this lane's confidence threshold.
+### RISK-CQR6-01 - Analytics queue drops admitted writes at capacity by design
+
+- Severity: Low-Medium risk
+- Confidence: Medium
+- Files/regions: `apps/web/src/lib/background-db-writes.ts:42-75`, `apps/web/src/app/actions/public.ts:436-525`.
+- Risk: `trackAnalyticsDbWrite()` returns `undefined` when `active + queued >= 1000`, after the public action has already charged the view-record rate limit and validated the target. This is an acceptable overload policy if intentional, but it means admitted page views can be silently dropped under distributed traffic. Keep the cap/drop policy documented and add metrics/log sampling if operators need analytics completeness.
+
+### RISK-CQR6-02 - CLIP production behavior remains outside default CI
+
+- Severity: Medium manual-validation risk
+- Confidence: High
+- Files/regions: `apps/web/src/lib/clip-model.ts:200-229`, `apps/web/src/app/api/search/semantic/route.ts:186-204`, `apps/web/src/__tests__/clip-offline-load.test.ts`, `apps/web/src/__tests__/clip-semantic-integration.test.ts`.
+- Risk: real model load/ranking requires seeded weights and explicit env flags, so default unit gates cannot prove production semantic search. This is already documented, but any future CLIP path/provider/model change should include the manual offline-load and integration gates before production enablement.
+
+### RISK-CQR6-03 - Source-contract tests still dominate the restore/LR failure-mode surface
+
+- Severity: Medium test-risk
+- Confidence: Medium
+- Files/regions: `apps/web/src/app/[locale]/admin/db-actions.ts:403-933`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-609`, `apps/web/src/__tests__/db-restore.test.ts`, `apps/web/src/__tests__/lr-upload-route-behavior.test.ts`.
+- Risk: Cycle 5 added useful LR route behavior coverage, but the restore path still has many child-process/lock/marker cleanup branches that are mostly guarded by source shape. The current source is careful; the residual risk is regression detection. Extracting or injecting the child-process runner remains the cleanest way to test timeout, stream error, nonzero close, and post-migration failure cleanup directly.
 
 ## Non-Findings / Closed Stale Candidates
 
-These looked relevant from older artifacts but are already fixed at current HEAD:
+- Cycle 5 CQR5-01 is fixed in source ownership: `startMaintenanceScheduler()` is called from instrumentation and `image-queue.ts` no longer owns `purgeExpiredSessions`. CQR6-01 is a new edge introduced by that extraction, not a duplicate of the old coupling issue.
+- Semantic embedding bootstrap now clamps each query to remaining scan budget with `batchLimit = Math.min(..., remainingScanBudget)` in `image-queue.ts:568-590`; the targeted cap tests passed.
+- Sidecar color backfill now keyset-pages candidates with `id > lastCandidateId` and `LIMIT BATCH_SIZE` in `backfill-color-pipeline.ts:409-427`; the in-app runner has the same keyset shape.
+- Feed/sitemap updated-order indexes are present in migration `0029`, Drizzle schema, and `reconcileLegacySchema`; journal `when` is monotonic above `0028`.
+- `sw.template.js` and generated `sw.js` both include `extendLifetime(event, promise)` around stale image revalidation; the template/generated contract test passed.
+- Admin API auth, server-action origin, and public route rate-limit lint gates passed on current HEAD.
 
-- Processing-error retry now uses delayed escalating backoff (`image-queue.ts:974-989`) instead of immediate synchronous re-enqueue.
-- Defensive queue-state re-init now clears stale `gcInterval` and tracked retry timers before replacing malformed state (`image-queue.ts:417-434`), with tests in `image-queue-gc-timer-reinit.test.ts`.
-- Missing-embedding bootstrap scans are now capped by `SEMANTIC_SCAN_LIMIT` and persist a within-process cursor (`image-queue.ts:570-576`), with model-version reset state present.
-- The SEO fallback in `Nav` now uses `buildSeoSettingsFallback()` instead of an inline partial object using the wrong `siteConfig` field (`components/nav.tsx:10-13`).
-- `reconcileLegacySchema` drift coverage is no longer unguarded: `migrate-reconcile-coverage.test.ts` checks tables, columns, indexes, FKs, drops, and the `processed` default mirror.
-- The storage abstraction remains quarantined by `storage-quarantine.test.ts`; no production code imports `@/lib/storage`, so I did not file its unwired backend API as a live maintainability defect.
+## Final Skipped-File / Common-Missed-Issues Sweep
 
-## File Groups Examined
-
-Deep/current reads:
-
-- Queue and lifecycle: `image-queue.ts`, `queue-shutdown.ts`, `instrumentation.ts`, `single-writer-guard.ts`
-- Backfill/reprocessing: `admin-backfill-runner.ts`, `actions/admin-backfill.ts`, settings UI status wiring
-- Migration/schema drift: `scripts/migrate.js`, `migrate-reconcile-coverage.test.ts`, `migrate-pending-migrations.test.ts`, `db/schema.ts` references
-- Data/privacy/config: `data.ts`, `settings-hash.ts`, `gallery-config.ts`, `nav.tsx`, `site-config.json`
-- Storage quarantine: `lib/storage/*`, `storage-local.test.ts`, `storage-quarantine.test.ts`
-- Mutation/API guard sweep: `app/actions/**`, `app/api/**`, `check-action-origin.ts`, `check-api-auth.ts`, `check-public-route-rate-limit.ts`
-
-Static sweeps:
-
-- `parseInt`, `JSON.parse`, `as any`, `@ts-ignore`, `eslint-disable`, bare catches, timers/listeners, `Promise.all`, rate-limit/origin/auth wrappers, privacy guard names, migration mirror names, and review/deferred-register references.
-
-## Final Sweep
-
-Commonly missed issue classes checked: retry tight loops, orphaned timers, process-global reset obligations, stale config fallbacks, migration mirror drift, public/admin mutation guard drift, privacy-select leakage, uncaught async side effects, JSON parsing without guards, parse-int truncation, stale source-text tests, and dead abstraction wiring.
-
-I found no material CRITICAL/HIGH/MED logic or maintainability defects beyond CQR5-01. The queue/backfill/migration fixes from cycle 4 are present on current HEAD and should not be re-opened from stale review text.
+- Skipped generated/dependency bulk: `node_modules`, `.next`, screenshots, binary fixtures, uploaded assets, fonts, and icons. Generated `apps/web/public/sw.js` was checked against the template because it is served.
+- Checked common missed surfaces: migration journal/reconcile parity, admin-only privacy field guards, API auth wrappers, action origin guards, public route rate limits, restore-maintenance gates, queue/backfill concurrency, service-worker lifetime, content-length parsing, `parseInt` hotspots, `as any`/suppression scans, and stale review carry-forward items.
+- No source files were edited. The only write is this review artifact.
