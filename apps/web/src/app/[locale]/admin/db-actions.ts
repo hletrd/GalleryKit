@@ -42,6 +42,26 @@ import { armDbChildProcessWatchdog } from "@/lib/db-child-watchdog";
 import { escapeCsvField } from "@/lib/csv-escape";
 
 const CSV_TAG_SEPARATOR = '\u0001';
+const RESTORE_SHARED_GROUP_VIEW_COUNT_DRAIN_TIMEOUT_MS = 15_000;
+
+async function drainSharedGroupViewCountsForRestore(
+    timeoutMs: number = RESTORE_SHARED_GROUP_VIEW_COUNT_DRAIN_TIMEOUT_MS,
+): Promise<boolean> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const flushPromise = flushBufferedSharedGroupViewCounts().then(() => true);
+    flushPromise.catch((err) => {
+        console.error('Shared-group view-count drain failed after restore already aborted/timed out', err);
+    });
+    const timeoutPromise = new Promise<false>((resolve) => {
+        timeout = setTimeout(() => resolve(false), timeoutMs);
+        timeout.unref?.();
+    });
+    try {
+        return await Promise.race([flushPromise, timeoutPromise]);
+    } finally {
+        if (timeout) clearTimeout(timeout);
+    }
+}
 
 // @mutation-barrier-exempt: read-only CSV export — no application-table
 // writes (the fire-and-forget audit log self-catches and is covered by the
@@ -570,8 +590,12 @@ export async function restoreDatabase(formData: FormData) {
                 // AGG9B-07 (loop-B cycle 9b): the stop-at-first-failure /
                 // later-stages-never-run ordering contract is enforced by the
                 // behavior-tested runRestoreDrainChecklist orchestrator.
-                await flushBufferedSharedGroupViewCounts();
                 const drainResult = await runRestoreDrainChecklist([
+                    {
+                        name: 'shared-group-view-counts',
+                        drain: () => drainSharedGroupViewCountsForRestore(),
+                        abortLog: 'Restore aborted: shared-group view-count flush did not settle within the drain budget',
+                    },
                     {
                         name: 'image-queue',
                         drain: async () => {

@@ -49,6 +49,7 @@ const ACTION_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.
 
 const APPROVED_ACTION_GUARD_MODULE = '@/lib/action-guards';
 const APPROVED_AUTH_GUARD_MODULE = '@/lib/request-origin';
+const APPROVED_ADMIN_MUTATION_BARRIER_MODULE = '@/lib/admin-mutation-barrier';
 const APPROVED_PRE_ORIGIN_AUTH_READ_MODULES = new Set([
     '@/app/actions',
     '@/app/actions/auth',
@@ -145,29 +146,32 @@ function hasReasonedMutationBarrierExemptComment(node: ts.Node, source: string):
     return /@mutation-barrier-exempt:[^\S\r\n]*(?=[^\s*/])/.test(getLeadingText(node, source));
 }
 
-function bodyAcquiresAdminMutationSlot(body: ts.Node, sourceFile: ts.SourceFile): boolean {
-    let found = false;
-    const visit = (node: ts.Node) => {
-        if (found) return;
-        if (
-            ts.isCallExpression(node)
-            && ts.isIdentifier(node.expression)
-            && node.expression.text === 'acquireAdminMutationSlot'
-        ) {
-            found = true;
-            return;
-        }
-        ts.forEachChild(node, visit);
-    };
-    visit(body);
-    void sourceFile;
-    return found;
-}
-
 function requiresAdminMutationBarrier(relative: string): boolean {
     const normalized = relative.replaceAll(path.sep, '/');
     return normalized.startsWith('src/app/actions/')
         || normalized === 'src/app/[locale]/admin/db-actions.ts';
+}
+
+function collectApprovedAdminMutationSlotImports(sourceFile: ts.SourceFile): Set<string> {
+    const approved = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || statement.moduleSpecifier.text !== APPROVED_ADMIN_MUTATION_BARRIER_MODULE
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+        ) {
+            continue;
+        }
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (importedName === 'acquireAdminMutationSlot') {
+                approved.add(element.name.text);
+            }
+        }
+    }
+    return approved;
 }
 
 function collectApprovedRequireSameOriginImports(sourceFile: ts.SourceFile): Set<string> {
@@ -393,8 +397,8 @@ function sameOriginGuardVariableName(statement: ts.Statement, approvedImports: S
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
     let current = expression;
-    while (ts.isParenthesizedExpression(current)) {
-        current = current.expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAwaitExpression(current)) {
+        current = ts.isParenthesizedExpression(current) ? current.expression : current.expression;
     }
     return current;
 }
@@ -603,6 +607,93 @@ function nodeContainsCallNamed(root: ts.Node, names: Set<string>): boolean {
     return found;
 }
 
+function expressionReadsMutationSlotAcquired(expression: ts.Expression, slotName: string): boolean {
+    const unwrapped = unwrapExpression(expression);
+    return (
+        ts.isPropertyAccessExpression(unwrapped)
+        && unwrapped.name.text === 'acquired'
+        && ts.isIdentifier(unwrapped.expression)
+        && unwrapped.expression.text === slotName
+    );
+}
+
+function statementReturnsEarly(statement: ts.Statement): boolean {
+    if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)) return true;
+    if (ts.isBlock(statement)) {
+        return statement.statements.some(statementReturnsEarly);
+    }
+    return false;
+}
+
+function statementChecksMutationSlotAcquired(statement: ts.Statement, slotName: string): boolean {
+    if (!ts.isIfStatement(statement)) return false;
+    const condition = unwrapExpression(statement.expression);
+    if (
+        ts.isPrefixUnaryExpression(condition)
+        && condition.operator === ts.SyntaxKind.ExclamationToken
+        && expressionReadsMutationSlotAcquired(condition.operand, slotName)
+    ) {
+        return statementReturnsEarly(statement.thenStatement);
+    }
+    return expressionReadsMutationSlotAcquired(condition, slotName);
+}
+
+function isApprovedMutationSlotCall(expression: ts.Expression | undefined, approvedImports: Set<string>): boolean {
+    if (!expression) return false;
+    const unwrapped = unwrapExpression(expression);
+    return (
+        ts.isCallExpression(unwrapped)
+        && ts.isIdentifier(unwrapped.expression)
+        && approvedImports.has(unwrapped.expression.text)
+    );
+}
+
+function bodyAcquiresAdminMutationSlot(
+    body: ts.Node,
+    approvedImports: Set<string>,
+    shadowsApprovedImport: boolean,
+): boolean {
+    if (shadowsApprovedImport || approvedImports.size === 0 || !ts.isBlock(body)) {
+        return false;
+    }
+
+    const blockHasApprovedSlot = (block: ts.Block): boolean => {
+        for (let i = 0; i < block.statements.length; i++) {
+            const statement = block.statements[i];
+            if (!ts.isVariableStatement(statement)) continue;
+            const isUsing = (statement.declarationList.flags & ts.NodeFlags.Using) !== 0;
+            if (!isUsing) continue;
+
+            for (const declaration of statement.declarationList.declarations) {
+                if (
+                    !ts.isIdentifier(declaration.name)
+                    || !isApprovedMutationSlotCall(declaration.initializer, approvedImports)
+                ) {
+                    continue;
+                }
+                const slotName = declaration.name.text;
+                if (block.statements.slice(i + 1).some((next) => statementChecksMutationSlotAcquired(next, slotName))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (node !== body && ts.isFunctionLike(node)) return;
+        if (ts.isBlock(node) && blockHasApprovedSlot(node)) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+}
+
 function statementContainsPreOriginAuthRead(statement: ts.Statement, preOriginAuthReadNames: Set<string>): boolean {
     return nodeContainsCallNamed(statement, preOriginAuthReadNames);
 }
@@ -664,13 +755,7 @@ function nodeContainsProtectedRead(root: ts.Node, dbReadBindings: DbReadBindings
     return found;
 }
 
-function unwrapReadAuthExpression(expression: ts.Expression): ts.Expression {
-    let current = expression;
-    while (ts.isParenthesizedExpression(current) || ts.isAwaitExpression(current)) {
-        current = ts.isParenthesizedExpression(current) ? current.expression : current.expression;
-    }
-    return current;
-}
+const unwrapReadAuthExpression = unwrapExpression;
 
 function isPreOriginAuthReadExpression(expression: ts.Expression, preOriginAuthReadNames: Set<string>): boolean {
     const unwrapped = unwrapReadAuthExpression(expression);
@@ -1221,6 +1306,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const sourceFile = ts.createSourceFile(relative, content, ts.ScriptTarget.Latest, true, scriptKind);
     const approvedRequireSameOriginImports = collectApprovedRequireSameOriginImports(sourceFile);
     const approvedHasTrustedSameOriginImports = collectApprovedHasTrustedSameOriginImports(sourceFile);
+    const approvedAdminMutationSlotImports = collectApprovedAdminMutationSlotImports(sourceFile);
     const preOriginAuthReadNames = collectPreOriginAuthReadNames(sourceFile);
     const approvedReadAuthNames = collectApprovedReadAuthNames(sourceFile);
     const dbReadBindings = collectDbReadBindings(sourceFile, relative);
@@ -1383,13 +1469,17 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             );
             return;
         }
-        if (!bodyAcquiresAdminMutationSlot(body, sourceFile)) {
+        if (!bodyAcquiresAdminMutationSlot(
+            body,
+            approvedAdminMutationSlotImports,
+            functionInfoDeclaresBindingName(bodyInfo, approvedAdminMutationSlotImports),
+        )) {
             if (hasReasonedMutationBarrierExemptComment(owner, content)) {
                 report.passed.push(`OK (barrier-exempt with reason): ${relative}::${name}`);
                 return;
             }
             report.failed.push(
-                `MISSING acquireAdminMutationSlot: ${relative}:${lineOf(owner)} ${name} must hold the admin-mutation barrier slot for its body (using ... = acquireAdminMutationSlot()) or carry '@mutation-barrier-exempt: <reason>' naming its equivalent restore fence`,
+                `MISSING acquireAdminMutationSlot: ${relative}:${lineOf(owner)} ${name} must hold the admin-mutation barrier slot for its body (using ... = acquireAdminMutationSlot() from ${APPROVED_ADMIN_MUTATION_BARRIER_MODULE}, followed by an acquired-state gate) or carry '@mutation-barrier-exempt: <reason>' naming its equivalent restore fence`,
             );
             return;
         }

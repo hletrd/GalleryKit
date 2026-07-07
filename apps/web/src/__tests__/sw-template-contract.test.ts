@@ -101,6 +101,7 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
 
     it('bypasses revocable share pages and public object pages instead of offline-caching them', () => {
         expect(TEMPLATE).toMatch(/function isRevocableShareHtmlRoute\(pathname\)/);
+        expect(TEMPLATE).toContain('p\\/[^/]+');
         expect(TEMPLATE).toContain('[csg]\\/[^/]+');
         expect(TEMPLATE).toMatch(/map\\\/\?\$/);
         const fetchHandler = TEMPLATE.slice(TEMPLATE.indexOf("self.addEventListener('fetch'"));
@@ -110,22 +111,22 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
         expect(htmlCacheIdx).toBeGreaterThan(shareBypassIdx);
     });
 
-    it('keeps normal photo pages eligible for the offline HTML fallback', () => {
+    it('classifies normal photo pages as revocable offline-cache bypass routes', () => {
         const classifier = TEMPLATE.slice(
             TEMPLATE.indexOf('function isRevocableShareHtmlRoute'),
             TEMPLATE.indexOf('function isSensitiveResponse'),
         );
 
-        expect(classifier).not.toContain('p\\/\\d+');
+        expect(classifier).toContain('p\\/[^/]+');
         expect(classifier).toContain('[csg]\\/[^/]+');
         expect(classifier).toMatch(/map\\\/\?\$/);
     });
 
     it('classifies concrete revocable/share routes identically in the template and generated worker', () => {
         const cases = [
-            ['/p/123', false],
-            ['/ko/p/123', false],
-            ['/en-US/p/123', false],
+            ['/p/123', true],
+            ['/ko/p/123', true],
+            ['/en-US/p/123', true],
             ['/s/share-key', true],
             ['/ko/s/share-key', true],
             ['/g/group-key', true],

@@ -10,7 +10,7 @@ import { runRestoreDrainChecklist, type RestoreDrainStage } from '@/lib/restore-
 // behavior tests drive the extracted orchestrator with injected stages.
 
 function makeStages(outcomes: boolean[], calls: string[]): RestoreDrainStage[] {
-    const names = ['image-queue', 'background-db-writes', 'maintenance-sweeps', 'admin-mutations'];
+    const names = ['shared-group-view-counts', 'image-queue', 'background-db-writes', 'maintenance-sweeps', 'admin-mutations'];
     return outcomes.map((outcome, i) => ({
         name: names[i],
         drain: vi.fn(async () => {
@@ -26,21 +26,22 @@ describe('runRestoreDrainChecklist', () => {
         const calls: string[] = [];
         const log = vi.fn();
 
-        const result = await runRestoreDrainChecklist(makeStages([true, true, true, true], calls), log);
+        const result = await runRestoreDrainChecklist(makeStages([true, true, true, true, true], calls), log);
 
         expect(result).toEqual({ ok: true });
-        expect(calls).toEqual(['image-queue', 'background-db-writes', 'maintenance-sweeps', 'admin-mutations']);
+        expect(calls).toEqual(['shared-group-view-counts', 'image-queue', 'background-db-writes', 'maintenance-sweeps', 'admin-mutations']);
         expect(log).not.toHaveBeenCalled();
     });
 
     it.each([
-        [0, 'image-queue', ['image-queue']],
-        [1, 'background-db-writes', ['image-queue', 'background-db-writes']],
-        [2, 'maintenance-sweeps', ['image-queue', 'background-db-writes', 'maintenance-sweeps']],
-        [3, 'admin-mutations', ['image-queue', 'background-db-writes', 'maintenance-sweeps', 'admin-mutations']],
+        [0, 'shared-group-view-counts', ['shared-group-view-counts']],
+        [1, 'image-queue', ['shared-group-view-counts', 'image-queue']],
+        [2, 'background-db-writes', ['shared-group-view-counts', 'image-queue', 'background-db-writes']],
+        [3, 'maintenance-sweeps', ['shared-group-view-counts', 'image-queue', 'background-db-writes', 'maintenance-sweeps']],
+        [4, 'admin-mutations', ['shared-group-view-counts', 'image-queue', 'background-db-writes', 'maintenance-sweeps', 'admin-mutations']],
     ])('stops at failing stage %i (%s): later stages never run and the abort is logged', async (failIndex, stageName, expectedCalls) => {
         const calls: string[] = [];
-        const outcomes = [true, true, true, true];
+        const outcomes = [true, true, true, true, true];
         outcomes[failIndex as number] = false;
         const log = vi.fn();
 
@@ -55,9 +56,9 @@ describe('runRestoreDrainChecklist', () => {
 
     it('propagates a thrown drain to the caller (the restore catch aborts)', async () => {
         const calls: string[] = [];
-        const stages = makeStages([true, true, true, true], calls);
-        stages[1] = {
-            ...stages[1],
+        const stages = makeStages([true, true, true, true, true], calls);
+        stages[2] = {
+            ...stages[2],
             drain: vi.fn(async () => {
                 calls.push('background-db-writes');
                 throw new Error('drain exploded');
@@ -66,16 +67,16 @@ describe('runRestoreDrainChecklist', () => {
         const log = vi.fn();
 
         await expect(runRestoreDrainChecklist(stages, log)).rejects.toThrow('drain exploded');
-        expect(calls).toEqual(['image-queue', 'background-db-writes']);
+        expect(calls).toEqual(['shared-group-view-counts', 'image-queue', 'background-db-writes']);
         expect(log).not.toHaveBeenCalled();
     });
 });
 
 describe('restoreDatabase drain-checklist wiring (source contract)', () => {
     // The orchestrator's behavior is executed above; this thin pin only
-    // proves restoreDatabase actually delegates to it with all four stages
+    // proves restoreDatabase actually delegates to it with all five stages
     // in the documented order and aborts on a failed result.
-    it('wires the four documented stages through runRestoreDrainChecklist in order', () => {
+    it('wires the five documented stages through runRestoreDrainChecklist in order', () => {
         const source = readFileSync(
             path.join(process.cwd(), 'src/app/[locale]/admin/db-actions.ts'),
             'utf8',
@@ -88,10 +89,10 @@ describe('restoreDatabase drain-checklist wiring (source contract)', () => {
         expect(checklistIdx).toBeGreaterThan(-1);
 
         const flushIdx = body.indexOf('await flushBufferedSharedGroupViewCounts()');
-        expect(flushIdx).toBeGreaterThan(-1);
-        expect(flushIdx).toBeLessThan(checklistIdx);
+        expect(flushIdx).toBe(-1);
 
         const stageOrder = [
+            'drainSharedGroupViewCountsForRestore',
             'quiesceImageProcessingQueueForRestore',
             'drainBackgroundDbWritesForRestore',
             'drainMaintenanceSweepsForRestore',

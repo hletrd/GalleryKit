@@ -19,6 +19,12 @@ const withApprovedActionGuard = (body: string) => `
     ${body}
 `;
 
+const withApprovedActionGuardAndMutationBarrier = (body: string) => `
+    import { requireSameOriginAdmin } from '@/lib/action-guards';
+    import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
+    ${body}
+`;
+
 const withApprovedReadAuth = (body: string) => `
     import { isAdmin } from '@/app/actions/auth';
     ${body}
@@ -616,7 +622,112 @@ describe('checkActionSource — function declarations', () => {
     });
 
     it('passes real mutating admin actions that acquire the admin-mutation barrier slot', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                using mutationSlot = acquireAdminMutationSlot();
+                if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: src/app/actions/settings.ts::updateSettings']);
+    });
+
+    it('passes real mutating admin actions that gate protected work behind acquired=true', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                using mutationSlot = acquireAdminMutationSlot();
+                if (mutationSlot.acquired) {
+                    await db.update(settings).set(input);
+                }
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: src/app/actions/settings.ts::updateSettings']);
+    });
+
+    it('fails spoofed local admin-mutation barrier functions', () => {
         const src = withApprovedActionGuard(`
+            function acquireAdminMutationSlot() {
+                return { acquired: true, [Symbol.dispose]() {} };
+            }
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                using mutationSlot = acquireAdminMutationSlot();
+                if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+    });
+
+    it('fails admin-mutation barrier imports from unapproved modules', () => {
+        const src = `
+            import { requireSameOriginAdmin } from '@/lib/action-guards';
+            import { acquireAdminMutationSlot } from '@/lib/fake-admin-mutation-barrier';
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                using mutationSlot = acquireAdminMutationSlot();
+                if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+    });
+
+    it('fails bare admin-mutation barrier calls without using disposal', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                acquireAdminMutationSlot();
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+    });
+
+    it('fails non-disposable admin-mutation barrier assignments', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                const mutationSlot = acquireAdminMutationSlot();
+                if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+    });
+
+    it('fails disposable admin-mutation slots that skip the acquired-state gate', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
             export async function updateSettings(input) {
                 const originError = await requireSameOriginAdmin();
                 if (originError) return { error: originError };
@@ -626,8 +737,9 @@ describe('checkActionSource — function declarations', () => {
             }
         `);
         const report = checkActionSource(src, 'src/app/actions/settings.ts');
-        expect(report.failed).toEqual([]);
-        expect(report.passed).toEqual(['OK: src/app/actions/settings.ts::updateSettings']);
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
     });
 
     it('passes reasoned mutation-barrier exemptions for equivalent restore fences', () => {

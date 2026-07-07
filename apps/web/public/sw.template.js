@@ -58,6 +58,7 @@ function isHtmlRoute(request) {
 
 function isRevocableShareHtmlRoute(pathname) {
   return (
+    /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?p\/[^/]+\/?$/.test(pathname) ||
     /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?[csg]\/[^/]+\/?$/.test(pathname) ||
     /^\/(?:[a-z]{2}(?:-[A-Z]{2})?\/)?map\/?$/.test(pathname)
   );
@@ -552,9 +553,8 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Revocable public object pages — always bypass to network. Offline HTML
-  // cache can otherwise outlive share revoke/delete/expiry or smart-collection
-  // membership changes for up to HTML_MAX_AGE_MS. Normal `/p/:id` photo pages
-  // intentionally remain eligible for the offline HTML fallback.
+  // cache can otherwise outlive photo deletion, share revoke/delete/expiry,
+  // or smart-collection membership changes for up to HTML_MAX_AGE_MS.
   if (isRevocableShareHtmlRoute(pathname) && isHtmlRoute(request)) return;
 
   // HTML routes — network-first with 24 h fallback
