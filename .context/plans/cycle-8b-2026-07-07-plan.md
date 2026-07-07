@@ -151,4 +151,8 @@ the peer's edits had converged and the whole suite was green in the shared tree.
 ## Deploy record
 
 - Pre-deploy checks: `git pull --rebase` clean, no concurrent peer deploy in `ps aux`.
-- `npm run deploy` (repo root): see final ledger line below.
+- `npm run deploy` (repo root, 2026-07-08): SUCCESS — remote build + compose up
+  completed ("Deployment Complete!"), post-deploy auto-prune ran, deploy-host disk
+  healthy (14% used). Production smoke: `/` 307 (locale redirect), `/feed.xml` 200
+  (new limiter live), `/api/health` 200.
+- DEPLOY: per-cycle-success.
