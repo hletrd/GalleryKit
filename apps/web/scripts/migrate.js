@@ -177,6 +177,36 @@ function formatError(error) {
     return { message: String(error) };
 }
 
+/**
+ * C4-01 / DBG4-01 (run-10 c4): legacy migrations whose embedded DML is
+ * mirrored by reconcileLegacySchema's own one-off backfill exception
+ * (the shared_group_images.position re-sequencing UPDATE). ONLY entries in
+ * this set may be baselined despite carrying DML — baselining records a hash
+ * WITHOUT executing SQL, so un-mirrored DML would be silently dropped.
+ * Do NOT add entries here unless reconcileLegacySchema gains an equivalent,
+ * self-gated mirror of the migration's DML effect.
+ */
+const LEGACY_DML_MIRRORED_BY_RECONCILE = new Set(['0001_sync_current_schema']);
+
+/**
+ * Detect whether a migration's SQL carries DML (INSERT/UPDATE/DELETE/REPLACE).
+ * Comments (`-- ...`) are stripped, then statements are split on drizzle's
+ * `--> statement-breakpoint` marker and `;`. Purely lexical — good enough to
+ * fail LOUD on the swallow class; false positives are acceptable (an operator
+ * reviews and, if genuinely mirrored, extends the allowlist deliberately).
+ */
+function journalSqlContainsDml(sql) {
+    const withoutComments = sql
+        .split('\n')
+        .filter((line) => !line.trimStart().startsWith('--') || line.includes('statement-breakpoint'))
+        .join('\n');
+    const statements = withoutComments
+        .split(/-->\s*statement-breakpoint|;/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    return statements.some((s) => /^(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(s));
+}
+
 function getAllJournalMigrations(migrationsFolder) {
     const journalPath = path.join(migrationsFolder, 'meta', '_journal.json');
     const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
@@ -191,6 +221,7 @@ function getAllJournalMigrations(migrationsFolder) {
             tag: entry.tag,
             folderMillis: entry.when,
             hash: crypto.createHash('sha256').update(migrationSql).digest('hex'),
+            containsDml: journalSqlContainsDml(migrationSql),
         };
     });
 }
@@ -739,10 +770,14 @@ async function getRecordedHashes(connection) {
  * ended up greater than every entry 7-17's folderMillis, so drizzle silently
  * skipped them on every deploy.
  *
- * Per-entry baselining keeps drizzle's own hash check authoritative: each
- * journal entry's hash is in the table, so drizzle short-circuits the apply
- * step. New migrations (added later with a strictly-greater `when`) pass the
- * cursor check and apply normally.
+ * Per-entry baselining keeps the table's MAX(created_at) cursor stable: each
+ * baselined row's created_at equals its journal `when` (never a synthetic
+ * max), so the cursor drizzle snapshots once per run is not raised past any
+ * genuinely-pending entry. NOTE (C4-41, verified against the installed
+ * drizzle-orm source): drizzle's migrator performs NO per-entry hash check —
+ * correctness rests entirely on that MAX(created_at) cursor plus this
+ * script's own post-condition in runMigrations(). New migrations (added later
+ * with a strictly-greater `when`) pass the cursor check and apply normally.
  */
 async function baselineAllJournalMigrations(connection, migrations, options = {}) {
     const haveHashes = await getRecordedHashes(connection);
@@ -768,6 +803,29 @@ async function baselineAllJournalMigrations(connection, migrations, options = {}
                 `Baselining them would silently drop their SQL; they must be left for drizzle.migrate() to apply.`
             );
         }
+    }
+
+    // C4-01 / DBG4-01 (run-10 c4): the cursor guard above is skipped when the
+    // caller has no cursor (fresh bootstrap, or an EMPTY-but-existing
+    // __drizzle_migrations table on a gallery-bearing DB) — exactly the branch
+    // through which a brand-new DML-bearing migration could still be baselined
+    // without its SQL ever running. reconcileLegacySchema mirrors DDL (plus the
+    // one allowlisted position backfill), never arbitrary DML, so refuse to
+    // baseline any DML-bearing entry outside the explicit allowlist on EVERY
+    // path. A loud failure here means: extend reconcileLegacySchema with a
+    // self-gated mirror of the DML and add the tag to
+    // LEGACY_DML_MIRRORED_BY_RECONCILE deliberately — or resolve the drift so
+    // the entry rides the drizzle-apply path.
+    const dmlBearing = inserts.filter(
+        (m) => m.containsDml && !LEGACY_DML_MIRRORED_BY_RECONCILE.has(m.tag)
+    );
+    if (dmlBearing.length > 0) {
+        throw new Error(
+            `[Migration] Refusing to baseline ${dmlBearing.length} DML-bearing migration(s) whose SQL has not executed: ` +
+            `${dmlBearing.map((m) => m.tag).join(', ')}. Baselining records the hash WITHOUT running the SQL, and ` +
+            `reconcileLegacySchema does not mirror DML. Either let drizzle.migrate() apply these entries, or mirror ` +
+            `their DML in reconcileLegacySchema and add the tag to LEGACY_DML_MIRRORED_BY_RECONCILE.`
+        );
     }
 
     for (const m of inserts) {
@@ -870,10 +928,14 @@ async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
     await baselineAllJournalMigrations(connection, trueDrift, { maxFolderMillis: cursor });
 }
 
-async function runMigrations(connection, migrationsFolder, expectedMigrations) {
+async function runMigrations(connection, migrationsFolder, expectedMigrations, migrateFn = migrate) {
     const db = drizzle(connection);
     console.log(`[Migration] Applying committed migrations from ${migrationsFolder}`);
-    await migrate(db, { migrationsFolder });
+    // C4-47 note: a rejection here (e.g. duplicate DDL when drizzle applies an
+    // un-baselined pending tail that reconcileLegacySchema already mirrored)
+    // must propagate — main()'s catch sets process.exitCode = 1 so the deploy
+    // fails loudly instead of booting on an ambiguous schema state.
+    await migrateFn(db, { migrationsFolder });
 
     // Post-condition: every journal entry must have a corresponding hash row in
     // __drizzle_migrations. Drizzle's MySQL migrator uses MAX(created_at) as a
@@ -959,9 +1021,12 @@ if (require.main === module) {
 module.exports = {
     areSameFileBytes,
     baselineAllJournalMigrations,
+    getAllJournalMigrations,
     hashFileSync,
+    journalSqlContainsDml,
     main,
     migrateLegacyOriginalUploads,
     prepareLegacyDatabaseIfNeeded,
     resolveUploadRoots,
+    runMigrations,
 };

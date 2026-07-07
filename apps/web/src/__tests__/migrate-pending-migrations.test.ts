@@ -20,17 +20,25 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const require = createRequire(import.meta.url);
+type JournalEntry = { tag: string; hash: string; folderMillis: number; containsDml?: boolean };
 const migrate = require('../../scripts/migrate.js') as {
     prepareLegacyDatabaseIfNeeded: (
         connection: unknown,
         dbName: string,
-        migrations: Array<{ tag: string; hash: string; folderMillis: number }>,
+        migrations: JournalEntry[],
     ) => Promise<void>;
     baselineAllJournalMigrations: (
         connection: unknown,
-        migrations: Array<{ tag: string; hash: string; folderMillis: number }>,
+        migrations: JournalEntry[],
         options?: { maxFolderMillis?: number | null },
     ) => Promise<number>;
+    journalSqlContainsDml: (sql: string) => boolean;
+    runMigrations: (
+        connection: unknown,
+        migrationsFolder: string,
+        expectedMigrations: JournalEntry[],
+        migrateFn?: (db: unknown, opts: { migrationsFolder: string }) => Promise<void>,
+    ) => Promise<void>;
 };
 
 type QueryCall = { sql: string; params?: unknown[] };
@@ -195,6 +203,135 @@ describe('baselineAllJournalMigrations — above-cursor guard (C3-01)', () => {
         expect(inserted).toBe(2);
         const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
         expect(inserts).toHaveLength(2);
+    });
+});
+
+describe('DML-baseline guard (C4-01 / DBG4-01 / TRC4-10)', () => {
+    it('legacy empty-log DB (cursor null): REFUSES to baseline a non-allowlisted DML-bearing entry', async () => {
+        // DBG4-01's reproduced scenario: gallery tables exist, the migrations
+        // table exists but is EMPTY (cursor === null), and a brand-new
+        // DML-bearing migration is missing. The C3-01 above-cursor guard is
+        // structurally skipped here (no cursor), so the DML guard must refuse.
+        const migrations: JournalEntry[] = [
+            { tag: '0000_old_ddl', hash: 'hash-0', folderMillis: 1000 },
+            { tag: '0099_new_dml_backfill', hash: 'hash-99', folderMillis: 99999, containsDml: true },
+        ];
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: [],
+            cursor: null,
+        });
+
+        await expect(
+            migrate.prepareLegacyDatabaseIfNeeded(connection, 'gallerykit', migrations),
+        ).rejects.toThrow(/DML-bearing/);
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(0);
+    });
+
+    it('true-drift path (below cursor): REFUSES to baseline a non-allowlisted DML-bearing entry', async () => {
+        // TRC4-10: a DML-bearing migration missing BELOW the cursor would have
+        // been baselined without its DML ever running.
+        const migrations: JournalEntry[] = [
+            { tag: '0000_dml_drift', hash: 'hash-0', folderMillis: 1000, containsDml: true },
+            { tag: '0001_recorded', hash: 'hash-1', folderMillis: 2000 },
+        ];
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: ['hash-1'],
+            cursor: 2000,
+        });
+
+        await expect(
+            migrate.prepareLegacyDatabaseIfNeeded(connection, 'gallerykit', migrations),
+        ).rejects.toThrow(/DML-bearing/);
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(0);
+    });
+
+    it('allowlisted 0001_sync_current_schema still baselines despite carrying DML (mirrored by reconcile)', async () => {
+        const migrations: JournalEntry[] = [
+            { tag: '0000_init', hash: 'hash-0', folderMillis: 1000 },
+            { tag: '0001_sync_current_schema', hash: 'hash-1', folderMillis: 2000, containsDml: true },
+        ];
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: [],
+            cursor: null,
+        });
+
+        await migrate.prepareLegacyDatabaseIfNeeded(connection, 'gallerykit', migrations);
+
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(2);
+        expect(inserts.map((c) => c.params?.[0])).toEqual(['hash-0', 'hash-1']);
+    });
+
+    it('DDL-only entries still baseline on the empty-log path (pinned legacy-bootstrap behavior preserved)', async () => {
+        const migrations = journal([1000, 2000]);
+        const { connection, calls } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: [],
+            cursor: null,
+        });
+
+        await migrate.prepareLegacyDatabaseIfNeeded(connection, 'gallerykit', migrations);
+        const inserts = calls.filter((c) => c.sql.includes('INSERT INTO __drizzle_migrations'));
+        expect(inserts).toHaveLength(2);
+    });
+});
+
+describe('journalSqlContainsDml (C4-01 detector)', () => {
+    it('flags INSERT / UPDATE / DELETE / REPLACE statements', () => {
+        expect(migrate.journalSqlContainsDml('INSERT INTO t VALUES (1);')).toBe(true);
+        expect(migrate.journalSqlContainsDml('UPDATE t SET a = 1;')).toBe(true);
+        expect(migrate.journalSqlContainsDml('DELETE FROM t;')).toBe(true);
+        expect(migrate.journalSqlContainsDml('REPLACE INTO t VALUES (1);')).toBe(true);
+    });
+
+    it('does not flag DDL-only migrations', () => {
+        expect(migrate.journalSqlContainsDml(
+            'CREATE TABLE `a` (`id` int);--> statement-breakpoint\nALTER TABLE `a` ADD `b` int;',
+        )).toBe(false);
+    });
+
+    it('ignores comment lines and detects DML after a statement-breakpoint', () => {
+        const sql = [
+            '-- UPDATE inside a comment must not count',
+            'ALTER TABLE `shared_group_images` ADD `position` int DEFAULT 0 NOT NULL;--> statement-breakpoint',
+            'UPDATE `shared_group_images` AS `sgi`',
+            'SET `sgi`.`position` = 1',
+            'WHERE `sgi`.`position` = 0;--> statement-breakpoint',
+            'ALTER TABLE `x` ADD `y` int;',
+        ].join('\n');
+        expect(migrate.journalSqlContainsDml(sql)).toBe(true);
+        expect(migrate.journalSqlContainsDml('-- DELETE ME (comment only)\nALTER TABLE `a` ADD `b` int;')).toBe(false);
+    });
+
+    it('flags the real 0001_sync_current_schema file (the allowlisted exception)', () => {
+        const sql = fs.readFileSync(
+            path.resolve(__dirname, '..', '..', 'drizzle', '0001_sync_current_schema.sql'),
+            'utf8',
+        );
+        expect(migrate.journalSqlContainsDml(sql)).toBe(true);
+    });
+});
+
+describe('runMigrations error propagation (C4-47)', () => {
+    it('propagates a duplicate-DDL rejection from the migrator instead of swallowing it', async () => {
+        const { connection } = makeConnection({
+            hasGalleryTables: true,
+            recordedHashes: [],
+            cursor: null,
+        });
+        const duplicateDdl = Object.assign(new Error("Table 'images' already exists"), {
+            code: 'ER_TABLE_EXISTS_ERROR',
+        });
+        await expect(
+            migrate.runMigrations(connection, '/tmp/unused', journal([1000]), async () => {
+                throw duplicateDdl;
+            }),
+        ).rejects.toThrow(/already exists/);
     });
 });
 
