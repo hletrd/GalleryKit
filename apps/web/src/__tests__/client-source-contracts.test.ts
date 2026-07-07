@@ -55,6 +55,37 @@ describe('client component source contracts', () => {
     expect(code).not.toContain("aria-modal={sheetState === 'expanded'");
   });
 
+  it('mounts the service worker registration component from the root layout', () => {
+    const layout = source('app/[locale]/layout.tsx');
+    expect(layout).toContain("import { RegisterServiceWorker } from '@/components/register-service-worker'");
+    expect(layout).toContain('<RegisterServiceWorker />');
+  });
+
+  it('keeps collapsed mobile nav focus order aligned with visual controls before menu', () => {
+    const code = source('components/nav-client.tsx');
+    expect(code.indexOf('id="primary-nav-controls"')).toBeLessThan(code.indexOf('Mobile Expand Toggle'));
+    expect(code).toContain('collapsed controls so DOM focus order matches the visual');
+    expect(code).not.toContain('order-last ml-1');
+  });
+
+  it('shows visible desktop search copy when production semantic search is active', () => {
+    const code = source('components/search.tsx');
+    expect(code).toContain("const showSearchLabel = semanticSearchMode === 'production'");
+    expect(code).toContain("size={showSearchLabel ? 'default' : 'icon'}");
+    expect(code).toContain("{showSearchLabel && <span className=\"hidden lg:inline\">{t('aria.searchPhotos')}</span>}");
+  });
+
+  it('names tag and category delete targets in destructive confirmations', () => {
+    const tags = source('app/[locale]/admin/(protected)/tags/tag-manager.tsx');
+    const categories = source('app/[locale]/admin/(protected)/categories/topic-manager.tsx');
+    expect(tags).toContain('const deleteTarget = initialTags.find');
+    expect(tags).toContain("t('tags.deleteConfirmTitle', { name: deleteTarget?.name ?? '' })");
+    expect(tags).toContain("t('tags.deleteConfirm', { name: deleteTarget?.name ?? '' })");
+    expect(categories).toContain('const deleteTopicTarget = initialTopics.find');
+    expect(categories).toContain("t('categories.deleteConfirmTitle', { label: deleteTopicTarget?.label ?? '' })");
+    expect(categories).toContain("t('categories.deleteConfirm', { label: deleteTopicTarget?.label ?? '' })");
+  });
+
   it('generates admin page metadata from localized admin-route helpers', () => {
     const helper = source('app/[locale]/admin/admin-metadata.ts');
     expect(helper).toContain("getTranslations('nav')");

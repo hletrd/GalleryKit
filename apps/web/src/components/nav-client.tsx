@@ -103,28 +103,6 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     </Link>
                 </div>
 
-                {/* Mobile Expand Toggle. Sized to the 44x44 touch-target
-                    minimum (Apple HIG / Google MDN) — F-2; the previous `p-2`
-                    rendered 32x32 which is below WCAG 2.5.5 AAA. */}
-                {hasExpandableMobileContent && (
-                    <button
-                        onClick={() => setIsExpanded(!isExpanded)}
-                        className={cn(
-                            "min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                            isExpanded ? "ml-auto mt-1" : "order-last ml-1"
-                        )}
-                        aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
-                        aria-expanded={isExpanded}
-                        aria-controls="primary-nav-topics primary-nav-controls"
-                    >
-                        {isExpanded ? (
-                            <ChevronUp className="h-4 w-4" />
-                        ) : (
-                            <ChevronDown className="h-4 w-4" />
-                        )}
-                    </button>
-                )}
-
                 {/* Topics */}
                 <div id="primary-nav-topics" className={cn(
                     "flex items-center gap-2 text-sm font-medium min-w-0 transition-all duration-300",
@@ -189,6 +167,29 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                         {otherLocale.toUpperCase()}
                     </button>
                 </div>
+
+                {/* Mobile Expand Toggle. Sized to the 44x44 touch-target
+                    minimum (Apple HIG / Google MDN). Rendered after the
+                    collapsed controls so DOM focus order matches the visual
+                    order: search, theme, language, then menu. */}
+                {hasExpandableMobileContent && (
+                    <button
+                        onClick={() => setIsExpanded(!isExpanded)}
+                        className={cn(
+                            "min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                            isExpanded ? "ml-auto mt-2" : "ml-1"
+                        )}
+                        aria-label={isExpanded ? t('aria.collapseMenu') : t('aria.expandMenu')}
+                        aria-expanded={isExpanded}
+                        aria-controls="primary-nav-topics primary-nav-controls"
+                    >
+                        {isExpanded ? (
+                            <ChevronUp className="h-4 w-4" />
+                        ) : (
+                            <ChevronDown className="h-4 w-4" />
+                        )}
+                    </button>
+                )}
             </div>
         </nav>
     );

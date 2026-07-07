@@ -61,6 +61,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [isAddingAlias, setIsAddingAlias] = useState(false);
     const [togglingMapSlug, setTogglingMapSlug] = useState<string | null>(null);
     const [mapPublishCandidate, setMapPublishCandidate] = useState<Topic | null>(null);
+    const deleteTopicTarget = initialTopics.find((topic) => topic.slug === deleteSlug) ?? null;
 
     async function applyMapVisible(slug: string, nextValue: boolean) {
         setTogglingMapSlug(slug);
@@ -327,9 +328,9 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
             <AlertDialog open={!!deleteSlug} onOpenChange={(open) => { if (!open && !isDeletingTopic) setDeleteSlug(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>{t('categories.deleteConfirmTitle')}</AlertDialogTitle>
+                        <AlertDialogTitle>{t('categories.deleteConfirmTitle', { label: deleteTopicTarget?.label ?? '' })}</AlertDialogTitle>
                         <AlertDialogDescription>
-                            {t('categories.deleteConfirm')}
+                            {t('categories.deleteConfirm', { label: deleteTopicTarget?.label ?? '' })}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

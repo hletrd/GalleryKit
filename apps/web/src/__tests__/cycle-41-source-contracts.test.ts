@@ -22,6 +22,10 @@ describe('cycle 41 source contracts', () => {
 
     it('shared photo viewers do not render whole-library similar-photo discovery', () => {
         const viewer = readSrc('components/photo-viewer.tsx');
+        const sheet = readSrc('components/info-bottom-sheet.tsx');
         expect(viewer).toContain('{!isSharedView && <SimilarPhotos');
+        expect(viewer).toContain('semanticSearchMode={semanticSearchMode}');
+        expect(sheet).toContain("import SimilarPhotos from '@/components/similar-photos'");
+        expect(sheet).toContain('{!isSharedView && <SimilarPhotos');
     });
 });

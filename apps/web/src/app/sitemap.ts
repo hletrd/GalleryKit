@@ -49,9 +49,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // a single global (non-localized) URL (+1); topicFeedEntries reserves one
     // localized row per topic (`LOCALES.length * topics.length`). Previously
     // only the first term was reserved, so feedEntry and topicFeedEntries
-    // could push the total past MAX_SITEMAP_URLS uncounted.
+    // could push the total past MAX_SITEMAP_URLS uncounted. Static public
+    // experience pages add one localized row per locale.
     const reservedNonImageUrls =
-      LOCALES.length * (1 + topics.length) + 1 + LOCALES.length * topics.length;
+      LOCALES.length * (2 + topics.length) + 1 + LOCALES.length * topics.length;
     const imageBudget = Math.max(
       0,
       Math.floor((MAX_SITEMAP_URLS - reservedNonImageUrls) / LOCALES.length),
@@ -94,6 +95,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }))
   );
 
+  const staticPublicEntries: MetadataRoute.Sitemap = LOCALES.map((locale) => ({
+    url: localizeUrl(BASE_URL, locale, '/timeline'),
+    lastModified: homepageLastModified ? new Date(homepageLastModified) : undefined,
+    changeFrequency: 'weekly' as const,
+    priority: 0.6,
+  }));
+
   // R18-L6: list the feed itself so sitemap-first aggregators (Inoreader,
   // Feedly) can auto-discover the syndication channel even when their
   // HTML-link discovery misses the homepage's <link rel="alternate"> hint.
@@ -128,6 +136,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // it without updating the reservation.
   return [
     ...homepageEntries,
+    ...staticPublicEntries,
     ...topicEntries,
     ...imageEntries,
     ...feedEntry,

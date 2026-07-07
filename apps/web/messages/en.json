@@ -90,8 +90,8 @@
     "currentImage": "Current: {name}",
     "create": "Create",
     "update": "Save",
-    "deleteConfirmTitle": "Delete Category",
-    "deleteConfirm": "Delete this category? This cannot be undone.",
+    "deleteConfirmTitle": "Delete category \"{label}\"?",
+    "deleteConfirm": "This will remove category \"{label}\". This cannot be undone.",
     "deleteAliasTitle": "Delete Alias",
     "deleteAliasConfirm": "Delete this alias? Shared links using this alias will stop working.",
     "deleteAliasButton": "Delete alias {alias}",
@@ -125,8 +125,8 @@
     "edit": "Edit",
     "editDescription": "Rename the tag used across matching photos.",
     "update": "Save",
-    "deleteConfirmTitle": "Delete Tag",
-    "deleteConfirm": "Delete this tag? This cannot be undone.",
+    "deleteConfirmTitle": "Delete tag \"{name}\"?",
+    "deleteConfirm": "This will remove tag \"{name}\". This cannot be undone.",
     "updated": "Saved",
     "deleted": "Deleted",
     "noTags": "No tags yet.",
@@ -818,7 +818,9 @@
   "footer": {
     "about": "GalleryKit",
     "admin": "Admin",
+    "map": "Map",
     "privacy": "Privacy",
+    "timeline": "Timeline",
     "opensInNewWindow": "opens in a new window"
   },
   "aboutGalleryKit": {

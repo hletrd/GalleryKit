@@ -42,6 +42,12 @@ export async function Footer() {
                     <Link href={localizePath(locale, '/about-gallerykit')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                         {t('about')}
                     </Link>
+                    <Link href={localizePath(locale, '/timeline')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                        {t('timeline')}
+                    </Link>
+                    <Link href={localizePath(locale, '/map')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                        {t('map')}
+                    </Link>
                     <Link href={localizePath(locale, '/privacy')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                         {t('privacy')}
                     </Link>

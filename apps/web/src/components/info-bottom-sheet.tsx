@@ -19,6 +19,7 @@ import {
 import { Histogram } from '@/components/histogram';
 import ColorDetailsSection, { humanizeColorPrimaries } from '@/components/color-details-section';
 import WideGamutHint from '@/components/wide-gamut-hint';
+import SimilarPhotos from '@/components/similar-photos';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { buildDownloadFilename } from '@/lib/download-filename';
@@ -38,6 +39,8 @@ interface InfoBottomSheetProps {
     histogramCycleRef?: React.RefObject<(() => void) | null>;
     /** R28-HD-LOW-1: persist WideGamutHint dismissal across sessions for share-route recipients. */
     isSharedView?: boolean;
+    /** Resolved semantic-search mode; gates the production-only SimilarPhotos panel. */
+    semanticSearchMode?: string;
     /** C2-01 (run-10 c2): explicit focus-restore target (the mobile Info
      *  button that opened the sheet). The sheet's internal `return null`
      *  unmounts the FocusTrap in the same commit it deactivates, so
@@ -60,7 +63,7 @@ type SheetState = 'peek' | 'expanded';
 
 const PEEK_HEIGHT = 140;   // px visible in peek state
 
-export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false, histogramCycleRef, isSharedView = false, restoreFocusRef }: InfoBottomSheetProps) {
+export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = false, untitledFallbackTitle, imageSizes = DEFAULT_IMAGE_SIZES, forceSrgbDerivatives = false, histogramCycleRef, isSharedView = false, semanticSearchMode = 'disabled', restoreFocusRef }: InfoBottomSheetProps) {
     const { t, locale } = useTranslation();
     const [sheetState, setSheetState] = useState<SheetState>('peek');
     const [sheetElement, setSheetElement] = useState<HTMLDivElement | null>(null);
@@ -378,6 +381,7 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                         {/* Color details accordion — mirrors desktop sidebar */}
                         <ColorDetailsSection image={image} isAdmin={isAdmin} t={t} forceSrgbDerivatives={forceSrgbDerivatives} />
                         <WideGamutHint colorPrimaries={image.color_primaries} t={t} persistDismissal={isSharedView} />
+                        {!isSharedView && <SimilarPhotos key={image.id} imageId={image.id} imageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />}
 
                         {/* R27-UX-MED-3: histogram now precedes the EXIF grid in
                             the mobile bottom sheet so it's visible without

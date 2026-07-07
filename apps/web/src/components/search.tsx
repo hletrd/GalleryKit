@@ -369,20 +369,22 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     }, [isOpen]);
 
     if (!isOpen) {
+        const showSearchLabel = semanticSearchMode === 'production';
         return (
             <Button
                 ref={triggerRef}
                 variant="ghost"
-                size="icon"
+                size={showSearchLabel ? 'default' : 'icon'}
                 onClick={() => setIsOpen(true)}
                 aria-label={t('aria.searchPhotos')}
                 aria-haspopup="dialog"
                 aria-expanded={isOpen}
                 // 44x44 touch-target floor; matches the adjacent theme/locale
                 // buttons in the nav (F-3).
-                className="h-11 w-11"
+                className={showSearchLabel ? "h-11 gap-2 px-3" : "h-11 w-11"}
             >
                 <SearchIcon className="h-4 w-4" />
+                {showSearchLabel && <span className="hidden lg:inline">{t('aria.searchPhotos')}</span>}
             </Button>
         );
     }

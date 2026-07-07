@@ -90,8 +90,8 @@
     "currentImage": "현재: {name}",
     "create": "만들기",
     "update": "저장",
-    "deleteConfirmTitle": "카테고리 삭제",
-    "deleteConfirm": "이 카테고리를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "deleteConfirmTitle": "\"{label}\" 카테고리를 삭제하시겠습니까?",
+    "deleteConfirm": "\"{label}\" 카테고리를 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
     "deleteAliasTitle": "별칭 삭제",
     "deleteAliasConfirm": "이 별칭을 삭제하시겠습니까? 이 별칭을 사용하는 공유 링크가 작동하지 않게 됩니다.",
     "deleteAliasButton": "별칭 {alias} 삭제",
@@ -125,8 +125,8 @@
     "edit": "수정",
     "editDescription": "사진에 연결된 태그 이름을 변경합니다.",
     "update": "저장",
-    "deleteConfirmTitle": "태그 삭제",
-    "deleteConfirm": "이 태그를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+    "deleteConfirmTitle": "\"{name}\" 태그를 삭제하시겠습니까?",
+    "deleteConfirm": "\"{name}\" 태그를 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
     "updated": "태그를 저장했습니다",
     "deleted": "태그를 삭제했습니다",
     "noTags": "태그가 없습니다.",
@@ -818,7 +818,9 @@
   "footer": {
     "about": "GalleryKit",
     "admin": "관리자",
+    "map": "지도",
     "privacy": "개인정보",
+    "timeline": "타임라인",
     "opensInNewWindow": "새 창에서 열림"
   },
   "aboutGalleryKit": {

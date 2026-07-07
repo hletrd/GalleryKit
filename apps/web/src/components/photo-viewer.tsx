@@ -1046,6 +1046,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             forceSrgbDerivatives={forceSrgbDerivatives}
             histogramCycleRef={histogramCycleRef}
             isSharedView={isSharedView}
+            semanticSearchMode={semanticSearchMode}
             restoreFocusRef={mobileInfoButtonRef}
         />
     </>

@@ -48,6 +48,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     const [deleteId, setDeleteId] = useState<number | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const router = useRouter();
+    const deleteTarget = initialTags.find((tag) => tag.id === deleteId) ?? null;
 
     async function handleUpdate(formData: FormData) {
         if (!editingTag) return;
@@ -141,9 +142,9 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
             <AlertDialog open={deleteId !== null} onOpenChange={(open) => { if (!open && !isDeleting) setDeleteId(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>{t('tags.deleteConfirmTitle')}</AlertDialogTitle>
+                        <AlertDialogTitle>{t('tags.deleteConfirmTitle', { name: deleteTarget?.name ?? '' })}</AlertDialogTitle>
                         <AlertDialogDescription>
-                            {t('tags.deleteConfirm')}
+                            {t('tags.deleteConfirm', { name: deleteTarget?.name ?? '' })}
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
