@@ -307,7 +307,7 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     }
 
     using mutationSlot = acquireAdminMutationSlot();
-    if (!mutationSlot) {
+    if (!mutationSlot.acquired) {
         return { error: t('restoreInProgress') };
     }
 

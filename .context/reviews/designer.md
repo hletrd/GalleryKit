@@ -1,54 +1,27 @@
-# GalleryKit Designer Review - Cycle 7 Lane F
+# GalleryKit Designer UI/UX Review - Cycle 8
 
 Date: 2026-07-07
-Reviewed workspace: `/Users/hletrd/flash-shared/gallery`
-Lane: designer
-Mode: read-only UI/UX review, writing only this review artifact.
+Workspace: `/Users/hletrd/flash-shared/gallery`
+Lane: designer UI/UX
+Mode: review-only. No fixes, commits, pushes, deploys, service changes, file removal, or MySQL mutation.
 
 ## Inventory
 
-Review-relevant inventory was built before selecting findings. I enumerated 605 files across the UI/product surface:
+Read first: `AGENTS.md` and `CLAUDE.md`.
 
-- `apps/web/src/app/**`: 80 route/layout/action files covering public home, topic, photo, share/group, map, timeline, year, smart collection, privacy, not-found/error, admin login, and protected admin pages.
-- `apps/web/src/components/**`: 60 UI components, including nav, search, home grid, cards, photo viewer, lightbox, info sheet, map, upload/admin controls, theme provider, and UI primitives.
-- `apps/web/src/lib/**`: 111 supporting files for config, data shaping, i18n paths, image URLs, color/HDR metadata, search, privacy-sensitive selects, and settings.
-- `apps/web/messages/**`: English and Korean message catalogs.
-- `apps/web/e2e/**`: 10 Playwright browser-flow specs.
-- `apps/web/src/__tests__/**`: 342 Vitest contract/unit/a11y files, including touch target, focus-visible, error shell, public/admin route, privacy, lightbox, and i18n tests.
+Relevant UI surface inventoried:
 
-I also read `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, the local designer/product reviewer instructions, and the project review context. This was not a sample-only pass.
+- `apps/web/src/app/**`: 80 route/layout/action files. Public routes include home, topic, photo, shared link/group, smart collection, map, timeline, year archive, privacy, loading, error, and not-found. Admin routes include login plus dashboard, categories, tags, settings, SEO, DB, password, tokens, users, analytics, and route-level loading/error.
+- `apps/web/src/components/**`: 61 UI/component files. Key surfaces reviewed: `nav-client.tsx`, `search.tsx`, `home-client.tsx`, `masonry-card.tsx`, `photo-viewer.tsx`, `image-zoom.tsx`, `photo-navigation.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `map/map-client.tsx`, `upload-dropzone.tsx`, `image-manager.tsx`, `tag-input.tsx`, admin nav/header/user manager, and shadcn/Radix primitives.
+- `apps/web/messages/en.json`, `apps/web/messages/ko.json`: current LTR locales and admin/public UI strings.
+- `apps/web/e2e/**`: 10 Playwright specs, including public navigation/search/lightbox, focus restore, nav visual target checks, hydration, 404 status, swipe visuals, and opt-in admin flows.
+- `apps/web/src/__tests__/**`: 340 top-level Vitest files, including touch target audit, focus-visible rings, password form a11y, map/privacy, info bottom sheet, lightbox, HDR contrast, i18n parity, source contracts, error shell, and public/admin UX regressions.
 
-## Browser And Code Evidence
-
-Local app startup was not attempted because this lane was read-only and the deployed production instance was reachable with real data. I used `BASE_URL=https://gallery.atik.kr` via `agent-browser` and backed browser observations with source/test evidence.
-
-Routes exercised:
-
-- `/en` desktop and mobile: navigation, mobile menu, tag filters, masonry photo links, footer, search trigger, theme and locale controls.
-- `/ko`: Korean localization and `html[lang="ko"]`.
-- `/en/admin`: login form, empty-submit validation, required fields, password reveal, alert text.
-- `/en/p/348`: photo detail, viewer toolbar, keyboard shortcut instructions, similar photos disclosure, histogram controls, download link.
-- `/en/map`: empty geotagged-map state.
-- `/en/nonexistent-topic-cycle7-lane-f`: 404 shell and document metadata.
-
-Representative browser evidence:
-
-- Main nav exposes `navigation "Main navigation"`, skip link, `Expand menu` / `Collapse menu`, `Search photos`, theme, locale, topic links, and footer links.
-- Search dialog exposes `role="dialog"`, `combobox` label `Search photos, tags, cameras...`, Close button, semantic-search switch, live result count, and Escape focus restore.
-- Admin login empty submit produced role alerts `Username is required` and `Password is required`; fields had `required`, `aria-invalid`, and described error regions.
-- Touch-target spot checks on live DOM measured visible public controls at 44 px or larger, matching source contracts such as `nav-client.tsx:101-118`, `nav-client.tsx:140-190`, `home-client.tsx:332-378`, and `footer.tsx:38-57`.
-
-Focused validation:
-
-```bash
-npm test --workspace=apps/web -- src/__tests__/error-shell-heading.test.ts src/__tests__/privacy-page-landmark.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts src/__tests__/info-bottom-sheet-ia.test.ts
-```
-
-Result: 4 files passed, 16 tests passed.
+Browser checks used `agent-browser` against `https://gallery.atik.kr` only. Admin protected routes were credential-gated, so admin findings below are source-backed; the unauthenticated login page was verified live.
 
 ## Findings
 
-### DES-C7F-01 - 404 pages keep the generic gallery document title
+### DES-C8-01 - Admin category/tag/SEO edit failures are toast-only and do not return focus to fields
 
 Severity: Medium
 Confidence: High
@@ -56,71 +29,57 @@ Status: confirmed
 
 Evidence:
 
-- Browser route: `https://gallery.atik.kr/en/nonexistent-topic-cycle7-lane-f`
-- DOM/browser result: visible page correctly showed `404`, heading `Page not found.`, `Back to gallery`, nav, and footer, and emitted a single `noindex` robots tag. `document.title` remained `ATIK.KR Gallery`.
-- Source: `apps/web/src/app/[locale]/not-found.tsx:12-49` renders the not-found shell but has no title override or client title effect.
-- Source: `apps/web/src/app/[locale]/layout.tsx:22-27` supplies the default/template title, and `apps/web/src/app/[locale]/layout.tsx:54-66` documents that `not-found.tsx` cannot export its own metadata in the current route shape.
-- Test gap: `apps/web/e2e/not-found-status.spec.ts:14-89` pins HTTP 404 and robots behavior but does not assert the 404 page title.
+- Category create/update handlers surface server-action errors only through `toast.error(...)`: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:90-123`.
+- The category create form has visible labels but no local error state, `aria-invalid`, `aria-describedby`, submit pending state, or invalid-field focus path: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:204-221`.
+- The category edit form repeats the same pattern: `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:362-382`.
+- Tag edit handler is also toast-only for update errors: `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:52-66`; its edit form has no inline error region or invalid-field focus: `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:168-181`.
+- SEO settings save returns errors only through toasts, while fields expose help text but no error state or focus target: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:42-72` and `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:98-184`.
+- Contrast with better local patterns: login uses field errors, `aria-invalid`, `aria-describedby`, and first-invalid focus in `apps/web/src/app/[locale]/admin/login-form.tsx:31-45` and `apps/web/src/app/[locale]/admin/login-form.tsx:65-128`; settings uses field errors plus `focusFirstInvalidSetting` in `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:148-185`.
 
 Failure scenario:
 
-A keyboard or screen-reader user opens several tabs from search results or pasted links and cannot distinguish a dead-end 404 tab from a valid gallery tab by the browser title. Search engines and monitoring get the correct 404/noindex signals, but the human-facing error state misses WCAG 2.4.2 page-title specificity.
+A keyboard or screen-reader admin submits a duplicate slug, invalid tag, invalid SEO locale, or sanitized rejected string. The only feedback is an ephemeral toast. Focus remains on the submit button or wherever the browser leaves it, the failing field is not marked invalid, and the error is not associated with the control. This fails the app's stronger form pattern and risks WCAG 3.3.1/3.3.3 remediation gaps.
 
 Suggested fix:
 
-Add a tiny client component inside the not-found shell that sets the document title to localized copy such as `Page not found | {siteTitle}` after hydration, or adopt a supported route-level/global not-found metadata mechanism if the app moves to that structure. Add an e2e assertion beside `not-found-status.spec.ts` that verifies both the visible H1 and title on `/en/nonexistent-page-xyz-abc` and `/ko/...`.
+Use the login/settings pattern: keep per-field/per-form error state, render persistent `role="alert"` or field-level error text, wire `aria-invalid` and `aria-describedby`, focus the first invalid field, and disable/update submit buttons while a request is pending. For server errors that cannot map cleanly to one field, render a form-level alert inside the dialog/card and focus it with `tabIndex={-1}`.
 
-## Coverage Sweep
+### DES-C8-02 - Tag autocomplete popovers can be clipped inside the admin image table scroller
 
-Information architecture:
+Severity: Medium
+Confidence: Medium
+Status: likely
 
-- Public IA is clear on live data: nav topics, search, language/theme controls, photo cards, footer, privacy, and admin entry are discoverable. Source confirms home structure and empty states in `apps/web/src/components/home-client.tsx:287-360`.
-- Photo detail has a hidden H1, explicit shortcut instructions, viewer controls, metadata sections, and similar-photo disclosure in `apps/web/src/components/photo-viewer.tsx`.
+Evidence:
 
-Affordances:
+- The image manager wraps the table in a horizontal overflow container: `apps/web/src/components/image-manager.tsx:424-425`.
+- Each image row renders `TagInput` inside that table/scroller: `apps/web/src/components/image-manager.tsx:498-531`.
+- `TagInput` renders its suggestion list as an absolutely positioned child of its local container, not a portal: `apps/web/src/components/tag-input.tsx:183-232`.
+- The suggestion list depends on `z-50`, but z-index cannot escape clipping by an overflow ancestor: `apps/web/src/components/tag-input.tsx:231-275`.
 
-- Buttons and links use labels, `aria-current`, visible hover/focus styling, and 44 px hit targets in nav/footer/tag/filter/photo-viewer code paths. Live DOM spot checks agreed.
-- Search semantic mode is not a dead-looking toggle on production: enabling semantic search and searching `concert` returned live results and a live result count.
+Failure scenario:
 
-Keyboard and focus navigation:
+On the admin image table, especially at mobile/tablet widths or near the bottom of the visible scroller, opening tag suggestions can place the list outside the scroll container's content box. The dropdown is then partially hidden or requires awkward table scrolling, making pointer selection unreliable and making the combobox feel broken even though keyboard selection still works.
 
-- Search opens from the nav, focuses the input, closes on Escape, and restores focus to the trigger. Source backs this in `apps/web/src/components/search.tsx:319-336` and dialog markup around `search.tsx:417-482`.
-- Photo viewer and lightbox include keyboard handling and focus restoration in `photo-viewer.tsx` and `lightbox.tsx`; targeted focus/error tests passed.
+Suggested fix:
 
-WCAG 2.2 accessibility:
+Render tag suggestions through a portal/popover layer, or specialize `TagInput` with a Radix Popover/Command surface whose content escapes overflow containers. Add an e2e or component-level regression that mounts `TagInput` inside an `overflow-x-auto` table wrapper and asserts the suggestion list is fully visible/selectable.
 
-- Confirmed strengths: landmarks, skip link, page H1s, focus-visible rings, role alerts on login validation, touch target contracts, `lang` and `dir` attributes.
-- Confirmed issue: 404 title specificity, listed above.
+## Verified Strengths / Non-Findings
 
-Responsive breakpoints:
+- Information architecture: public navigation exposes site title, topic links, search, theme, locale, footer links, and admin entry. `nav-client.tsx:91-193`, `footer.tsx`, and live `/en` snapshots confirm landmarks and controls.
+- Focus and keyboard: search has dialog semantics, focus trap, Escape close, input autofocus, active-descendant listbox navigation, and trigger focus restoration in `search.tsx:319-349` and `search.tsx:402-563`. Existing e2e covers search, lightbox, and info-sheet focus restore.
+- Touch targets: public nav, tag filters, footer, photo controls, upload remove buttons, and admin table controls use 44 px floors. The repo has a blocking `touch-target-audit.test.ts`, and live public nav spot checks measured visible controls at 44 px or larger.
+- WCAG/page structure: root layout provides skip link, `lang`, `dir`, color-scheme metadata, and public shell landmarks in `apps/web/src/app/[locale]/layout.tsx:102-154`. 404 pages now set a localized title with `NotFoundDocumentTitle` and live `/en/nonexistent-cycle8-designer-check` reported title `Page not found | ATIK.KR Gallery`, H1 `Page not found.`, and a single `noindex`.
+- Contrast/dark mode: design tokens define light/dark/OLED foreground, muted, destructive text, and forced-colors handling in `globals.css:13-181`. Live desktop dark-mode smoke kept nav controls readable and target-sized.
+- Reduced motion: global reduced-motion CSS clamps animations/transitions and suppresses hover scale transforms in `globals.css:253-279`; photo viewer and navigation also check reduced motion in `photo-viewer.tsx`, `photo-navigation.tsx`, and `image-zoom.tsx`.
+- Responsive breakpoints: home masonry mirrors Tailwind columns in `home-client.tsx:26-79` and reserves card geometry in `home-client.tsx:231-269` plus `masonry-card.tsx:50-75`. Live mobile and desktop public pages were usable.
+- Loading/empty/error states: search, load-more, upload, tokens, photo loading, public not-found, restore maintenance, map empty state, and home filtered-empty state have visible copy and status/alert coverage where appropriate.
+- i18n/RTL: current locales are `en` and `ko` in `apps/web/src/lib/constants.ts:1-4`; root layout sets `dir={getLocaleDirection(locale)}`. No active RTL locale ships, so RTL is a future-launch review requirement rather than a current defect.
+- Perceived performance: public home uses responsive image `srcset`, above-fold priority, content visibility, intrinsic reservation, and no live CLS entries in the browser smoke. LCP was not exposed by the browser CLI run, so no LCP defect is claimed.
 
-- Desktop 1440 and mobile 390 browser passes were usable. Mobile menu expansion exposed topic links and controls without hiding primary search/theme/language affordances.
+## Final Sweep
 
-Loading, empty, and error states:
+No fixes were implemented. No tests, builds, services, deployments, commits, pushes, or database/container operations were run. The temporary MySQL container was not touched.
 
-- Search has unavailable/error status copy and a live status region.
-- Map route has an explicit empty geotagged-photo state.
-- Home and filtered-empty states are coded in `home-client.tsx:344-360`.
-- 404 shell has usable wayfinding, but title needs the fix above.
-
-Form validation UX:
-
-- Admin login prevents empty submit with localized inline alerts, `aria-invalid`, and required fields. Evidence came from live DOM and `apps/web/src/app/[locale]/admin/login-form.tsx:31-45`, `65-128`.
-
-Dark/light mode:
-
-- Source declares `viewport.colorScheme` and light/dark theme colors in `layout.tsx:70-79`; nav exposes a theme toggle. Browser dark-mode pass remained navigable and accessible-tree equivalent.
-
-i18n and RTL:
-
-- English and Korean routes were both exercised. `layout.tsx:103-108` sets `lang` and `dir`, and `locale-path.ts` currently ships only LTR locales (`en`, `ko`). No current RTL bug is claimed; an RTL locale would need a separate visual/a11y pass before launch.
-
-Perceived performance:
-
-- Code uses responsive image sizing, above-fold priority selection, blur/placeholder paths, masonry column sizing, and explicit empty/error states. This lane did not run Lighthouse/Web Vitals, so no performance defect is claimed.
-
-## Files And Categories Examined
-
-Examined categories: public routes, admin login/protected routes, layouts/metadata, nav/search/footer, home grid/cards, photo viewer/lightbox, info sheet, map, upload/admin controls, theme/i18n helpers, site config, data privacy selects, message catalogs, a11y/unit tests, and Playwright specs.
-
-No source files or plans were modified.
+This cycle leaves two UI/UX findings: one confirmed admin form feedback/accessibility gap and one likely autocomplete clipping issue in the admin image table. Everything else reviewed is either covered by existing tests/source contracts or requires authenticated admin browser access for deeper live verification.

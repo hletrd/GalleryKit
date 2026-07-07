@@ -12,6 +12,7 @@ const {
     getGalleryConfigStrictMock,
     getUploadTrackerMock,
     lockReleaseMock,
+    logAuditEventMock,
     saveOriginalAndGetMetadataMock,
     settleUploadTrackerClaimMock,
     statfsMock,
@@ -29,6 +30,7 @@ const {
         getGalleryConfigStrictMock: vi.fn(),
         getUploadTrackerMock: vi.fn(() => tracker),
         lockReleaseMock: vi.fn(),
+        logAuditEventMock: vi.fn(async () => undefined),
         saveOriginalAndGetMetadataMock: vi.fn(),
         settleUploadTrackerClaimMock: vi.fn(),
         statfsMock: vi.fn(),
@@ -101,6 +103,10 @@ vi.mock('@/lib/gallery-config', () => ({
 
 vi.mock('@/lib/revalidation', () => ({
     revalidateAllAppData: vi.fn(),
+}));
+
+vi.mock('@/lib/audit', () => ({
+    logAuditEvent: logAuditEventMock,
 }));
 
 vi.mock('@/lib/restore-maintenance', () => ({
@@ -196,5 +202,78 @@ describe('Lightroom upload route behavior', () => {
         expect(lockReleaseMock).toHaveBeenCalledOnce();
         expect(dbInsertMock).not.toHaveBeenCalled();
         expect(enqueueImageProcessingMock).not.toHaveBeenCalled();
+    });
+
+    it('uses the PAT actor for quota, row ownership, audit, and queue success work', async () => {
+        getGalleryConfigStrictMock.mockResolvedValueOnce({
+            allowHdrIngest: true,
+            autoAltTextEnabled: true,
+            avifEffort: 7,
+            forceSrgbDerivatives: true,
+            imageQualityAvif: 86,
+            imageQualityJpeg: 91,
+            imageQualityWebp: 92,
+            imageSizes: [640, 1536],
+            sdrJpegChroma: '4:2:0',
+            semanticSearchMode: 'stub',
+            stripGpsOnUpload: false,
+            wideGamutJpegChroma: '4:4:4',
+            wideGamutMaxSourcePixels: 50_000_000,
+        });
+        saveOriginalAndGetMetadataMock.mockResolvedValueOnce({
+            bitDepth: 8,
+            blurDataUrl: 'data:image/jpeg;base64,abcd',
+            colorPipelineDecision: 'srgb',
+            colorSignals: { isHdr: false, colorPrimaries: 'srgb' },
+            exifData: { cameraModel: 'TestCam' },
+            filenameAvif: 'img.avif',
+            filenameJpeg: 'img.jpg',
+            filenameOriginal: 'orig.jpg',
+            filenameWebp: 'img.webp',
+            height: 10,
+            iccProfileName: 'sRGB IEC61966-2.1',
+            originalHeight: 10,
+            originalWidth: 10,
+            width: 10,
+        });
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'pat-upload.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+        form.set('title', 'PAT upload');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
+
+        await expect(response.json()).resolves.toEqual({ success: true, id: 9 });
+        expect(response.status).toBe(201);
+        expect(settleUploadTrackerClaimMock).toHaveBeenCalledWith(
+            uploadTracker,
+            'lr:42',
+            1,
+            1024,
+            1,
+            3,
+        );
+        expect(enqueueImageProcessingMock).toHaveBeenCalledWith(expect.objectContaining({
+            id: 9,
+            filenameOriginal: 'orig.jpg',
+            topic: 'seoul',
+            autoAltTextEnabled: true,
+            semanticSearchMode: 'stub',
+        }));
+        expect(logAuditEventMock).toHaveBeenCalledWith(
+            42,
+            'lr_token_used',
+            'image',
+            '9',
+            '203.0.113.42',
+            { topic: 'seoul', filename: 'pat-upload.jpg' },
+        );
+        expect(lockReleaseMock).toHaveBeenCalledOnce();
     });
 });

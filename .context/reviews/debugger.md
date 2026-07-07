@@ -1,120 +1,132 @@
-# Debugger Review - Cycle 7 Lane B
+# Debugger Review - Cycle 8
 
 Date: 2026-07-07 KST
 Reviewer lane: debugger
-HEAD reviewed: `cae5fbd9b88f`
-Scope: latent bugs, edge failures, race conditions, null/undefined regressions, restore/upload/download failure modes, deploy/runtime breakage. Review-only except this artifact.
+HEAD reviewed: `eca554146776`
+Scope: latent bugs, failure modes, regressions, restore/upload/download races, route/server-action edge cases, generated assets, service worker, migration/reconcile, backup/restore, auth/session, i18n routing, and test blind spots.
+Execution constraints honored: review-only; no fixes implemented; no commit, push, deploy, service stop, file removal, source mutation, or MySQL-container mutation. The only written file is this review artifact.
 
 ## Result Summary
 
-- Confirmed latent runtime defects found: 0
-- Likely issues: 1 Low
-- Manual-validation risks: 2
+- Confirmed defects: 1 High
+- Likely/risk findings: 1 Medium
+- Tests run: none. This lane stayed source-inspection only to avoid mutating the protected temporary MySQL container and because the requested output was a review artifact.
 
-The previous cycle's password-change versus restore race is fixed in current HEAD: `updatePassword()` now acquires an admin mutation slot before long Argon2 work and before the password/session transaction. I did not find a current confirmed data-loss race, restore corruption path, auth/session failure, or upload/download path bug in the reviewed code. The one likely issue is a small retention/lifecycle edge in the high-volume upload-serving path.
+The strongest issue is a restore-window regression in `updatePassword()`: it acquires the admin mutation slot but checks the slot object for truthiness instead of checking `.acquired`, so a refused slot still proceeds into Argon2 work and the password/session transaction. That directly defeats the restore drain contract for this one server action.
 
 ## Inventory Built First
 
-Inventoried the repository before detailed review, excluding generated/heavy directories (`.git`, `node_modules`, `.next`, nested `.claude/worktrees`) and TypeScript build info.
+Read first:
 
-Reviewed categories:
+- `AGENTS.md`
+- `CLAUDE.md`
+- code-review skill instructions at `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-- Auth/session mutations: `apps/web/src/app/actions/auth.ts`, `session.ts`, session schema/migrations.
-- Foreground/background restore fences: `db-actions.ts`, `admin-mutation-barrier.ts`, `restore-maintenance*.ts`, `image-queue.ts`, `background-db-writes.ts`, maintenance scheduler.
-- Upload and image processing: `actions/images.ts`, `api/admin/lr/upload/route.ts`, `process-image.ts`, `upload-paths.ts`, `upload-filenames.ts`, derivative cleanup and queue paths.
-- Download/file/OG serving: `serve-upload.ts`, public upload routes, admin DB download route, OG photo route and fetch helper.
-- Public search/share/feed flows: public actions, semantic/similar search routes, share pages, feed routes.
-- Migrations/deploy/runtime: drizzle migrations, `scripts/migrate.js`, Dockerfile, compose, nginx, deploy scripts, package manifests.
-- Tests/docs: restore, migration journal, SQL restore scanner, privacy, secret tracking, rate-limit/auth lint gates, relevant review history.
+Repository inventory:
+
+- Counted and narrowed the active app surface to about 903 relevant files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, and `apps/web/public`, excluding dependency/build output.
+- Counted 44 app route/page/layout/action entry files under `apps/web/src/app`.
+- Inventoried route handlers: admin DB download, Lightroom upload, health/live, OG routes, semantic/similar search, feeds, and both upload route twins.
+- Inventoried migrations: `apps/web/drizzle/0000_*.sql` through `0029_*.sql`, plus `apps/web/drizzle/meta/_journal.json`.
+- Inventoried generated/static assets: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, icons, bundled resources, and upload fixture directories.
+- Inventoried tests covering the relevant failure classes: auth/action-origin/API-auth lint tests, upload route tests, service-worker contracts, migration/reconcile tests, restore scanner tests, privacy guard tests, image queue/backfill tests, and Playwright public/admin flows.
+
+Detailed areas inspected:
+
+- Auth/session edge cases: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/request-origin.ts`.
+- Restore/admin mutation fences: `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`.
+- Upload/image processing failure paths: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`.
+- Public route/cache behavior: `apps/web/src/lib/serve-upload.ts`, both `/uploads/[...path]` route twins, semantic/similar search routes, OG image routes, feed routes, health/live routes.
+- Backup/restore/migration: `apps/web/src/app/api/admin/db/download/route.ts`, `apps/web/scripts/migrate.js`, SQL restore scanner tests and migration source tests.
+- i18n/routing/cache invalidation: `apps/web/src/proxy.ts`, `apps/web/src/i18n/request.ts`, `apps/web/src/lib/locale-path.ts`, `apps/web/src/lib/revalidation.ts`, public `[locale]` layouts/pages.
+- Generated assets/service worker: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/scripts/build-sw.ts`; template versus generated output differs by expected `SW_VERSION` stamping only.
 
 ## Findings
 
-### DBG-B-01 - Low - Upload stream abort listener is not explicitly removed on normal completion
+### DBG-C8-01 - High - Password change proceeds when restore mutation slot is refused
 
-Severity: Low
-Confidence: Medium-Low
+Severity: High
+Confidence: High
+Validation: confirmed from source
+Status: confirmed
+
+Evidence:
+
+- `acquireAdminMutationSlot()` always returns an object. When restore exclusive mode is active it returns `{ acquired: false, [Symbol.dispose]() { ... } }` at `apps/web/src/lib/admin-mutation-barrier.ts:76-80`.
+- The same helper documents the required call-site check as `if (!mutationSlot.acquired)` at `apps/web/src/lib/admin-mutation-barrier.ts:69-75`.
+- Most server actions follow that contract; `rg` found the only truthiness check at `apps/web/src/app/actions/auth.ts:309-312`.
+- `updatePassword()` currently does:
+  - same-origin and current-user checks at `apps/web/src/app/actions/auth.ts:291-303`
+  - one restore-maintenance snapshot at `apps/web/src/app/actions/auth.ts:304-307`
+  - `using mutationSlot = acquireAdminMutationSlot(); if (!mutationSlot) ...` at `apps/web/src/app/actions/auth.ts:309-312`
+  - Argon2 verify/hash and the `admin_users`/`sessions` transaction at `apps/web/src/app/actions/auth.ts:381-416`
+- Restore depends on refused new mutation slots after setting the durable marker and before import: it calls `drainAdminMutationsForRestore()` at `apps/web/src/app/[locale]/admin/db-actions.ts:550-562` and releases the exclusive side later at `apps/web/src/app/[locale]/admin/db-actions.ts:572-578`.
+- Existing auth source coverage only asserts that the slot is acquired before expensive work/DB mutation; it does not assert the refused-slot branch. See `apps/web/src/__tests__/auth-mutation-barrier-source.test.ts:13-26`.
+
+Failure scenario:
+
+1. An admin submits a password change while no restore marker is active.
+2. `updatePassword()` passes the one-time maintenance check at `apps/web/src/app/actions/auth.ts:304-307`.
+3. A restore starts before line 309, sets the durable/process maintenance state, and activates the exclusive mutation barrier while preparing to import.
+4. `acquireAdminMutationSlot()` returns an object with `acquired: false`.
+5. `if (!mutationSlot)` is false because the object is truthy, so the action continues into rate-limit work, Argon2 verification/hash, and the password/session transaction.
+6. The restore drain can believe new mutations are blocked, yet this action writes `admin_users.password_hash` and rotates `sessions` during or immediately around the restore import window. Depending on timing, the restored DB can end up with password/session state that did not come from either a clean pre-restore or clean post-restore state.
+
+Why happy-path tests can pass:
+
+- The barrier unit test correctly verifies refused slots expose `slot.acquired === false` at `apps/web/src/__tests__/admin-mutation-barrier.test.ts:41-48`.
+- The auth source test only checks that the slot line appears before rate-limit, Argon2, and transaction work at `apps/web/src/__tests__/auth-mutation-barrier-source.test.ts:16-25`.
+- There is no behavioral test that drives `updatePassword()` while the exclusive barrier is active and asserts it returns `restoreInProgress` without calling `argon2.verify`, `argon2.hash`, or `db.transaction`.
+
+Suggested fix:
+
+- Change `apps/web/src/app/actions/auth.ts:309-312` to check `if (!mutationSlot.acquired) return { error: t('restoreInProgress') };`.
+- Add an auth action behavior test that activates `drainAdminMutationsForRestore()`, calls `updatePassword()` with otherwise-valid form/session mocks, and asserts no password verification, hash, transaction, cookie write, or audit write occurs.
+- Consider a source-contract test that rejects `if (!mutationSlot)` in `auth.ts`, because this was the exact typo class.
+
+### DBG-C8-02 - Medium - Upload route advertises range handling but always returns full-body 200 responses
+
+Severity: Medium
+Confidence: Medium
 Validation: likely issue from source inspection
+Status: likely
 
 Evidence:
 
-- GET upload routes pass the request abort signal into `serveUploadFile()` in `apps/web/src/app/uploads/[...path]/route.ts:7-15` and `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:7-15`.
-- `serveUploadFile()` opens and fd-stats the requested derivative before streaming in `apps/web/src/lib/serve-upload.ts:304-335`.
-- The function registers a one-shot abort listener that closes over the file stream in `apps/web/src/lib/serve-upload.ts:337-360`.
-- The normal response path returns the converted web stream in `apps/web/src/lib/serve-upload.ts:362-366` without a visible `removeEventListener` on stream `close`, `end`, or `error`.
+- Both upload route twins carry the public rate-limit exemption rationale that derivative serving is bounded by "range handling" at `apps/web/src/app/uploads/[...path]/route.ts:4` and `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:4`.
+- The GET handlers pass only `If-None-Match`, method, and abort signal to `serveUploadFile()` at `apps/web/src/app/uploads/[...path]/route.ts:7-15` and `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:7-15`; the `Range` header is never forwarded.
+- `serveUploadFile()` handles 304 and HEAD at `apps/web/src/lib/serve-upload.ts:268-302`, then opens the file and always sets full-file `Content-Length` at `apps/web/src/lib/serve-upload.ts:304-328`.
+- The body response is always returned with default status 200 at `apps/web/src/lib/serve-upload.ts:365-369`; there is no `206 Partial Content`, `Content-Range`, `Accept-Ranges`, or `416 Range Not Satisfiable` path.
+- Upload-serving tests cover GET, 304, HEAD, abort cleanup, directory/extension mismatches, and symlink containment, but `rg` found no `Range`, `Accept-Ranges`, or `Content-Range` coverage in `apps/web/src/__tests__/serve-upload.test.ts:41-260` or `apps/web/src/__tests__/uploads-route-method-wiring.test.ts:41-65`.
 
-Concrete failure scenario:
+Failure scenario:
 
-Under normal image loads, `Readable.toWeb()` and `autoClose` should close the file descriptor. If the runtime keeps the request `AbortSignal` reachable longer than the body stream, the one-shot listener can retain the already-closed stream object until request GC. This is not a confirmed fd leak, but it is avoidable retention on a high-volume image-serving path.
-
-Suggested fix:
-
-Use a named abort handler and remove it from the signal on stream `close`, `end`, and `error`, while keeping the current `{ once: true }` abort behavior. Add a focused unit/source test if `AbortSignal` can be mocked cleanly.
-
-## Previously Suspected Issues Rechecked
-
-- Password-change restore race: fixed. `updatePassword()` now checks same-origin, current user, restore maintenance, then acquires `acquireAdminMutationSlot()` at `apps/web/src/app/actions/auth.ts:291-312` before validation, rate-limit work, Argon2 verification/hash, and the `admin_users`/`sessions` transaction at `apps/web/src/app/actions/auth.ts:381-416`.
-- Restore foreground drain: present. Restore quiesces queues/background writes, then drains foreground admin mutations before import at `apps/web/src/app/[locale]/admin/db-actions.ts:539-568`, and always releases the exclusive flag in `apps/web/src/app/[locale]/admin/db-actions.ts:572-611`.
-- Barrier behavior: `acquireAdminMutationSlot()` increments `inFlight` and releases via `Symbol.dispose` in `apps/web/src/lib/admin-mutation-barrier.ts:76-91`; restore drain blocks new slots and times out instead of importing over in-flight mutations in `apps/web/src/lib/admin-mutation-barrier.ts:97-135`.
-
-## Manual-Validation Risks
-
-### DBG-B-02 - Medium - Restore child-process failure behavior remains difficult to prove without behavioral fakes
-
-Severity: Medium validation risk
-Confidence: Medium
-Validation: manual or expanded automated validation required
-
-Evidence:
-
-- Restore has multiple asynchronous child-process and stream exits in `apps/web/src/app/[locale]/admin/db-actions.ts:640-854`: SQL scan rejection, read stream errors, `mysql` spawn errors, stdin errors, timeout, nonzero close, success close, and post-restore migration.
-- Cleanup and lifecycle release paths are source-visible at `apps/web/src/app/[locale]/admin/db-actions.ts:572-635`, but many event orderings are not exercised by the targeted tests I ran.
-
-Concrete failure scenario:
-
-A timeout, `mysql` spawn error, read-stream error, or post-restore migration failure could leave durable maintenance, queue state, process locks, or temp files in the wrong final state if an event ordering diverges from the intended source path.
+When a derivative is served through the route-handler fallback rather than Next's static file server, a browser/CDN/client that retries or resumes with `Range: bytes=...` receives a full 200 response. That can break resume semantics, waste bandwidth on large JPEG/AVIF derivatives, and diverge from the route comment and lint exemption rationale. The failure is easy to miss because ordinary image loads, HEAD probes, and ETag revalidation all pass.
 
 Suggested fix:
 
-Extract or wrap restore/import/migration child-process execution so tests can simulate timeout, spawn error, stdin error, read-stream error, nonzero close, and post-migration failure. Assert final marker, lock, queue, temp-file, and response state for each case.
-
-### DBG-B-03 - Low/Medium - Deployment cleanup and proxy behavior need live-host validation
-
-Severity: Low/Medium validation risk
-Confidence: Medium
-Validation: manual deployment validation required
-
-Evidence:
-
-- Deploy prunes Docker artifacts after a successful health check in `apps/web/deploy.sh:57-104`; comments document bind-mounted persistence and intentionally avoid `volume prune -a`.
-- Nginx body-size/rate-limit behavior is path-sensitive in `apps/web/nginx/default.conf:99-204`, with separate caps for admin DB, dashboard upload, Lightroom upload, and generic admin API routes.
-
-Concrete failure scenario:
-
-A host-specific compose path, bind mount, proxy, or nginx location mismatch can pass source review but fail in production: large valid uploads 413 at the edge, restore bodies exceed a proxy cap, health checks pass while a later prune removes an unexpected non-bind-mounted dependency, or rate-limit buckets collapse behind a load balancer.
-
-Suggested fix:
-
-Keep deploy validation on the live host: exercise login, dashboard upload, Lightroom upload, DB backup download, restore-size rejection, public upload serving, and Docker disk cleanup after deploy. Verify persistence directories are bind mounts and not Docker volumes before relying on prune behavior.
-
-## Non-Findings and Code Evidence
-
-- Auth mutation ordering: login pre-increments rate limits before Argon2 work, stores hashed sessions, and sets secure/httpOnly cookies; password change now participates in the restore mutation barrier.
-- Upload admission: `uploadImages()` checks maintenance, same-origin, admin slot, current user, form fields, upload contract lock, disk space, and topic existence before processing; failure paths release claims and clean partial files.
-- Lightroom upload: route-level admin auth is scoped to `lr:upload`, body/chunked/size checks run early, upload tracker claims reject duplicates, and late restore/HDR/GPS/DB failure paths clean original files.
-- File serving: derivative serving validates directory/extension/path segments, rejects symlinks, verifies realpath containment, fd-stats the opened file, and handles HEAD without opening the streaming fd.
-- Backup/download: admin DB download validates the backup filename, resolves inside the backups directory, realpath-checks directory and file, opens/stats the descriptor, and returns attachment/no-store/nosniff headers.
-- Migrations: journal monotonicity and pending-migration checks passed; schema reconciliation and restore scanner tests passed.
-- Public data privacy: privacy field tests passed, and `apps/web/src/lib/data.ts:368-488` has source-level public/map field guards for admin-only fields.
-- JSON-LD/XSS: `safeJsonLd()` escapes script-breaking characters before `dangerouslySetInnerHTML` use in the photo page.
-
-## Validation Evidence
-
-- `npm run lint:api-auth --workspace=apps/web` - passed.
-- `npm run lint:action-origin --workspace=apps/web` - passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
-- `npm test --workspace=apps/web -- migration-journal.test.ts migration-journal-monotonicity.test.ts migrate-pending-migrations.test.ts sql-restore-scan.test.ts tracked-secrets.test.ts privacy-fields.test.ts` - passed, 6 files / 63 tests.
-- `npm audit --workspace=apps/web --audit-level=moderate --json` - failed with moderate dependency advisories; tracked in the security report, not promoted here as a source-level debugger defect.
+- Either implement single-range support in `serveUploadFile()` and pass `request.headers.get('range')` from both route twins, or remove the "range handling" claim and explicitly decide that the fallback route does not support partial content.
+- If implemented, add tests for satisfiable range, suffix range, invalid/multiple range, conditional 304 precedence, HEAD with range, and abort cleanup on a partial stream.
 
 ## Final Sweep
 
-Final sweep covered auth/session state, public/admin API error paths, server action guard ordering, upload/restore/download cleanup, file descriptor and stream paths, migration journal behavior, rate-limit ordering, CSP/JSON-LD/XSS-adjacent rendering, raw SQL and child-process paths, deploy scripts, tests, and docs. I did not modify source code or plans. Residual risk is mainly unexercised child-process failure ordering and live deployment topology, not a confirmed current code defect.
+No additional confirmed findings after reviewing these areas:
+
+- Browser upload path: `uploadImages()` checks same-origin, restore maintenance, admin mutation slot, current user, upload contract lock, disk space, topic existence, per-file failures, late restore cleanup, upload tracker settlement, and post-commit revalidation/audit boundaries in `apps/web/src/app/actions/images.ts:129-624`.
+- Delete/update image actions: single and bulk deletion hold mutation slots, handle strict cleanup failures as explicit user-visible failures, and revalidate narrow or broad paths in `apps/web/src/app/actions/images.ts:655-923`.
+- Lightroom upload path: token/cookie auth, content-length/chunked rejection, quota preclaim/settlement, multipart parse slot, upload contract lock, HDR gate, GPS original stripping, late restore cleanup, DB insert containment, enqueue/audit/revalidate post-commit behavior in `apps/web/src/app/api/admin/lr/upload/route.ts:84-611`.
+- Queue processing: advisory claim, original resolution, restore-maintenance checks, derivative verification, retry/permanent-failure tracking, side-effect draining, bootstrap resume, and orphan temp cleanup in `apps/web/src/lib/image-queue.ts:373-1240`.
+- Image processing: original save cleanup, RAW rejection, color/HDR metadata extraction, atomic derivative writes, backup/rollback cleanup, non-empty derivative verification, and restore sidecar guards in `apps/web/src/lib/process-image.ts:887-1485`.
+- Backup/restore: backup dump validation, temp permissions, child-process watchdogs, SQL scan/trailer checks, post-restore migrations, lock release, maintenance retention on failure, and queue resume behavior in `apps/web/src/app/[locale]/admin/db-actions.ts:166-939`.
+- Migration/reconcile: journal baselining guards, pending-tail handling, DML-baseline refusal, full-schema reconcile, migration postcondition hash check, and admin seeding in `apps/web/scripts/migrate.js:348-1034`.
+- Auth/API wrappers: token scope handling, same-origin cookie auth, token rate-limit attempts, no-store/nosniff defaults, and request origin trust in `apps/web/src/lib/api-auth.ts:1-145` and `apps/web/src/lib/request-origin.ts:1-109`.
+- Public semantic/similar routes: restore gates, same-origin checks, content-length enforcement, JSON shape checks, rate-limit pre-increment, query/body caps, no-store headers, and failure responses in `apps/web/src/app/api/search/semantic/route.ts:1-369` and `apps/web/src/app/api/search/similar/[id]/route.ts:1-286`.
+- OG/feed/health routes: restore-maintenance fast paths, no-store on errors, rate-limit placement, fallback responses, and cache validators inspected in `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx`, `apps/web/src/app/feed.xml/route.ts`, and localized feed routes.
+- i18n/proxy/routing: locale prefix enforcement, admin route protection, CSP nonce injection, admin-render cache marker, and not-found maintenance guards in `apps/web/src/proxy.ts`, `apps/web/src/i18n/request.ts`, and localized public layouts.
+- Generated assets/service worker: `public/sw.js` is regenerated from `public/sw.template.js` with the expected stamped version; image cache HEAD revalidation, HTML-cache admin exclusions, and offline fallback routing were inspected.
+- Tests: current tests cover many previously reported races, but the auth refused-slot branch and upload range semantics are not covered.
+
+Residual risks:
+
+- This was a source review, not a runtime or browser-flow run. Child-process restore event orderings and deployment proxy/body-size behavior still deserve behavioral validation in their own lanes.
+- I did not run tests or commands that could touch the protected MySQL container.

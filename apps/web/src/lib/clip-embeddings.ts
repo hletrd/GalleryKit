@@ -33,15 +33,19 @@ export {
 // to the default rather than yield 0 (a 0 scan-limit would scan nothing). Also
 // apply a host-budgeted upper clamp so an operator misconfiguration can't
 // request a million-row brute-force scan/top-k in one public request.
-export const SEMANTIC_ENV_INT_MAX = 25_000;
-function envPositiveInt(raw: string | undefined, fallback: number): number {
+export const SEMANTIC_SCAN_LIMIT_HARD_MAX = 25_000;
+export const SEMANTIC_TOP_K_HARD_MAX = 100;
+// Backward-compatible alias for older source-contract tests/docs that named
+// the original shared scan-limit clamp.
+export const SEMANTIC_ENV_INT_MAX = SEMANTIC_SCAN_LIMIT_HARD_MAX;
+function envPositiveInt(raw: string | undefined, fallback: number, max: number): number {
     const n = Number(raw ?? '');
     if (!Number.isFinite(n) || n <= 0) return fallback;
     const i = Math.floor(n);
-    return i >= 1 ? Math.min(i, SEMANTIC_ENV_INT_MAX) : fallback;
+    return i >= 1 ? Math.min(i, max) : fallback;
 }
-export const SEMANTIC_TOP_K_MAX = envPositiveInt(process.env.SEMANTIC_TOP_K_MAX, 50);
-export const SEMANTIC_SCAN_LIMIT = envPositiveInt(process.env.SEMANTIC_SCAN_LIMIT, 2000);
+export const SEMANTIC_TOP_K_MAX = envPositiveInt(process.env.SEMANTIC_TOP_K_MAX, 50, SEMANTIC_TOP_K_HARD_MAX);
+export const SEMANTIC_SCAN_LIMIT = envPositiveInt(process.env.SEMANTIC_SCAN_LIMIT, 2000, SEMANTIC_SCAN_LIMIT_HARD_MAX);
 
 /**
  * Compute cosine similarity between two 512-dim Float32Arrays.

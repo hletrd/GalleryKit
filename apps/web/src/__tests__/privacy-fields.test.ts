@@ -1,8 +1,20 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { images } from '@/db/schema';
 import { adminSelectFieldKeys, publicSelectFieldKeys } from '@/lib/data';
 import { timelineSelectFieldKeys } from '@/lib/data-timeline';
 import { searchEnrichmentSelectFields } from '@/lib/search-enrichment-fields';
+
+const dataSource = readFileSync(resolve(__dirname, '../lib/data.ts'), 'utf8');
+
+function sourceBetween(source: string, startNeedle: string, endNeedle: string): string {
+    const start = source.indexOf(startNeedle);
+    const end = source.indexOf(endNeedle, start + startNeedle.length);
+    expect(start, `${startNeedle} should exist`).toBeGreaterThanOrEqual(0);
+    expect(end, `${endNeedle} should exist after ${startNeedle}`).toBeGreaterThan(start);
+    return source.slice(start, end);
+}
 
 const SENSITIVE_KEYS = [
     'latitude',
@@ -163,5 +175,29 @@ describe('Privacy field separation', () => {
         for (const key of SENSITIVE_KEYS) {
             expect(enrichmentKeys).not.toContain(key);
         }
+    });
+
+    it('public projection blocks do not alias safe keys to sensitive image columns', () => {
+        const publicSelectDerivation = sourceBetween(
+            dataSource,
+            'const {\n    latitude: _omitLatitude',
+            'const publicSelectFields = {',
+        );
+        for (const key of SENSITIVE_KEYS) {
+            expect(publicSelectDerivation, `${key} must be explicitly omitted before publicSelectFields rest-spread`).toContain(`${key}: _omit`);
+        }
+
+        const searchFieldsSource = sourceBetween(
+            dataSource,
+            'const searchFields = {',
+            'type _SearchSensitive',
+        );
+        const leaked = SENSITIVE_KEYS.filter((key) =>
+            new RegExp(`\\b[A-Za-z0-9_]+\\s*:\\s*images\\.${key}\\b`).test(searchFieldsSource),
+        );
+        expect(
+            leaked,
+            `Public searchFields must not alias safe keys to sensitive images.* columns: ${leaked.join(', ')}`,
+        ).toEqual([]);
     });
 });

@@ -1,52 +1,117 @@
-# Cycle 7 - Architect Lane
+# Cycle 8 - Architect Lane
 
 Date: 2026-07-07
 Reviewer: architect
-HEAD reviewed: `cae5fbd9b88f193a815bc91c1e41df2833094fd7`
-Mode: read-only architecture/design review except this artifact. No source files or plans were modified.
+HEAD reviewed: `eca55414677676462ae54a5579d9c35bfdf16d3c`
+Mode: read-only architectural/design review except this artifact. I did not implement fixes, commit, push, deploy, stop services, remove source files, or touch the temporary MySQL container named `gallerykit-e2e-mysql-cycle7-47691` on `127.0.0.1:33307`.
 
 ## Inventory
 
-I inventoried the repository first and reviewed architecture through cross-file contracts, not isolated files.
+I read `AGENTS.md` and `CLAUDE.md` first, then inventoried the repository surface before reviewing individual boundaries.
 
-- Product/runtime contract: `AGENTS.md`, `CLAUDE.md`, root/web READMEs, review history, deferred plans, and deployment notes.
-- Layers reviewed: Next.js route tree, public/admin server actions, API routes, auth/session/rate-limit boundaries, data-access layer, schema/migrations, image processing pipeline, background queues, restore fences, smart collections, sharing, SEO/i18n, and storage quarantine.
-- Operational architecture: migration/reconcile script, deploy scripts, Docker/compose/nginx topology, service worker/source contracts, lint gates, and test suites.
-- Counts: 606 app source files, 346 source-contract/unit tests, 12 e2e/fixture files, 30 SQL migrations, 29 web scripts, and 3 top-level docs/scripts outside app scope.
+- Docs and operating contracts: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`, `.context/plans/`, `.context/reviews/`, deploy/nginx notes, migration runbook, and prior cycle architect output.
+- Application surface: 600 TypeScript/TSX source files under `apps/web/src`, including 80 App Router files and 111 `lib/` files.
+- Tests and gates: 346 unit/source-contract tests in `src/__tests__`, 12 Playwright e2e files, lint scripts for admin API auth, action origin, public route rate limits, JS scripts, migration journal, privacy fields, touch targets, and many source-contract tests.
+- Data/deploy topology: 30 SQL migrations plus Drizzle journal, `scripts/migrate.js`, `Dockerfile`, `docker-compose.yml`, `deploy.sh`, `nginx/default.conf`, service worker templates, runtime instrumentation, and operational sidecar scripts.
+- Architecture areas inspected: app/data/lib boundaries, server actions vs API routes, auth/origin/rate-limit gates, public/admin select contracts, storage abstraction status, upload/image queueing, color/HDR processing, semantic search activation, migration/reconcile behavior, deploy/nginx/cache topology, i18n routing, restore fences, and process-local operational constraints.
 
-Validation performed: static architecture review only. I did not run application quality gates because this review lane was scoped to read-only inspection plus report artifacts.
+Validation performed: static architecture review only. I did not run quality gates because this lane was scoped to read-only inspection plus this report artifact.
 
 ## Findings Summary
 
 - Critical: 0
 - High: 0
-- Medium: 1 confirmed architecture issue
-- Low: 1 confirmed boundary/coupling risk
+- Medium: 4
+- Low: 2
 
 ## Findings
 
-### ARCH-C7-01 - Smart-collection topic references have no lifecycle owner on topic deletion
+### ARCH-C8-01 - Public data-contract guards can be bypassed by aliasing sensitive columns
 
 Severity: Medium
 Confidence: High
-Status: Confirmed from code
+Status: Risk, confirmed guard-shape gap
 
 Evidence:
 
-- The architectural model stores smart-collection rules as JSON text (`apps/web/drizzle/0009_smart_collections.sql:6-14`). This is intentionally flexible, but it means cross-entity references inside the AST are outside relational FK enforcement.
-- Topic predicates are first-class AST values and are validated only as strings (`apps/web/src/lib/smart-collections.ts:432-440`).
-- Rename owns this dependency explicitly: `updateTopic()` scans every smart collection and remaps exact references in the same transaction (`apps/web/src/app/actions/topics.ts:316-349`), using `remapTopicSlugInQuery()` (`apps/web/src/lib/smart-collections.ts:522-550`).
-- Delete does not share that ownership. `deleteTopic()` checks `images.topic`, then deletes the topic (`apps/web/src/app/actions/topics.ts:448-462`) without consulting `smart_collections`.
+- The canonical public field set explicitly omits sensitive keys from `adminSelectFields` and relies on object keys plus a `PrivacySensitiveKeys` union for compile-time protection (`apps/web/src/lib/data.ts:368-407`, `apps/web/src/lib/data.ts:458-475`).
+- Public mirrors use the same key-name pattern. `searchEnrichmentSelectFields` selects direct `images` columns, then checks `Extract<keyof typeof searchEnrichmentSelectFields, PrivacySensitiveKeys>` (`apps/web/src/lib/search-enrichment-fields.ts:29-47`).
+- Timeline mirrors the public field shape manually and guards only selected object keys (`apps/web/src/lib/data-timeline.ts:35-67`).
+- Text search does the same inside `searchImages`: `searchFields` is hand-built, then guarded by `Extract<keyof typeof searchFields, _PrivacySensitiveKeys>` (`apps/web/src/lib/data.ts:1599-1617`).
 
-Concrete failure scenario:
+Failure scenario:
 
-The system preserves smart-collection behavior across topic rename, but not across topic deletion. A public smart collection can keep a valid query that targets a deleted topic slug and degrade into an empty gallery with no schema violation, no admin warning, and no route-level error. This is especially likely because smart collections are documented as direct-DB-authored operator artifacts rather than a fully guided UI workflow.
+A future public route can accidentally select `gpsLat: images.latitude`, `originalName: images.user_filename`, or another sensitive column under a safe-looking alias. The current type guard inspects the result object key, not the underlying Drizzle column, so the code typechecks and the leak reaches unauthenticated responses despite the privacy guard comments.
 
 Suggested fix:
 
-Create one topic-reference lifecycle boundary for smart collections. The deletion path should use the same parser/remapper family as rename to find exact topic references, then apply a product decision: block deletion while collections reference the topic, or automatically mark/update affected collections with an audit trail. Add tests at the action/helper level so rename and delete remain symmetrical for `topic eq` and `topic in` predicates.
+Move public response selects behind a column-level allowlist rather than key-name deny checks. Prefer deriving public route-specific selects from `publicSelectFields`, or introduce a small helper/type that only accepts approved public schema columns. Add an AST lint/source-contract test that rejects direct use of `images.latitude`, `images.longitude`, `images.filename_original`, `images.user_filename`, and other `PrivacySensitiveKeys` columns in public select modules even when aliased.
 
-### ARCH-C7-02 - Shared-group view counting crosses read, cache, and write boundaries
+### ARCH-C8-02 - Derivative setting changes invalidate app data, but not the dominant static image serving path
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+
+Evidence:
+
+- Existing derivatives under `public/uploads` are served by Next static handling, and `next.config.ts` gives them `Cache-Control: public, max-age=3600, must-revalidate` (`apps/web/next.config.ts:56-73`).
+- `serve-upload.ts` includes `IMAGE_PIPELINE_VERSION`, mtime, size, and settings hash in the route-handler ETag, but its own comment says existing static derivatives still require re-encode to change bytes and mtime (`apps/web/src/lib/serve-upload.ts:240-258`).
+- `settings-hash.ts` also documents that the hash only helps route-handler fallback and that existing files normally resolve through Next's static server (`apps/web/src/lib/settings-hash.ts:14-19`).
+- `updateGallerySettings()` detects byte-impacting changes and returns `requiresBackfill`, but still commits settings and only revalidates the app tree (`apps/web/src/app/actions/settings.ts:168-199`, `apps/web/src/app/actions/settings.ts:224-239`); `revalidateAllAppData()` only calls `revalidatePath('/', 'layout')` (`apps/web/src/lib/revalidation.ts:59-64`).
+
+Failure scenario:
+
+An admin changes `force_srgb_derivatives`, JPEG/AVIF quality, chroma, or `wide_gamut_max_source_pixels`. Pages and metadata can revalidate immediately, but already-uploaded images continue serving old static bytes until a manual re-encode rewrites the files. The UI can show new settings while visitors inspect old derivatives, which is especially confusing for color/HDR correctness work.
+
+Suggested fix:
+
+Choose one image invalidation model and make it enforceable. The strongest fix is to move generated derivatives out of `public/` so all `/uploads/*` traffic goes through the route handler with the settings-aware ETag. A scalable alternative is content-addressed or versioned derivative filenames keyed by pipeline/settings hash. If static serving stays, make byte-impacting setting changes a guided workflow that blocks or clearly queues a backfill before presenting the setting as applied to existing assets.
+
+### ARCH-C8-03 - Semantic embedding storage cannot retain multiple model versions
+
+Severity: Medium
+Confidence: High
+Status: Confirmed
+
+Evidence:
+
+- The schema says `model_version` tags the encoder, but `imageEmbeddings.imageId` is the primary key and `modelVersion` is only indexed for scans (`apps/web/src/db/schema.ts:271-300`).
+- The physical migration also creates `PRIMARY KEY (image_id)` and a separate `model_version` column (`apps/web/drizzle/0012_image_embeddings.sql:5-11`); migration 0022 only adds `(model_version, updated_at)` for route scans (`apps/web/drizzle/0022_image_embeddings_model_version_idx.sql:1-9`).
+- Queue writes upsert on the single image row and overwrite both `embedding` and `modelVersion` (`apps/web/src/lib/image-queue.ts:512-523`).
+- The admin action and sidecar backfill use the same overwrite behavior (`apps/web/src/app/actions/embeddings.ts:175-186`, `apps/web/scripts/backfill-clip-embeddings.ts:212-223`).
+- Public search routes filter by active `modelVersion`, so rows from the other mode are ignored (`apps/web/src/app/api/search/semantic/route.ts:263-279`, `apps/web/src/app/api/search/similar/[id]/route.ts:177-190`).
+
+Failure scenario:
+
+After production CLIP embeddings are generated, any intentional or accidental switch to stub mode can overwrite production rows with `stub-sha256-v1` rows. Switching back to production then leaves the route with missing production rows until another full production backfill completes. The `model_version` filter prevents mixing stub and production results, but the schema does not preserve both versions for reversible rollout.
+
+Suggested fix:
+
+If mode/version rollback is a supported operator behavior, change the key to `(image_id, model_version)` and update all upserts, scans, and cleanup paths to target a specific version. If only one active version is intended, make that explicit: block stub writes once production is active, surface a destructive-mode warning before any downgrade, and document that changing encoder mode requires a full re-embed.
+
+### ARCH-C8-04 - Single-writer safety is documented but not enforceable
+
+Severity: Medium
+Confidence: High
+Status: Confirmed operational risk
+
+Evidence:
+
+- `single-writer-guard.ts` states two live web processes sharing one DB break restore fences, upload quota tracking, and rate-limit fast paths, but the guard is "WARN-ONLY" and "cannot enforce single-instance operation" (`apps/web/src/lib/single-writer-guard.ts:6-16`).
+- The loud contention path explicitly says startup is continuing (`apps/web/src/lib/single-writer-guard.ts:218-235`).
+- Startup runs the guard fire-and-forget and treats initialization failure as non-fatal (`apps/web/src/instrumentation.ts:22-31`).
+- Upload quota state is process-global in memory (`apps/web/src/lib/upload-tracker-state.ts:7-20`), queue state is process-global (`apps/web/src/lib/image-queue.ts:373-455`), and semantic rate limits are in-memory maps (`apps/web/src/lib/rate-limit.ts:393-415`).
+
+Failure scenario:
+
+A Docker, systemd, or reverse-proxy misconfiguration starts two `gallerykit-web` instances against the same database. Both continue serving. Upload limits split per process, image queue/bootstrap behavior duplicates work, process-local semantic/OG/share fast-path limiters weaken, and restore/readiness fences depend on which process sees the marker. Operators may miss the log-only warning during an outage.
+
+Suggested fix:
+
+Add an enforceable production option, for example `GALLERYKIT_ENFORCE_SINGLE_WRITER=true`, that makes persistent advisory-lock contention fail readiness or exit before serving traffic. Longer term, move every correctness-relevant process-local state to DB-backed/advisory-lock-backed coordination and leave only best-effort analytics as local buffers.
+
+### ARCH-C8-05 - Shared-group reads still own a view-count write side effect
 
 Severity: Low
 Confidence: High
@@ -54,20 +119,42 @@ Status: Confirmed design/coupling risk
 
 Evidence:
 
-- `getSharedGroup()` is named and used as a data retrieval helper, but it conditionally buffers a denormalized view-count write after building the group result (`apps/web/src/lib/data.ts:1331-1407`).
-- The same side-effectful function is exported through React `cache()` with a warning that callers must not mix count semantics in one render path (`apps/web/src/lib/data.ts:1793-1797`).
-- The page-level route already resolves the selected-photo/counting decision and records durable analytics explicitly (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:137-142`), so the architecture has two owners for one view event: route code for durable analytics and data-layer read code for denormalized counters.
+- `getSharedGroup()` is a data retrieval helper, but it buffers a denormalized view-count increment after loading the group and images (`apps/web/src/lib/data.ts:1322-1407`).
+- The same helper is exported through React `cache()` with a warning not to call the cached wrapper with different count semantics in one render path (`apps/web/src/lib/data.ts:1796-1800`).
+- The public shared-group page separately records durable analytics after resolving the selected-photo decision (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:137-142`).
 
-Concrete failure scenario:
+Failure scenario:
 
-A new layout, metadata path, or share preview calls `getSharedGroupCached()` for read-only data and accidentally increments the denormalized group view count. Another route can later pass selected-photo options and rely on the same cached helper, making the counter behavior harder to reason about than the durable analytics path. The system is currently protected by comments and caller discipline rather than by layer boundaries.
+A future metadata, preview, layout, or admin-inspection path calls `getSharedGroupCached()` for read-only data and accidentally increments the denormalized counter. Another caller in the same render tree can then be affected by React-cache argument semantics. The durable analytics owner and denormalized counter owner are split across route and data layers.
 
 Suggested fix:
 
-Make shared-group reads pure and move all view-event writes into an explicit route/service function. The route should decide once whether the access counts, then call durable analytics and denormalized counter buffering together. Only the pure read helper should be cached.
+Make shared-group reads pure. Move denormalized counter buffering into an explicit `recordSharedGroupView` service next to durable analytics, and have the route decide once whether a request counts. Cache only the pure read helper.
+
+### ARCH-C8-06 - The experimental storage abstraction does not yet preserve live pipeline file invariants
+
+Severity: Low
+Confidence: Medium
+Status: Likely future-integration risk
+
+Evidence:
+
+- The storage singleton and interface both state that production upload, processing, and serving paths still use direct filesystem helpers and that the abstraction is not wired end-to-end (`apps/web/src/lib/storage/index.ts:1-12`, `apps/web/src/lib/storage/types.ts:1-16`).
+- The local backend writes buffers directly to the final path with `fs.writeFile` (`apps/web/src/lib/storage/local.ts:98-108`) and copies with `link`/`copyFile` directly to the destination path (`apps/web/src/lib/storage/local.ts:142-156`).
+- The live image pipeline uses temp paths plus `rename()` and rollback tracking around final derivative writes (`apps/web/src/lib/process-image.ts:1164-1224`), and the serving/caching docs rely on atomic rename behavior.
+
+Failure scenario:
+
+A future "wire the storage backend" change could replace the live pipeline's atomic write/rollback guarantees with direct final-path writes from `LocalStorageBackend`. During a failed encode, deploy interruption, or backfill replacement, readers could observe partial files or stale/new byte mismatches, breaking the cache and fd-stat assumptions that current serving code is built around.
+
+Suggested fix:
+
+Either keep the abstraction quarantined and label it test/experimental-only, or upgrade the `StorageBackend` contract before integration: atomic replace, temp-file cleanup, symlink-safe open/write behavior, rollback semantics, and explicit parity tests against `process-image.ts` and `serve-upload.ts` invariants.
 
 ## Final Sweep
 
-Architecture categories examined: route/action/API layering, admin/public trust boundaries, origin/auth/rate-limit gates, restore and background-write ownership, DB schema versus JSON rule references, migration/reconcile safety, media pipeline responsibilities, public sharing flows, semantic search activation, storage abstraction quarantine, deployment topology, and documentation-to-code contract drift.
+I found no Critical or High architectural findings in this pass. The strongest current risks are medium-severity design boundaries: public privacy guard shape, image-cache invalidation split, semantic embedding version ownership, and enforceability of the single-instance topology.
 
-Residual risk: this was static review, so production-only behavior such as live nginx state, real restore contention, and host deployment configuration was not manually validated.
+Areas checked with no new finding: admin API routes are behind `withAdminAuth`; mutating server actions are covered by `requireSameOriginAdmin` linting; Lightroom upload mirrors browser upload settings and GPS/HDR gates; smart-collection topic deletion now blocks referenced topics; migration journal and reconcile scripts have loud drift/DML guards; i18n uses a small explicit locale set (`en`, `ko`) with `localePrefix: 'always'`; color/HDR metadata remains admin-only where delivery bytes do not yet support public HDR claims; semantic production activation is deliberately operator-only with sidecar seed/backfill runbooks.
+
+Residual risk: this was static review. I did not validate live host nginx state, production env values, real CLIP model weights, deployed DB rows, or the temporary MySQL container.

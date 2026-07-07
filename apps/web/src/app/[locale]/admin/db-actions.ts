@@ -39,6 +39,7 @@ import { escapeCsvField } from "@/lib/csv-escape";
 
 const DB_CHILD_PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
 const DB_CHILD_PROCESS_KILL_GRACE_MS = 5000;
+const CSV_TAG_SEPARATOR = '\u0001';
 
 function armDbChildProcessWatchdog(
     child: ChildProcessWithoutNullStreams,
@@ -112,7 +113,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
             height: images.height,
             captureDate: images.capture_date,
             topic: images.topic,
-            tags: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name} SEPARATOR CHAR(1))`
+            tags: sql<string>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name} SEPARATOR ${sql.raw(`'${CSV_TAG_SEPARATOR}'`)})`
         })
         .from(images)
         .leftJoin(imageTags, eq(images.id, imageTags.imageId))
@@ -135,7 +136,7 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
             escapeCsvField(String(row.height)),
             escapeCsvField(row.captureDate ? String(row.captureDate) : ""),
             escapeCsvField(row.topic || ""),
-            // C21-AGG-02: split on \x01 (matching SEPARATOR CHAR(1) in the
+            // C21-AGG-02: split on \x01 (matching CSV_TAG_SEPARATOR in the
             // GROUP_CONCAT above) and rejoin with comma+space for a
             // human-readable CSV value. The \x01 separator is robust
             // against tag names containing commas (currently rejected by

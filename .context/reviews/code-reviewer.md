@@ -1,78 +1,62 @@
-# Cycle 7 - Code-Reviewer Lane
+# Cycle 8 - Code-Reviewer Lane
 
 Date: 2026-07-07
 Reviewer: code-reviewer
-HEAD reviewed: `cae5fbd9b88f193a815bc91c1e41df2833094fd7`
-Mode: read-only repository review except this artifact. No source files or plans were modified.
+HEAD reviewed: `eca55414cae2b5a716fb9eac02ad9ee1e4b688b0`
+Mode: read-only repository review except this artifact. No source fixes, commits, pushes, deploys, service changes, file removals, or MySQL-container mutations were performed.
 
 ## Inventory
 
-I built the inventory before selecting findings and reviewed cross-file behavior rather than only comments or tests.
+I built the inventory before selecting findings and reviewed current code against the latest review/plan history instead of restating closed work.
 
-- Instructions/context: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, existing `.context/reviews/*`, and relevant `.context/plans/*`.
-- Application source: 606 files under `apps/web/src`, including Next.js app routes, server actions, React components, data access, auth/session/rate-limit helpers, image processing, queues, privacy projections, search, smart collections, upload/share flows, and storage quarantine.
-- Tests and contracts: 346 files under `apps/web/src/__tests__`, 12 Playwright e2e/fixture files, lint scripts for auth/origin/rate-limit policy, route/source contract tests, migration tests, and privacy guard tests.
-- Schema/scripts/deploy/docs: 30 SQL migrations plus Drizzle journal, 29 `apps/web/scripts` files including `migrate.js`, `Dockerfile`, `docker-compose.yml`, `apps/web/deploy.sh`, root deploy helper, nginx config, and docs.
+- Instructions/context read first: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, latest `.context/reviews/_aggregate.md`, current `.context/reviews/code-reviewer.md`, `run9-cycle8` aggregate/lane files, `plan/plan-370-cycle9-fixes.md`, and `plan/plan-371-cycle9-deferred.md`.
+- Application source inventory: 600 TypeScript/TSX files under `apps/web/src`, including 80 App Router/action/API files and 175 files across `lib`, `db`, and `components`.
+- Tests/contracts inventory: 358 files across `apps/web/src/__tests__` and `apps/web/e2e`, including auth/origin/rate-limit scanners, migration/reconcile tests, privacy-field guards, semantic-search contracts, and touch-target/a11y checks.
+- Schema/scripts/config/docs inventory: 30 SQL migrations plus Drizzle journal/snapshots, 29 app scripts, Dockerfile/compose/deploy/nginx config, root deploy helper, service worker/template, package manifests, and operational docs.
+- Focus areas inspected: auth/session/rate-limit, server actions, public API routes, privacy select projections, smart collections, image upload/delete/retry, image queue/backfill, semantic/similar search, restore/backup, migrations/schema/journal, public map/share pages, upload serving, service worker cache, deploy scripts, i18n contracts, and recent hardening changes in HEAD.
 
-Validation performed: static code/data-flow review only. I did not run the full quality gates because this lane was scoped to read-only review plus report artifacts.
+Validation performed: static code/data-flow review plus one targeted read-only test command:
+`npm test --workspace=apps/web -- src/__tests__/clip-semantic-limits-env.test.ts src/__tests__/semantic-search-params.test.ts` -> 2 files passed, 27 tests passed. I did not run full lint/typecheck/build/unit/e2e gates in this review lane.
 
 ## Findings Summary
 
 - Critical: 0
 - High: 0
 - Medium: 1 confirmed
-- Low: 1 confirmed maintainability/design risk
-- Manual-validation-only risks: 0
+- Low: 0 new
+- Manual-validation-only risks: 0 new
 
 ## Findings
 
-### CR-C7-01 - Deleting a topic leaves public smart collections with stale topic predicates
+### CR-C8-01 - Semantic text search can be configured to return 25,000 public results per request
 
 Severity: Medium
 Confidence: High
-Status: Confirmed from code
+Status: Confirmed from code and tests
 
 Evidence:
 
-- Smart collections store rule ASTs in opaque JSON (`apps/web/drizzle/0009_smart_collections.sql:6-14`), so the database cannot enforce a foreign key from `query_json` topic values to `topics.slug`.
-- The validator permits exact topic predicates such as `topic eq "slug"` and `topic in [...]` as plain strings (`apps/web/src/lib/smart-collections.ts:432-440`).
-- The rename path knows this coupling exists and remaps exact topic references inside the same transaction (`apps/web/src/app/actions/topics.ts:316-349`) using `remapTopicSlugInQuery()` (`apps/web/src/lib/smart-collections.ts:522-550`).
-- The delete path only checks whether images still reference the topic, then deletes the topic row (`apps/web/src/app/actions/topics.ts:448-462`). It never scans `smart_collections`, blocks deletion, remaps rules, or marks affected collections private/invalid.
-- Public smart-collection pages trust the stored rule at read time and return normal content for a public collection if the query parses and compiles (`apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:90-111`); load-more does the same (`apps/web/src/app/actions/public.ts:219-233`).
+- `envPositiveInt()` applies one shared hard cap, `SEMANTIC_ENV_INT_MAX = 25_000`, to both `SEMANTIC_TOP_K_MAX` and `SEMANTIC_SCAN_LIMIT` (`apps/web/src/lib/clip-embeddings.ts:36-44`).
+- The public semantic route clamps client-supplied `topK` to `SEMANTIC_TOP_K_MAX` (`apps/web/src/app/api/search/semantic/route.ts:72-91`) and then passes that value directly into `topK(scored, topKParam, activeThreshold)` (`apps/web/src/app/api/search/semantic/route.ts:311`).
+- Every selected result id is then sent through one enrichment query and mapped into the JSON response (`apps/web/src/app/api/search/semantic/route.ts:322-367`), so a high `SEMANTIC_TOP_K_MAX` is not just an internal ranking value; it controls public response cardinality.
+- The test suite currently pins the bad coupling: `SEMANTIC_TOP_K_MAX=2000000` is expected to clamp to `25_000` (`apps/web/src/__tests__/clip-semantic-limits-env.test.ts:75-80`), and `clampSemanticTopK(1000)` is expected to clamp only to the current env-derived max (`apps/web/src/__tests__/semantic-search-params.test.ts:36-38`).
+- The docs describe `SEMANTIC_SCAN_LIMIT` as having a 25,000 hard cap, but describe `SEMANTIC_TOP_K_MAX` separately as the ceiling on results returned to clients with default 50 (`CLAUDE.md:598-601`, also the env table at `CLAUDE.md:118-119`). That separation is correct operationally; the implementation conflates the scan-row cap with the response-count cap.
 
 Concrete failure scenario:
 
-1. An operator creates a public smart collection with `{"type":"predicate","column":"topic","operator":"eq","value":"travel"}`.
-2. Later all images are moved away from topic `travel`.
-3. The operator deletes `travel`; `deleteTopic()` succeeds because it checks only `images.topic`.
-4. The collection remains public and valid, but now references a non-existent topic slug. It silently returns zero images and keeps doing so until someone manually audits `query_json`.
+An operator raises `SEMANTIC_SCAN_LIMIT` for a larger gallery and accidentally also sets `SEMANTIC_TOP_K_MAX=2000000`, or follows the current test-implied "unbounded override clamps to 25,000" behavior. A public same-origin semantic search with `{"query":"portrait","topK":25000}` is accepted. The route scans up to 25,000 embeddings, runs the insertion-based `topK` loop with `k=25000`, sends an `IN (...)` enrichment query for every matched id above threshold, sorts and serializes thousands of cards, and returns a huge JSON payload. The rate limit limits request frequency, but one admitted request can still consume avoidable CPU, DB, memory, and bandwidth on the single-writer host.
 
 Suggested fix:
 
-Before deleting a topic, scan smart collections with the existing parser and detect exact topic references. Either block deletion with a clear error naming the referencing collections, or update a documented lifecycle policy such as marking affected collections private/invalid and logging an audit event. Put this logic in a shared topic-reference helper so rename and delete cannot diverge again. Add a unit/source test that a topic referenced by `eq` or `in` smart-collection predicates cannot be deleted silently.
+Split the env parser into separate caps, for example `SEMANTIC_SCAN_LIMIT_HARD_MAX = 25_000` and `SEMANTIC_TOP_K_HARD_MAX = 100` or another UI-budgeted result count. Clamp `SEMANTIC_TOP_K_MAX` to the smaller response cap even when the env value is higher. Update `clip-semantic-limits-env.test.ts` so oversized `SEMANTIC_TOP_K_MAX` no longer resolves to 25,000, and add a route/clamp assertion proving client `topK` cannot exceed the response cap.
 
-### CR-C7-02 - `getSharedGroup()` is a read-style getter with hidden write side effects and a cached wrapper
+## Prior Findings Checked
 
-Severity: Low
-Confidence: High
-Status: Confirmed maintainability risk from code
-
-Evidence:
-
-- `getSharedGroup()` performs read/model assembly, then conditionally writes by calling `bufferGroupViewCount(group.id)` (`apps/web/src/lib/data.ts:1331-1407`).
-- The exported cached wrapper directly wraps the side-effectful getter (`apps/web/src/lib/data.ts:1793-1797`) and relies on callers remembering argument-sensitive count semantics.
-- The page separately records durable shared-group analytics after resolving whether a selected photo is present (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:137-142`), which means the route already has an explicit write boundary for part of the same event.
-
-Concrete failure scenario:
-
-A future caller uses `getSharedGroupCached(key)` for a metadata/existence/read-only path, or reuses the cached helper in a render path with different selected-photo/count semantics. Because the getter itself owns the denormalized counter update, that read path can increment counters without an explicit write call, and the React cache wrapper makes the behavior depend on argument shape and call ordering. The current warning comment documents the footgun, but the function boundary still permits it.
-
-Suggested fix:
-
-Split `getSharedGroup()` into a pure read helper and an explicit counter mutation, similar to the existing `recordSharedGroupView()` call site. Have the page decide once whether the group view should count, then call both durable analytics and denormalized counter update explicitly. Cache only the pure read helper.
+- Prior `CR-C7-01` is fixed at current HEAD: `deleteTopic()` now parses `smartCollections.query_json` and throws `TopicReferencedBySmartCollectionError` when an exact `topic eq` or `topic in` reference points at the slug being deleted (`apps/web/src/app/actions/topics.ts:461-479`), using `queryReferencesTopicSlug()` (`apps/web/src/lib/smart-collections.ts:552-560`).
+- Prior `CR-C7-02` still exists as a known residual: `getSharedGroup()` can buffer a view-count side effect and `getSharedGroupCached` still wraps it (`apps/web/src/lib/data.ts:1396-1407`, `apps/web/src/lib/data.ts:1796-1800`). I did not re-file it as a new finding because it is already recorded in the previous lane and unchanged.
 
 ## Final Sweep
 
-Areas checked for commonly missed issues: admin API auth wrappers, same-origin server-action guards, public route rate-limit pre-increments, privacy projection omissions, restore-maintenance fences, queue/bootstrap behavior, migration baseline/reconcile rules, semantic search public routes, Lightroom upload parity, share-key pages, smart collection parse/compile paths, storage abstraction quarantine, deploy/disk-prune policy, and docs/source contract drift.
+Checked issue classes: admin API auth wrappers, same-origin server-action guards, public route rate-limit pre-increments, privacy projection omissions, unsafe JSON/HTML/script sinks, raw SQL and LIKE escaping, path traversal/symlink/realpath checks, restore-maintenance fences, child-process env/timeout cleanup, queue/bootstrap/backfill retry behavior, migration journal/schema/reconcile drift, semantic search scan/result limits, Lightroom upload parity, share-key view accounting, smart-collection topic lifecycle, map GPS visibility/truncation, upload-serving abort cleanup, service-worker cache boundaries, deploy/disk-prune invariants, i18n key parity surfaces, and docs/source contract drift.
 
-Residual risk: this was static review. Full lint/typecheck/build/unit/e2e gates were not rerun in this lane.
+I found one real actionable current defect and no new Critical/High issues. Residual risk: full blocking gates and Playwright e2e were not rerun in this lane.

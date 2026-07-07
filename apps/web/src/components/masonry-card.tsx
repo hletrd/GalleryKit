@@ -46,6 +46,7 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, topicLabel, i
     // agree without any inline post-processing.
     const displayTitle = getPhotoDisplayTitleFromTagNames(image, image.user_filename || t('common.untitled'));
     const altText = getConcisePhotoAltText(image, t('common.photo'));
+    const accessibleTitle = `${displayTitle} #${image.id}`;
 
     // AGG-R8-08 (run-8 c2): guard the width/height denominators. image.width/
     // height are NOT NULL from validated Sharp metadata so a 0 is
@@ -60,8 +61,8 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, topicLabel, i
         : Math.round(estimatedCardWidth);
     const isWideGamut = isWideGamutPrimary(image.color_primaries);
     const photoAriaLabel = isWideGamut
-        ? `${t('aria.viewPhoto', { title: displayTitle })} (${t('viewer.gamutBadgeP3')})`
-        : t('aria.viewPhoto', { title: displayTitle });
+        ? `${t('aria.viewPhoto', { title: accessibleTitle })} (${t('viewer.gamutBadgeP3')})`
+        : t('aria.viewPhoto', { title: accessibleTitle });
 
     return (
         <div

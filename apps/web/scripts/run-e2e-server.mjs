@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const appDir = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const DISPOSABLE_DB_NAME_PATTERN = /(?:^|[_-])(e2e|test|ci)(?:$|[_-])|^gallery_(e2e|test|ci)$/i;
 
 function parseArgs(argv) {
   const args = new Map();
@@ -27,6 +28,21 @@ function loadDotenvAsData() {
   const envPath = resolveEnvPath();
   if (existsSync(envPath) && typeof process.loadEnvFile === 'function') {
     process.loadEnvFile(envPath);
+  }
+}
+
+function assertSafeE2eDatabase() {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to run E2E server setup in production environment');
+  }
+  const dbName = process.env.DB_NAME?.trim() ?? '';
+  const explicitlyAllowed = process.env.E2E_ALLOW_DESTRUCTIVE_SEED === 'true';
+  const disposableDbName = DISPOSABLE_DB_NAME_PATTERN.test(dbName);
+  if (!explicitlyAllowed && !disposableDbName) {
+    throw new Error(
+      'Refusing to run E2E server setup against DB_NAME=' +
+      `${dbName || '(unset)'}. Set E2E_ALLOW_DESTRUCTIVE_SEED=true or use a disposable DB name containing e2e/test/ci. CI=true alone is not sufficient.`,
+    );
   }
 }
 
@@ -73,6 +89,7 @@ async function main() {
   }
 
   loadDotenvAsData();
+  assertSafeE2eDatabase();
   await run('npm', ['run', 'init']);
   await run('npm', ['run', 'e2e:seed']);
   await run('npm', ['run', 'build'], {

@@ -1,7 +1,12 @@
 import { Nav } from '@/components/nav';
 import { Footer } from '@/components/footer';
+import { getCspNonce } from '@/lib/csp-nonce';
+import siteConfig from '@/site-config.json';
+import Script from 'next/script';
 
 export default async function PublicLayout({ children }: { children: React.ReactNode }) {
+    const nonce = await getCspNonce();
+
     return (
         <>
             <Nav />
@@ -15,6 +20,19 @@ export default async function PublicLayout({ children }: { children: React.React
                 </div>
             </main>
             <Footer />
+            {siteConfig.google_analytics_id && /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(siteConfig.google_analytics_id) && (
+                <>
+                    <Script src={`https://www.googletagmanager.com/gtag/js?id=${siteConfig.google_analytics_id}`} strategy="lazyOnload" nonce={nonce} />
+                    <Script id="google-analytics" strategy="lazyOnload" nonce={nonce}>
+                        {`
+                            window.dataLayer = window.dataLayer || [];
+                            function gtag(){dataLayer.push(arguments);}
+                            gtag('js', new Date());
+                            gtag('config', ${JSON.stringify(siteConfig.google_analytics_id)});
+                        `}
+                    </Script>
+                </>
+            )}
         </>
     );
 }

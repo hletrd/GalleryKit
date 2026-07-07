@@ -8,10 +8,8 @@ import { notFound } from 'next/navigation';
 import { IMAGE_BASE_URL, LOCALES } from '@/lib/constants';
 import { buildHreflangAlternates, getAlternateOpenGraphLocales, getLocaleDirection, getOpenGraphLocale } from '@/lib/locale-path';
 import { getSeoSettings } from '@/lib/data';
-import siteConfig from "@/site-config.json";
 import { getCspNonce } from '@/lib/csp-nonce';
 
-import Script from 'next/script';
 import { RegisterServiceWorker } from '@/components/register-service-worker';
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
@@ -153,19 +151,6 @@ export default async function RootLayout({
         </NextIntlClientProvider>
         <RegisterServiceWorker />
         {/* Pretendard font loaded via self-hosted @font-face in globals.css */}
-        {siteConfig.google_analytics_id && /^(G-[A-Z0-9]+|UA-\d+-\d+)$/.test(siteConfig.google_analytics_id) && (
-          <>
-            <Script src={`https://www.googletagmanager.com/gtag/js?id=${siteConfig.google_analytics_id}`} strategy="lazyOnload" nonce={nonce} />
-            <Script id="google-analytics" strategy="lazyOnload" nonce={nonce}>
-              {`
-                window.dataLayer = window.dataLayer || [];
-                function gtag(){dataLayer.push(arguments);}
-                gtag('js', new Date());
-                gtag('config', ${JSON.stringify(siteConfig.google_analytics_id)});
-              `}
-            </Script>
-          </>
-        )}
       </body>
     </html>
   );

@@ -1,62 +1,61 @@
-# Critic Review - Cycle 7 Lane E
+# Critic Review - Cycle 8
 
-Reviewer: critic. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `cae5fbd9`.
-Mode: read-only source/document critique, except this requested review artifact.
+Reviewer: critic. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `eca55414677676462ae54a5579d9c35bfdf16d3c`.
+
+Mode: skeptical source/document review. I did not implement fixes, commit, push, deploy, stop services, remove files, or touch the temporary MySQL container `gallerykit-e2e-mysql-cycle7-47691` on `127.0.0.1:33307`.
 
 ## Inventory
 
-I built the review inventory before filing findings:
+I read `AGENTS.md` and `CLAUDE.md` first, then built this inventory before filing findings:
 
-- Operating docs and policies: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`.
-- Package and gate scripts: root `package.json`, `apps/web/package.json`, lint scanners, migration tests, deploy contract tests.
-- Deploy/runbook surfaces: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/Dockerfile`.
-- Schema/migration surfaces: all `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`.
-- CLIP/semantic-search implementation: `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/clip-*`, `apps/web/src/lib/image-queue.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/components/similar-photos.tsx`, and semantic settings UI/action code.
-- Product boundary checks: storage abstraction, upload/serve paths, privacy omit guards, public/admin routes, payment/Stripe remnants, Lightroom API, and edit/cull/score wording.
+- Repository/docs: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`, latest `.context/reviews/run9-cycle8/*`, current `.context/reviews/critic.md`, and run-10 convergence/deferred plans.
+- Package/gate surface: root and app `package.json`, quality-gate scripts, lint scanners, Playwright/Vitest config, migration journal/tests.
+- Deployment/ops: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`.
+- Schema/migrations: `apps/web/src/db/schema.ts`, every `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`.
+- High-risk app code: admin auth/session/rate-limit helpers, admin API wrappers, public actions, upload/delete/share actions, DB backup/restore, restore-maintenance barrier, image queue, process-image/color/HDR/GPS paths, semantic search/CLIP code, smart collections, privacy select fields, service-worker cache contract, public routes, admin settings/tokens UI.
 
-Validation run during review:
-
-- `npm run lint:api-auth --workspace=apps/web` - pass.
-- `npm run lint:action-origin --workspace=apps/web` - pass.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` - pass.
-- `npm test --workspace=apps/web -- --run src/__tests__/storage-quarantine.test.ts src/__tests__/gallery-config-semantic-production.test.ts src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts` - pass, 39 tests.
-- `npm test --workspace=apps/web -- --run src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-pending-migrations.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/deploy-script-contract.test.ts` - pass, 129 tests.
+No full gate run was executed because this lane is review-only and the task requested exactly one written artifact. Validation was source-backed via `rg`, `nl -ba`, `git status --short`, `git diff --stat`, targeted line reads, and a read-only journal monotonicity check. The worktree was clean at start.
 
 ## Findings
 
-### CRIT-E-01 - Embedding storage cannot retain multiple model versions even though the architecture is version-gated
+### CRIT-C8-01 - `image_embeddings` is model-version filtered at read time but cannot retain more than one model version
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed from code and docs; production-weight behavior was not manually exercised
-- Perspectives: architecture, rollback safety, operator correctness, documentation mismatch
+- Status: Confirmed
+- Perspectives: architecture, semantic-search correctness, rollback safety, operator runbook
+- Evidence:
+  - `apps/web/drizzle/0012_image_embeddings.sql:5-11` creates `image_embeddings` with `PRIMARY KEY (image_id)` only.
+  - `apps/web/src/db/schema.ts:286-300` mirrors that: `imageId` is the primary key; `modelVersion` is only a normal indexed column.
+  - `apps/web/scripts/backfill-clip-embeddings.ts:212-223`, `apps/web/src/app/actions/embeddings.ts:175-186`, and `apps/web/src/lib/image-queue.ts:512-523` all upsert on that single-image key and overwrite `embedding` plus `modelVersion`.
+  - Reads are version-gated: semantic search filters `modelVersion` in `apps/web/src/app/api/search/semantic/route.ts:270-279`; similar search requires production rows in `apps/web/src/app/api/search/similar/[id]/route.ts:137-190`.
+  - `apps/web/src/lib/clip-embeddings.ts:233-235` says the production model-version string should be bumped whenever the model or dimension changes.
+  - `apps/web/README.md:70-74` documents production serving only matching `model_version` rows, but not that backfill overwrites prior versions instead of retaining them.
+- Concrete failure scenario: An operator rolls from model/version `A` to `B`. The `B` backfill overwrites rows image by image. During a partial rollout, production `B` search sees only the overwritten subset; untouched images remain filtered out. If the operator rolls the app setting back to `A`, rows already overwritten to `B` no longer have `A` embeddings, so rollback also has partial recall. This is not just a storage optimization; it conflicts with the read-side version gate's implied rollback boundary.
+- Suggested fix: Migrate `image_embeddings` to retain versions, e.g. composite primary/unique key `(image_id, model_version)` or a surrogate key plus unique `(image_id, model_version)`. Update Drizzle schema, `reconcileLegacySchema`, all upsert conflict targets, search/similar queries, cleanup/retention policy for obsolete versions, and tests. If single-version storage is intentional, downgrade the architecture: document production upgrades as destructive single-active-version rewrites and add an operator rollback warning.
 
-Evidence:
+### CRIT-C8-02 - Production CLIP sidecar can repeatedly spend the whole scan budget on the same failing low-id prefix
 
-- `apps/web/drizzle/0012_image_embeddings.sql:5-11` creates `image_embeddings` with `image_id` as the sole primary key.
-- `apps/web/src/db/schema.ts:286-300` mirrors that contract with `imageId: primaryKey`, while `modelVersion` is only a normal column plus an index.
-- `apps/web/scripts/backfill-clip-embeddings.ts:25-42` documents that the sidecar writes one row per image and replaces the existing row for a new model version; `apps/web/scripts/backfill-clip-embeddings.ts:212-223` implements `onDuplicateKeyUpdate` against that single image key.
-- `apps/web/src/app/actions/embeddings.ts:175-186` performs the same in-app upsert and overwrites `embedding`, `modelVersion`, and timestamps for the image.
-- Serving is version-filtered: `apps/web/src/app/api/search/semantic/route.ts:270-279` filters candidates by the active production model version, and `apps/web/src/app/api/search/similar/[id]/route.ts:140-148` plus `apps/web/src/app/api/search/similar/[id]/route.ts:181-190` require the active version for target and candidate rows.
-- `apps/web/README.md:70` says production serves only rows matching active `model_version`, and `CLAUDE.md:570-574` says sidecar and in-app scans converge with duplicates at worst. Those statements do not call out that prior-version embeddings are overwritten, not retained.
+- Severity: Medium
+- Confidence: Medium
+- Status: Likely
+- Perspectives: operations, data integrity of search coverage, previous-plan challenge
+- Evidence:
+  - `apps/web/scripts/backfill-clip-embeddings.ts:150-188` initializes `cursor = 0` per process, advances by ascending `images.id`, and selects rows missing the target `modelVersion`.
+  - The same script decrements remaining budget by `processed + failed` at `apps/web/scripts/backfill-clip-embeddings.ts:155-158` and stops when that reaches `SEMANTIC_SCAN_LIMIT`.
+  - Per-image failures such as missing `filenameOriginal`, missing original path, or encoder errors increment `failed` but do not mark the image as skipped for later runs: see `apps/web/scripts/backfill-clip-embeddings.ts:193-204` and the catch at `apps/web/scripts/backfill-clip-embeddings.ts:228-232`.
+  - When the cap is reached, the script logs and exits non-zero if any failures occurred (`apps/web/scripts/backfill-clip-embeddings.ts:236-248`).
+  - The README tells operators to repeat the same sidecar command when `SEMANTIC_SCAN_LIMIT` is reached (`apps/web/README.md:80-82`).
+  - The in-process queue explicitly fixed this exact class with a persistent process-local cursor (`apps/web/src/lib/image-queue.ts:340-356`), but the sidecar still restarts from zero every invocation.
+- Concrete failure scenario: A production gallery has an old prefix of 2,000 processed images whose originals are missing or unreadable, followed by thousands of valid images. `backfill-clip-embeddings.ts --production --force` retries that prefix, reaches `SEMANTIC_SCAN_LIMIT`, prints failed IDs, and exits. Re-running the documented command starts at `cursor = 0` and retries the same prefix again, so valid newer rows are never embedded until the operator manually repairs or removes every low-id failure. Production semantic search then has incomplete or empty recall despite following the runbook.
+- Suggested fix: Give the sidecar a durable or operator-visible skip/resume mechanism. Options: persist a failed-at/model-version marker, accept `--start-after-id`, write a sidecar checkpoint under the data volume, or process a bounded failing prefix but continue scanning past it while reporting failures separately. Update the README runbook to say that repeated runs cannot progress past a saturated failing prefix until the failed IDs are addressed.
 
-Failure scenario:
+## Final Sweep
 
-During a real model rollout or future model upgrade, a backfill for model version `B` overwrites each image's previous version `A` row. If the rollout is interrupted, production search for version `B` sees only the overwritten subset while untouched images remain on `A` and are filtered out. If an operator rolls configuration back to `A`, the rows already overwritten to `B` no longer have `A` embeddings. The system is therefore model-version gated at read time but not model-version retaining at write time.
+- Auth/session/origin: middleware only does coarse cookie-format screening, but server actions and API wrappers perform actual auth; admin API exports use `withAdminAuth`; mutating server actions checked by scanner patterns.
+- Restore/deploy: DB restore holds restore, upload-contract, color-backfill, and semantic-backfill locks; durable maintenance and admin mutation drains are present. Deploy auto-prune runs only after health success and persistent app data is bind-mounted. Host nginx changes remain operator-applied, which is clearly documented.
+- Migration safety: the journal still contains historical non-monotonic entries, but `migrate.js` has hash/postcondition and DML-baseline guards. Latest entries are above the current max and the authoring rule is documented.
+- Privacy/public routes: `publicSelectFields` and `publicMapSelectFields` have compile-time guards; shared photo/group metadata avoids unthrottled existence lookups; smart collection page/layout/load-more all check `is_public` before rendering rows.
+- Product boundary: no current Stripe/payment route or dependency surfaced; storage abstraction remains quarantined from live upload/serve paths; edit/cull/score language is scoped to metadata edits.
 
-Suggested fix:
-
-Either document the current single-active-embedding limitation as an explicit operational constraint, or migrate the schema to retain rows by `(image_id, model_version)`. The durable fix is a composite primary key or surrogate key with a unique `(image_id, model_version)`, followed by Drizzle schema updates, `reconcileLegacySchema` coverage, queue/backfill conflict-target changes, search/similar query updates, and a retention/cleanup policy for obsolete model versions.
-
-## No Additional Confirmed Critic Defects
-
-The final sweep did not find additional current high-confidence defects in the reviewed surfaces:
-
-- Admin API auth, mutating server-action origin protection, and public route rate-limit scanner contracts passed.
-- Migration journal, monotonicity, reconciler coverage, pending-migration, and deploy-contract tests passed.
-- Semantic production mode is gated by environment and settings code; the UI does not allow selecting production directly, and routes reject unavailable production search.
-- Similar-photo UI is production-only and the route requires active production model rows.
-- Storage abstraction is quarantined and documented as local-only/not integrated; direct upload/serve paths still use the local filesystem as documented.
-- Payment/Stripe and bundled Lightroom-plugin features are not advertised as active product surfaces in the current app docs inspected.
-
-Residual risk remains that live production behavior was not validated with real CLIP weights, a real production database, or a host nginx reload probe. This review is source-backed plus targeted local tests, not an operations audit.
+Residual risk: this was source review, not a live production or browser-flow audit. I did not verify real CLIP weights, production DB contents, applied host nginx config, or e2e behavior against the temporary MySQL container.

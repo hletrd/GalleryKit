@@ -1,57 +1,84 @@
-# Cycle 7 Lane C Causal Tracing Review
+# Cycle 8 Tracer Lane Review
 
 Role: `tracer`
-Scope: read-only source review, except this artifact. Source code was not modified.
-Method: traced request-to-work causality across public pages/API, background queues, analytics buffers, restore/deploy boundaries, DB writes, search inference, image processing, and client-triggered flows.
+Scope: read-only causal tracing of suspicious end-to-end flows. Source code was not modified.
+Allowed write: this file only.
+Runtime constraints honored: no fixes, commits, pushes, deploys, service stops, file removals, or mutation of `gallerykit-e2e-mysql-cycle7-47691` on `127.0.0.1:33307`.
+Validation method: traced executable code paths and existing tests/source contracts. I did not rely on comments as proof, and I did not run database/e2e flows.
 
-## Inventory Reviewed
+## Inventory
 
-- Public request chains: locale public pages under `apps/web/src/app/[locale]/(public)/**`, public server actions in `apps/web/src/app/actions/public.ts`, semantic/similar search API routes, OG/feed/sitemap routes, and middleware.
-- Background causality: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, backfill scripts, deploy helper scripts.
-- Data dependencies: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, analytics data, schema indexes, migrations, privacy omit guards.
-- Client-to-server flows: home client/load-more, lightbox navigation, map marker navigation, semantic search UI, upload/admin status components, analytics recorder call sites on photo/topic/share pages.
-- Restore/cache/revalidation: restore maintenance checks, drain hooks, public `revalidate = 0` pages, React cache wrappers, deploy/runtime scripts.
+- Required docs read first: `AGENTS.md`, `CLAUDE.md`.
+- Public semantic/similar search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/components/search.tsx`, `apps/web/src/components/similar-photos.tsx`, `apps/web/src/lib/clip-*.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, semantic/similar route tests.
+- Upload -> process -> persist -> serve: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/serve-upload.ts`, upload routes and upload/process/serve tests.
+- Admin auth/login/session: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/proxy.ts`, login/password components, auth/session/barrier tests.
+- Sharing: `apps/web/src/app/actions/sharing.ts`, public `/s/[key]` and `/g/[key]` pages, `apps/web/src/lib/data.ts`, sharing/shared-link tests.
+- Backup/restore: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, restore maintenance/barrier modules, `apps/web/src/app/api/admin/db/download/route.ts`, restore/download tests.
+- Image deletion/revalidation: `deleteImage`/`deleteImages` in `apps/web/src/app/actions/images.ts`, variant cleanup in `apps/web/src/lib/process-image.ts`, deletion/revalidation tests.
+- Service worker/PWA assets: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/scripts/build-sw.ts`, `apps/web/src/app/manifest.ts`, icon assets, service-worker tests.
+- Sitemap/OG metadata: `apps/web/src/app/sitemap.ts`, `apps/web/src/app/robots.ts`, `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx`, `apps/web/src/lib/og-photo-fetch.ts`, `apps/web/src/lib/seo-og-url.ts`, sitemap/OG tests.
+- Deploy/migration startup: `apps/web/scripts/migrate.js`, `apps/web/scripts/entrypoint.sh`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, migration/deploy startup tests.
 
 ## Findings
 
-### TRACE-C7-01: Analytics view recorders only track the final insert, leaving earlier DB writes outside restore/drain causality
+### TRC8-01: `updatePassword` ignores failed restore-barrier acquisition and can write during restore
+
+- Severity: High
+- Confidence: High
+- Status: Confirmed
+- Location: `apps/web/src/app/actions/auth.ts:291-416`, `apps/web/src/lib/admin-mutation-barrier.ts:67-80`, `apps/web/src/app/[locale]/admin/db-actions.ts:550-562`, `apps/web/src/__tests__/auth-mutation-barrier-source.test.ts:14-25`
+
+Competing hypotheses:
+- Safe: password updates participate in the foreground admin mutation barrier, so restore waits for them or refuses new entrants.
+- Unsafe: the action acquires a slot object but checks the object truthiness instead of its `acquired` flag, so the exclusive restore window does not block this action.
+
+Evidence:
+- The barrier contract returns an object in both cases. On exclusive restore, `acquireAdminMutationSlot()` returns `{ acquired: false, [Symbol.dispose]() { ... } }`, not `null` or `undefined` (`apps/web/src/lib/admin-mutation-barrier.ts:67-80`).
+- The documented usage pattern is `if (!mutationSlot.acquired)` (`apps/web/src/lib/admin-mutation-barrier.ts:73-75`), and other admin mutation actions use that shape.
+- `updatePassword` instead does `using mutationSlot = acquireAdminMutationSlot(); if (!mutationSlot) ...` (`apps/web/src/app/actions/auth.ts:309-312`). A failed acquisition is still truthy, so the action proceeds.
+- The restore flow sets the durable marker, then drains foreground admin mutations through `drainAdminMutationsForRestore()` before importing (`apps/web/src/app/[locale]/admin/db-actions.ts:550-562`). A password update that failed acquisition is not counted as in-flight.
+- The existing auth barrier test only checks that slot acquisition appears before rate-limit/Argon2/transaction work; it does not assert the failed-acquire branch checks `.acquired` (`apps/web/src/__tests__/auth-mutation-barrier-source.test.ts:14-25`).
+
+Failure scenario:
+An admin submits a password change just before restore begins. The action passes the one-time maintenance check, restore flips the exclusive barrier, and `acquireAdminMutationSlot()` returns `{ acquired: false }`. Because the object is truthy, `updatePassword` continues through Argon2 and the transaction that updates `admin_users.password_hash`, deletes sessions, and inserts a new session (`apps/web/src/app/actions/auth.ts:405-416`). Restore can drain with no counted in-flight mutation and import the backup while the password action later writes into the restored database.
+
+Suggested fix:
+Change the guard to `if (!mutationSlot.acquired) return { error: t('restoreInProgress') };`. Add a behavior test that mocks/forces `acquireAdminMutationSlot()` to return `{ acquired: false }` and asserts no rate-limit increment, Argon2 verify/hash, DB transaction, session rotation, or cookie set occurs. Also tighten the source contract to require `.acquired` inside `updatePassword`.
+
+### TRC8-02: Admin CSV export still uses the MySQL-invalid `GROUP_CONCAT ... SEPARATOR CHAR(1)` form
 
 - Severity: Medium
-- Confidence: Medium
-- Status: Confirmed code path; failure requires restore/traffic timing
-- Location: `apps/web/src/app/actions/public.ts:377-414`, `apps/web/src/app/actions/public.ts:428-460`, `apps/web/src/app/actions/public.ts:463-493`, `apps/web/src/app/actions/public.ts:495-528`, `apps/web/src/lib/background-db-writes.ts:42-84`
-
-The public view recorders are documented as fire-and-forget so analytics does not block page render. The final analytics inserts are wrapped in `trackAnalyticsDbWrite()`, which bounds concurrency, skips during restore maintenance, and is drained by `drainBackgroundDbWritesForRestore()`. However, the recorder performs earlier DB work before that wrapper: `checkViewRecordRateLimit()` increments/checks `rate_limit_buckets`, then the recorder validates visible image/topic/group rows. Those DB operations are outside the tracked analytics queue.
-
-The restore guard is checked before and after those untracked operations, but not inside the rate-limit increment itself. If restore maintenance flips on after the first guard and before `incrementRateLimit()`, a detached public view recorder can still write a rate-limit row during the restore window. The restore drain only waits for promises registered in `backgroundDbWrites`/`analyticsDbWrites`, so it cannot prove these pre-insert DB operations have quiesced.
-
-Concrete failure scenario: a public photo page calls `void recordPhotoView(image.id)` while a restore begins. The recorder passes `isRestoreMaintenanceActive()`, awaits headers, and increments the DB rate-limit bucket. Restore maintenance starts before the final `trackAnalyticsDbWrite()` call. The final analytics insert is skipped by the later guard, but the rate-limit write has already happened outside the tracked drain. This violates the expected causal boundary that background public analytics writes are either drained or skipped during restore.
-
-Suggested fix: wrap the entire recorder body, including rate-limit and visibility validation DB work, in a tracked restore-aware task, or add a restore-aware guard directly around/in `checkViewRecordRateLimit()` before DB increment/check/rollback. If the product intentionally allows rate-limit writes during restore, document that exception explicitly and keep only final analytics inserts in the drain contract.
-
-### TRACE-C7-02: Map page exposes a stale-causality window after topic visibility changes because the server returns an arbitrary capped latest set
-
-- Severity: Low
 - Confidence: High
-- Status: Confirmed from code
-- Location: `apps/web/src/lib/data.ts:1736-1768`, `apps/web/src/app/[locale]/(public)/map/page.tsx:13-66`
+- Status: Confirmed
+- Location: `apps/web/src/app/[locale]/admin/db-actions.ts:83-164`, `apps/web/src/__tests__/shared-link-runtime-contracts.test.ts:14-29`, `apps/web/src/lib/data.ts:1247-1276`
 
-The map query uses a deterministic most-recent cap of 10,000 rows and the page is uncached (`revalidate = 0`), so topic visibility changes are reflected immediately in the query predicate. The causal gap is in the public interpretation of the map: when more than 10,000 opted-in GPS photos exist, the map silently represents only the newest capped subset. There is no `truncated` flag or UI state to distinguish "all map-visible photos" from "first 10,000 after cap."
+Competing hypotheses:
+- Safe: admin CSV export uses the same string-literal separator shape that the public shared-link flow already fixed and test-locked.
+- Unsafe: the export query retained `SEPARATOR CHAR(1)`, which the existing MySQL source contract identifies as an `ER_PARSE_ERROR` shape.
 
-Concrete failure scenario: an operator enables map visibility for an older travel topic after the gallery already has 10,000 newer GPS photos. The topic is correctly opted in, but none of its older photos appear on `/map` because the cap is filled by newer rows. From the user's perspective, the topic-toggle action appears not to have caused the expected map result.
+Evidence:
+- `exportImagesCsv()` selects `tags: sql<string>\`GROUP_CONCAT(DISTINCT ${tags.name} ORDER BY ${tags.name} SEPARATOR CHAR(1))\`` (`apps/web/src/app/[locale]/admin/db-actions.ts:106-121`) and later splits on `\x01` (`apps/web/src/app/[locale]/admin/db-actions.ts:138-143`).
+- The repo already carries a regression test for the same MySQL grammar issue: `SEPARATOR CHAR(1)` is invalid and must be replaced by a quoted string literal (`apps/web/src/__tests__/shared-link-runtime-contracts.test.ts:14-29`).
+- The fixed public data path defines a literal separator and embeds it through `sql.raw` (`apps/web/src/lib/data.ts:1247-1276`).
+- Existing tests mention `db-actions.ts`, but no test currently covers `exportImagesCsv()` for this separator contract; `cycle-20-source-contracts.test.ts` slices only the watchdog before `exportImagesCsv`.
 
-Suggested fix: return a `truncated` flag and expose it in the page, or change the map API to be viewport/topic filtered so newly opted-in topics can be queried causally. If keeping the global latest cap, document it in the admin topic visibility UI and public map affordance.
+Failure scenario:
+An authenticated admin opens the database tools and exports image CSV. The action reaches the SELECT and MySQL rejects the query with a parse error before any CSV can be returned. Because `exportImagesCsv()` has no local catch around the query, the server action fails instead of returning `{ error }`.
 
-## Causal Paths Verified Without Findings
+Suggested fix:
+Mirror the public shared-link fix: define an export separator constant such as `const CSV_TAG_SEPARATOR = '\u0001'` and use `SEPARATOR ${sql.raw(\`'${CSV_TAG_SEPARATOR}'\`)}` or an equivalent quoted literal. Add a source or behavior test that scans `db-actions.ts`/`exportImagesCsv()` for absence of `SEPARATOR CHAR(1)` and presence of the matching split delimiter.
 
-- Image processing: uploads enqueue work through bounded image queue paths; processing uses per-image locks, atomic derivative/base-file writes, DB status updates after successful writes, retry bookkeeping, and drain/shutdown hooks.
-- Backfills: color and CLIP backfill scripts use advisory locks, keyset pagination, bounded concurrency, batched DB updates, and cleanup for deleted-mid-run rows.
-- Semantic search: text embedding happens before vector scans, request aborts are checked at major boundaries, rate-limit refunds stop once expensive work begins, and production/stub model-version separation prevents mixed-model results.
-- Analytics final inserts: although the pre-insert causality issue above exists, the final insert queue itself is bounded and drainable.
-- Public data privacy: public-facing select helpers omit admin/private fields and map GPS exposure is constrained to map-visible topics plus runtime assertions.
-- Cache/revalidation: public gallery pages intentionally use `revalidate = 0` to reflect processing and visibility changes quickly; React cache wrappers are scoped to request-level config/data reuse rather than durable stale caches.
-- Deploy/runtime: deploy helper builds and restarts the container before post-deploy Docker cleanup; persistent data paths are bind-mounted and the script avoids aggressive volume pruning.
+## Flow Traces Without New Findings
+
+- Public semantic/similar search: semantic search checks same-origin, maintenance, content type, transfer encoding, content length, rate limit, mode, aborts, model-version isolation, processed rows, byte-safe embedding decode, enrichment through `searchEnrichmentSelectFields`, and no score leakage (`apps/web/src/app/api/search/semantic/route.ts:107-368`). Similar search is production-only, excludes self, filters processed rows and production embeddings, and strips scores (`apps/web/src/app/api/search/similar/[id]/route.ts:68-285`). Residual test gap: similar-route tests mock `hasTrustedSameOrigin`, so browser provenance coverage depends on integration/e2e behavior rather than that unit test.
+- Upload -> process -> persist -> serve: upload validates origin/auth/maintenance/barrier, saves originals privately, inserts pending DB rows, enqueues processing, and revalidates public/admin paths (`apps/web/src/app/actions/images.ts:129-635`). The queue uses per-image locks, source existence checks, atomic derivative processing, conditional processed updates, cleanup on deleted-mid-process races, caption/embedding side effects after the core processed update, and retry/failure persistence (`apps/web/src/lib/image-queue.ts:715-1062`). Serving confines paths to derivative roots, validates realpaths, supports ETag/HEAD, and streams via file handles (`apps/web/src/lib/serve-upload.ts:168-384`).
+- Sharing: single-photo and group sharing use same-origin/admin checks, mutation-barrier `.acquired` checks, rate limiting, collision-safe key creation, revoke/delete revalidation, and public pages validate keys, rate-limit lookups, and avoid caching revoked share HTML through the service worker (`apps/web/src/app/actions/sharing.ts:92-423`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:90-149`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:96-209`).
+- Backup/restore: dump/restore enforce admin origin, advisory locks, upload/backfill/semantic locks, durable restore maintenance, queue quiesce, background write drains, foreground mutation drains, dump header/trailer validation, dangerous SQL scan, and maintenance retention on restore failure (`apps/web/src/app/[locale]/admin/db-actions.ts:166-636`, `apps/web/src/app/[locale]/admin/db-actions.ts:640-860`). Backup download streams from a validated open file handle and is test-locked (`apps/web/src/app/api/admin/db/download/route.ts:21-109`).
+- Image deletion/revalidation: delete paths acquire the mutation barrier correctly, select share/group keys before deletion, remove queue state, delete image/tag rows transactionally, cleanup variants with strict full-scan semantics, and revalidate home/photo/topic/admin/share/group paths (`apps/web/src/app/actions/images.ts:655-754`). Existing source tests pin raced zero-row delete and share revalidation contracts.
+- Service worker/PWA assets: generated `sw.js` matches the template plus `IMAGE_PIPELINE_VERSION` stamp (`36c91deb-p7` in this checkout), manifest icon paths resolve to existing app/public assets, admin/revocable routes bypass SW HTML caching, and tests compare template/generated worker cache behavior (`apps/web/scripts/build-sw.ts:27-43`, `apps/web/public/sw.template.js:525-560`, `apps/web/src/app/manifest.ts:24-51`, `apps/web/src/__tests__/sw-template-contract.test.ts:59-349`).
+- Sitemap/OG metadata: sitemap reserves localized homepage/topic/feed budgets before image rows and clamps to 50,000 URLs; robots allows OG endpoints before disallowing `/api/`; topic/photo OG routes rate-limit before expensive work, use ETags, sanitize rendered text, constrain canonical origins, and use non-cacheable temporary fallbacks for pending derivatives (`apps/web/src/app/sitemap.ts:26-135`, `apps/web/src/app/robots.ts:15-23`, `apps/web/src/app/api/og/route.tsx:71-270`, `apps/web/src/app/api/og/photo/[id]/route.tsx:87-375`).
+- Deploy/migration startup: container startup runs migrations before `server.js`, migration startup includes legacy/fresh reconcile, per-entry baselining, above-cursor/DML guards, post-condition hash verification, strong admin bootstrap password enforcement, and connection cleanup; deploy waits for health before Docker cleanup and only prunes after the new container is healthy (`apps/web/Dockerfile:187-197`, `apps/web/scripts/migrate.js:843-1013`, `apps/web/deploy.sh:51-104`, `apps/web/src/__tests__/migrate-pending-migrations.test.ts:89-356`).
 
 ## Final Sweep
 
-Common tracing categories checked: source-to-derivative image causality, upload-to-queue handoff, queue retry/lifecycle state, DB write ordering, restore maintenance boundaries, fire-and-forget analytics, public route rate-limit accounting, semantic search model-version lineage, cache invalidation/revalidation, map GPS visibility, and deploy/runtime cleanup ordering. No additional high-confidence causality defects were found. Residual risk remains around timing-sensitive restore races and large-production-state behavior that could not be exercised without a live database and browser trace.
+Checked causal boundaries across request provenance, maintenance/restore gates, foreground mutation barriers, background drains, DB write ordering, queue handoff, file-system atomicity, public cache/revalidation, service-worker caching, crawler metadata, startup migration state, and existing regression tests. New high-confidence findings are limited to the auth restore-barrier gap and the admin CSV separator regression above. Remaining risk is mainly timing-sensitive restore concurrency and browser-header provenance that static tracing cannot fully exercise without live browser/database tests.

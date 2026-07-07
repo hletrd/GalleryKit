@@ -88,6 +88,13 @@ describe('C2-19 MasonryCard memoization contract', () => {
         expect(src).toMatch(/export const MasonryCard = memo\(MasonryCardImpl\)/);
     });
 
+    it('disambiguates duplicate visible titles in link accessible names', () => {
+        const src = readSrc('components/masonry-card.tsx');
+        expect(src).toContain('const accessibleTitle = `${displayTitle} #${image.id}`;');
+        expect(src).toContain("t('aria.viewPhoto', { title: accessibleTitle })");
+        expect(src).toContain('aria-label={photoAriaLabel}');
+    });
+
     it('home-client.tsx passes the stable prop set (no derived/cloned objects) into MasonryCard', () => {
         const src = readSrc('components/home-client.tsx');
         const mapCall = src.slice(src.indexOf('orderedImages.map'), src.indexOf('</GridPictureFallbackBoundary>'));

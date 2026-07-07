@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import type { PoolConnection as CallbackPoolConnection } from "mysql2";
+import { readFileSync } from "node:fs";
 import * as schema from "./schema";
 
 // Enable TLS for non-localhost DB connections to protect credentials in transit.
@@ -8,7 +9,14 @@ import * as schema from "./schema";
 const dbHost = process.env.DB_HOST ?? '127.0.0.1';
 const isLocalhost = ['127.0.0.1', 'localhost', '::1'].includes(dbHost);
 const sslDisabled = process.env.DB_SSL === 'false';
-const sslConfig = (!isLocalhost && !sslDisabled) ? { ssl: { rejectUnauthorized: true } } : {};
+const sslConfig = (() => {
+    if (isLocalhost || sslDisabled) return {};
+    const caPath = process.env.DB_SSL_CA?.trim();
+    if (!caPath) {
+        throw new Error('DB_SSL_CA is required for non-local DB connections unless DB_SSL=false');
+    }
+    return { ssl: { ca: readFileSync(caPath, 'utf8'), rejectUnauthorized: true } };
+})();
 
 // AGG-R5C3-05 + AGG-5 (run-6 c1): exported so background maintenance ops (the
 // color-pipeline backfill runner) can budget how many of the shared pool

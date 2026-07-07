@@ -15,11 +15,14 @@ describe('auth mutation barrier source contracts', () => {
         expect(authSource).toContain("from '@/lib/admin-mutation-barrier'");
         const functionIndex = indexAfter(authSource, 'export async function updatePassword');
         const slotIndex = indexAfter(authSource, 'using mutationSlot = acquireAdminMutationSlot();');
+        const acquiredCheckIndex = indexAfter(authSource, 'if (!mutationSlot.acquired)', slotIndex);
         const rateLimitIndex = indexAfter(authSource, "incrementRateLimit(ip, 'password_change'", slotIndex);
         const verifyIndex = indexAfter(authSource, 'argon2.verify', slotIndex);
         const transactionIndex = indexAfter(authSource, 'db.transaction', slotIndex);
 
         expect(slotIndex).toBeGreaterThan(functionIndex);
+        expect(acquiredCheckIndex).toBeGreaterThan(slotIndex);
+        expect(authSource.slice(slotIndex, rateLimitIndex)).not.toContain('if (!mutationSlot)');
         expect(rateLimitIndex).toBeGreaterThan(slotIndex);
         expect(verifyIndex).toBeGreaterThan(slotIndex);
         expect(transactionIndex).toBeGreaterThan(slotIndex);

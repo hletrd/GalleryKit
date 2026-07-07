@@ -82,6 +82,7 @@ describe('cycle 22 source contracts', () => {
         expect(home).toContain('useDisplayCapability');
         expect(home).toContain("document.documentElement.setAttribute('data-display-gamut', displayGamut)");
         expect(home).toContain("document.documentElement.setAttribute('data-force-show-color-chips', forceShowColorChips ? 'true' : 'false')");
+        expect(masonryCard).toContain('const accessibleTitle = `${displayTitle} #${image.id}`;');
         expect(masonryCard).toContain('const photoAriaLabel = isWideGamut');
         expect(masonryCard).toContain("(${t('viewer.gamutBadgeP3')})");
         expect(masonryCard).toContain('aria-label={photoAriaLabel}');
