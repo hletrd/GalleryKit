@@ -507,8 +507,7 @@ async function storeImageEmbeddingForMode(
         console.debug(`[Queue] Skipping embedding write for image ${imageId} during restore maintenance`);
         return;
     }
-    const buf = embeddingToBuffer(embedding);
-    const embeddingValue = buf as unknown as string;
+    const embeddingValue = embeddingToBuffer(embedding);
     await db.insert(imageEmbeddings)
         .values({
             imageId,

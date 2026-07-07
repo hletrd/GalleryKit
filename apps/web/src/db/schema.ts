@@ -1,5 +1,11 @@
-import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, primaryKey, bigint } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, primaryKey, bigint, customType } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
+
+const mediumblob = customType<{ data: Buffer; driverData: Buffer }>({
+    dataType() {
+        return 'mediumblob';
+    },
+});
 
 export const topics = mysqlTable("topics", {
     slug: varchar("slug", { length: 255 }).primaryKey(),
@@ -270,25 +276,22 @@ export const sharedGroupViews = mysqlTable("shared_group_views", {
 
 // US-P51 (Phase 5.1): CLIP semantic search — 512-dim float32 embeddings per image.
 // embedding is stored as a MEDIUMBLOB (2048 bytes = 512 × 4-byte little-endian float32).
-// The Drizzle column is typed as `text` for schema diffing; the actual SQL migration
-// creates it as MEDIUMBLOB. The application layer converts Buffer ↔ Float32Array.
+// The Drizzle column uses a local `mediumblob` custom type so future schema diffs
+// keep the same binary physical type as migration 0012 and legacy reconcile.
+// The application layer converts Buffer ↔ Float32Array.
 // model_version tags which encoder produced the embedding (stub: 'stub-sha256-v1').
 // No PII: only image_id and the embedding vector are stored.
 //
 // AGG-C10-01 (run-6 cycle-1): because the physical column is MEDIUMBLOB (binary
-// charset), mysql2 ALWAYS returns a Buffer for this column at RUNTIME — the `text`
-// type below is a static approximation only; the value is NOT a string. Writers
-// insert the raw `Buffer` (cast through `unknown` at the write site); readers MUST
+// charset), mysql2 ALWAYS returns a Buffer for this column at RUNTIME. Writers
+// insert the raw `Buffer`; readers MUST
 // use `decodeEmbeddingColumn()` (lib/clip-embeddings.ts), which handles the raw
 // Buffer and any legacy base64-string rows. Do NOT `Buffer.from(value, 'base64')`
 // a column value that is already a Buffer — the encoding arg is ignored and the
 // length check then drops every row.
 export const imageEmbeddings = mysqlTable("image_embeddings", {
     imageId: int("image_id").primaryKey().references(() => images.id, { onDelete: 'cascade' }),
-    // Note: actual column is MEDIUMBLOB — see migration 0012. The `text` type here
-    // is a Drizzle approximation; mysql2 returns a Buffer at runtime, and the lib
-    // layer (decodeEmbeddingColumn / embeddingToBuffer) wraps Buffer reads/writes.
-    embedding: text("embedding").notNull(),
+    embedding: mediumblob("embedding").notNull(),
     modelVersion: varchar("model_version", { length: 32 }).notNull(),
     updatedAt: timestamp("updated_at")
         .default(sql`CURRENT_TIMESTAMP`)

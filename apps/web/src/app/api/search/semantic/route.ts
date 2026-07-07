@@ -262,7 +262,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     // Scan up to SEMANTIC_SCAN_LIMIT most-recent embeddings for the active model (HARD cap).
     // The model_version filter ensures stub rows never appear in production results and vice-versa.
-    let rows: { imageId: number; embedding: string | null }[];
+    let rows: { imageId: number; embedding: unknown }[];
     try {
         if (isRequestAborted(request)) {
             return abortResponse();

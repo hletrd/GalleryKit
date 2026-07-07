@@ -170,8 +170,8 @@ export function bufferToEmbedding(buf: Buffer): Float32Array {
  * return null if the value is not a well-formed 512-dim embedding.
  *
  * AGG-C10-01 (run-6 cycle-1): the column is physically MEDIUMBLOB, so mysql2
- * ALWAYS returns a Buffer for it (binary charset 63 → `readLengthCodedBuffer`),
- * regardless of the Drizzle `text()` type annotation. The previous read sites did
+ * returns a Buffer for it (binary charset 63 → `readLengthCodedBuffer`).
+ * The previous read sites did
  * `Buffer.from(row.embedding as string, 'base64')` — but `Buffer.from(buffer, enc)`
  * IGNORES the encoding for Buffer input and copies verbatim, so a base64-stored
  * vector came back as a ~2732-byte Buffer that failed the 2048-byte length check

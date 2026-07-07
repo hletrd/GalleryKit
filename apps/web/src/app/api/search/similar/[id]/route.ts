@@ -176,7 +176,7 @@ export async function GET(
 
     // Step 7: scan up to SEMANTIC_SCAN_LIMIT most-recent production embeddings,
     // compute cosine vs target, exclude self, rank with topK.
-    let rows: { imageId: number; embedding: string | null }[];
+    let rows: { imageId: number; embedding: unknown }[];
     try {
         rows = await db
             .select({ imageId: imageEmbeddings.imageId, embedding: imageEmbeddings.embedding })

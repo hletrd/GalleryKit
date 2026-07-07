@@ -172,6 +172,13 @@ describe('reconcileLegacySchema mirrors every drizzle SQL index (AGG-R8-10 / TRC
     );
 });
 
+describe('reconcileLegacySchema structural pins for high-risk binary/vector schema', () => {
+    it('keeps image_embeddings binary storage and scan index shape aligned', () => {
+        expect(MIGRATE_SRC_CODE).toMatch(/CREATE TABLE IF NOT EXISTS image_embeddings[\s\S]*embedding mediumblob NOT NULL/);
+        expect(MIGRATE_SRC_CODE).toMatch(/CREATE INDEX idx_image_embeddings_model_version_updated ON image_embeddings \(model_version, updated_at\)/);
+    });
+});
+
 describe('reconcileLegacySchema explicitly repairs current foreign keys', () => {
     const drizzleDir = path.resolve(__dirname, '..', '..', 'drizzle');
     const removedForeignKeys = new Set([

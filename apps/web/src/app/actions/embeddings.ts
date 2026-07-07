@@ -168,10 +168,8 @@ export async function backfillClipEmbeddings(): Promise<BackfillEmbeddingsResult
                             embedding = embedImageStub(id);
                         }
                         // AGG-C10-01: store the RAW buffer (not base64) so the read path
-                        // (decodeEmbeddingColumn) round-trips it. The Drizzle `text()`
-                        // column is a MEDIUMBLOB approximation, so cast through `unknown`.
-                        const buf = embeddingToBuffer(embedding);
-                        const embeddingValue = buf as unknown as string;
+                        // (decodeEmbeddingColumn) round-trips it from the MEDIUMBLOB.
+                        const embeddingValue = embeddingToBuffer(embedding);
                         await db.insert(imageEmbeddings)
                             .values({
                                 imageId: id,

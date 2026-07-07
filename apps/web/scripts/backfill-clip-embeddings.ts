@@ -203,11 +203,8 @@ async function main(): Promise<number> {
                             embedding = embedImageStub(id);
                         }
                         // AGG-C10-01: store the RAW 2048-byte float32 buffer (not base64) so
-                        // the read path (decodeEmbeddingColumn) round-trips it. The Drizzle
-                        // `text()` column is a schema approximation over a MEDIUMBLOB, so the
-                        // Buffer is cast through `unknown` at this single write site.
-                        const buf = embeddingToBuffer(embedding);
-                        const embeddingValue = buf as unknown as string;
+                        // the read path (decodeEmbeddingColumn) round-trips it from MEDIUMBLOB.
+                        const embeddingValue = embeddingToBuffer(embedding);
                         assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
                         await db.insert(imageEmbeddings)
                             .values({

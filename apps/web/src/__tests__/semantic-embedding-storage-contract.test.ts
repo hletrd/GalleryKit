@@ -6,6 +6,7 @@ const APP_README = readFileSync(resolve(__dirname, '../../README.md'), 'utf8');
 const CLAUDE = readFileSync(resolve(__dirname, '../../../../CLAUDE.md'), 'utf8');
 const SCHEMA = readFileSync(resolve(__dirname, '../db/schema.ts'), 'utf8');
 const MIGRATION_0012 = readFileSync(resolve(__dirname, '../../drizzle/0012_image_embeddings.sql'), 'utf8');
+const MIGRATE = readFileSync(resolve(__dirname, '../../scripts/migrate.js'), 'utf8');
 
 describe('semantic embedding storage contract', () => {
     it('keeps live docs honest that image_embeddings stores one active row per image', () => {
@@ -19,5 +20,14 @@ describe('semantic embedding storage contract', () => {
         expect(SCHEMA).toMatch(/imageId:\s*int\("image_id"\)\.primaryKey\(\)/);
         expect(MIGRATION_0012).toContain('PRIMARY KEY (`image_id`)');
         expect(MIGRATION_0012).not.toContain('PRIMARY KEY (`image_id`, `model_version`)');
+    });
+
+    it('keeps Drizzle, migration, and legacy reconcile embedding storage as MEDIUMBLOB', () => {
+        expect(SCHEMA).toContain('customType<{ data: Buffer; driverData: Buffer }>');
+        expect(SCHEMA).toContain("return 'mediumblob';");
+        expect(SCHEMA).toContain('embedding: mediumblob("embedding").notNull()');
+        expect(SCHEMA).not.toContain('embedding: text("embedding").notNull()');
+        expect(MIGRATION_0012.toLowerCase()).toContain('`embedding` mediumblob not null');
+        expect(MIGRATE.toLowerCase()).toContain('embedding mediumblob not null');
     });
 });
