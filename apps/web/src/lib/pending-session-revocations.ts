@@ -23,11 +23,30 @@ import { inArray } from 'drizzle-orm';
 
 const MAX_PENDING_REVOCATIONS = 256;
 
-const pending = new Set<string>();
+// ARCH9-02 (loop-B cycle 9): survive module re-instantiation (dev-mode Fast
+// Refresh / duplicate module graphs) via the same `globalThis + Symbol.for`
+// guard used by the six sibling coordination-state modules
+// (admin-mutation-barrier, restore-maintenance, image-queue,
+// upload-tracker-state, admin-backfill-runner, storage/index). A silently
+// reset queue would drop restore-window session revocations with no log.
+const pendingRevocationsKey = Symbol.for('gallerykit.pendingSessionRevocations');
+
+type PendingRevocationsGlobal = typeof globalThis & {
+    [pendingRevocationsKey]?: Set<string>;
+};
+
+function getPending(): Set<string> {
+    const globalWithPending = globalThis as PendingRevocationsGlobal;
+    if (!(globalWithPending[pendingRevocationsKey] instanceof Set)) {
+        globalWithPending[pendingRevocationsKey] = new Set<string>();
+    }
+    return globalWithPending[pendingRevocationsKey]!;
+}
 
 /** Queue a session-token hash whose DB delete was skipped by a restore window. */
 export function enqueuePendingSessionRevocation(tokenHash: string): void {
     if (!tokenHash) return;
+    const pending = getPending();
     if (pending.size >= MAX_PENDING_REVOCATIONS && !pending.has(tokenHash)) {
         // Bounded set: evict the oldest entry (Set preserves insertion order).
         const oldest = pending.values().next().value;
@@ -37,7 +56,7 @@ export function enqueuePendingSessionRevocation(tokenHash: string): void {
 }
 
 export function pendingSessionRevocationCount(): number {
-    return pending.size;
+    return getPending().size;
 }
 
 /**
@@ -48,6 +67,7 @@ export function pendingSessionRevocationCount(): number {
  * @returns the number of queued revocations flushed (0 on failure or empty).
  */
 export async function flushPendingSessionRevocations(): Promise<number> {
+    const pending = getPending();
     if (pending.size === 0) return 0;
     const hashes = Array.from(pending);
     try {
@@ -67,5 +87,5 @@ export async function flushPendingSessionRevocations(): Promise<number> {
 
 /** Test-only reset. */
 export function _clearPendingSessionRevocationsForTest(): void {
-    pending.clear();
+    getPending().clear();
 }
