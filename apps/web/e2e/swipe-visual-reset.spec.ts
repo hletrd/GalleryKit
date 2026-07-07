@@ -92,4 +92,41 @@ test('shared-group swipe: sub-threshold snaps back; threshold navigates in place
             await expect(indicator.first()).toHaveCSS('opacity', '0');
         }
     }
+
+    // Phase 3 (C4-29 / TEST4-05, run-10 c4): the reset contract must hold for
+    // NON-swipe in-place triggers too — the chevron click reaches the same
+    // goToPhoto/onSelectId=setCurrentImageId path but never ran under test
+    // (the classic fix-one-sibling-miss-the-next pattern). Step back via the
+    // visible prev-chevron and assert the indicators settle identically.
+    const urlBeforeChevron = page.url();
+    const prevChevron = page.getByRole('button', { name: 'Previous photo' });
+    if ((await prevChevron.count()) > 0) {
+        await prevChevron.first().click();
+        await expect(page).not.toHaveURL(urlBeforeChevron);
+        for (const testId of ['swipe-next-indicator', 'swipe-prev-indicator']) {
+            const indicator = page.getByTestId(testId);
+            if ((await indicator.count()) > 0) {
+                await expect(indicator.first()).toHaveCSS('opacity', '0');
+            }
+        }
+    }
+
+    // Phase 4 (C4-04 / PERF4-01, run-10 c4): in-place stepping must be
+    // SHALLOW — no server round-trip, no share-limiter burn. Pre-fix, every
+    // step was a real RSC navigation through the pre-incrementing /g/[key]
+    // render, so a browsing session could exhaust SHARE_MAX_REQUESTS (60/min)
+    // and have the open viewer replaced by the 404 page. Step repeatedly and
+    // assert the URL keeps tracking the photo id while the viewer stays alive
+    // (still the media container, never the not-found page).
+    for (let step = 0; step < 6; step++) {
+        const before = page.url();
+        await dispatchSwipe(page, { fromX: 300, toX: 140, y: 300 });
+        // Alternate direction when we hit the end of the group.
+        if (page.url() === before) {
+            await dispatchSwipe(page, { fromX: 140, toX: 300, y: 300 });
+        }
+        await expect(page).toHaveURL(/\/g\/Abc234Def5\?photoId=\d+/);
+        await expect(page.getByTestId('photo-media-container').first()).toBeVisible();
+    }
+    await expectNoNextError(page);
 });

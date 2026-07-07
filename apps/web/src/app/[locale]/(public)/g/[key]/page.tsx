@@ -199,6 +199,13 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                         <Link
                             key={image.id}
                             href={`${localizePath(locale, `/g/${key}`)}?photoId=${image.id}`}
+                            // C4-04 / PERF4-01 (run-10 c4): viewport-entry RSC
+                            // prefetches of every visible tile drain the same
+                            // per-IP SHARE_MAX_REQUESTS budget as real lookups
+                            // (each prefetch re-runs the pre-incrementing page
+                            // render) — a large shared grid could 404 the
+                            // recipient's session before they clicked anything.
+                            prefetch={false}
                             className="block break-inside-avoid relative group overflow-hidden rounded-lg bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                             aria-label={tAria('viewPhoto', { title: altText })}
                             style={{

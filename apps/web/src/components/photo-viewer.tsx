@@ -326,8 +326,20 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     useEffect(() => {
         if (!syncPhotoQueryBasePath || !image) return;
-        router.replace(`${syncPhotoQueryBasePath}?photoId=${image.id}`, { scroll: false });
-    }, [image, router, syncPhotoQueryBasePath]);
+        // C4-04 / PERF4-01 (run-10 c4): sync the query param SHALLOWLY.
+        // router.replace() on a revalidate=0 page is a real RSC navigation —
+        // every in-place step (swipe, arrow, shared-grid pick, 5s slideshow
+        // tick) re-ran the whole /g/[key] server render AND burned a
+        // SHARE_MAX_REQUESTS (60/min per IP) pre-increment slot; past the
+        // budget the open viewer was replaced by the 404 page mid-browse.
+        // window.history.replaceState is App Router-supported shallow routing
+        // (updates useSearchParams subscribers, no server round-trip). The
+        // skip-if-match guard also removes the mount-time redundant sync.
+        const targetUrl = `${syncPhotoQueryBasePath}?photoId=${image.id}`;
+        const current = `${window.location.pathname}${window.location.search}`;
+        if (current === targetUrl) return;
+        window.history.replaceState(null, '', targetUrl);
+    }, [image, syncPhotoQueryBasePath]);
 
     // P3-26: set document root attribute so CSS can force-show color chips
     useEffect(() => {
