@@ -42,6 +42,13 @@ describe('db/index.ts — pool-connection listener', () => {
         expect(source).toMatch(/await Promise\.race\(\[initPromise, initTimeout\]\)/);
     });
 
+    it('destroys a connection whose init query times out instead of releasing it busy', () => {
+        const timeoutCatch = /catch\s*\(err\)\s*\{([\s\S]*?)\n\s*\}\s*finally/.exec(source)?.[1] ?? '';
+        expect(timeoutCatch).toContain('connection.destroy()');
+        expect(timeoutCatch).not.toContain('connection.release()');
+        expect(source).toContain('rather than releasing a potentially still-busy session back to the');
+    });
+
 
     it('routes pool query and execute through the initialized connection path', () => {
         expect(source).toMatch(/poolConnection\.query\s*=\s*\(async/);

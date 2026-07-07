@@ -101,6 +101,7 @@ const GA_CONNECT_SOURCES = [
   'https://*.google-analytics.com',
   'https://*.analytics.google.com',
   'https://*.googletagmanager.com',
+  'https://www.google.com',
 ] as const;
 const GA_IMG_SOURCES = [
   'https://*.google-analytics.com',

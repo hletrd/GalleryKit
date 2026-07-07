@@ -87,6 +87,7 @@ async function main() {
   if (!/^\d{1,5}$/.test(port)) {
     throw new Error(`Unsafe E2E port: ${port}`);
   }
+  const runtimeBaseUrl = `http://${host}:${port}`;
 
   loadDotenvAsData();
   assertSafeE2eDatabase();
@@ -107,7 +108,7 @@ async function main() {
     cwd: appDir,
     stdio: 'inherit',
     shell: false,
-    env: commandEnv({ HOSTNAME: host, PORT: port }),
+    env: commandEnv({ HOSTNAME: host, PORT: port, BASE_URL: runtimeBaseUrl }),
   });
 
   const stopServer = () => {

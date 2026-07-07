@@ -28,6 +28,18 @@ describe('cycle 12 operational proof surfaces', () => {
         expect(script).toContain("'X-Forwarded-Proto'");
         expect(script).toContain("'X-Forwarded-For'");
         expect(script).toContain('TRUST_PROXY=true');
+        expect(script).toContain("'Content-Type': 'application/json'");
+        expect(script).toContain("JSON.stringify({ query: '', topK: 1 })");
+        expect(script).toContain('client-IP/rate-limit handling');
+        expect(script).toContain('unexpected HTTP ${status}');
+        expect(script).not.toContain("'Content-Type': 'text/plain'");
+    });
+
+    it('keeps E2E runtime BASE_URL aligned with the local Playwright origin', () => {
+        const script = readFileSync(resolve(ROOT, 'apps/web/scripts/run-e2e-server.mjs'), 'utf8');
+        expect(script).toContain('const runtimeBaseUrl = `http://${host}:${port}`');
+        expect(script).toContain('BASE_URL: runtimeBaseUrl');
+        expect(script).toContain("E2E_PUBLIC_BASE_URL || 'https://gallerykit-e2e.invalid'");
     });
 
     it('runs real-model CLIP preflight from a durable scheduled/manual workflow', () => {

@@ -14,6 +14,10 @@ describe('cycle 20 source contracts', () => {
         expect(watchdog).toContain("child.once('close', markSettled)");
         expect(watchdog).toContain("if (!childSettled) child.kill('SIGKILL')");
         expect(watchdog).not.toContain('if (!child.killed)');
+        expect(watchdog.indexOf("child.kill('SIGTERM')")).toBeLessThan(watchdog.indexOf('onTimeout(err)'));
+        expect(watchdog.indexOf("child.kill('SIGKILL')")).toBeLessThan(watchdog.indexOf('onTimeout(err)'));
+        expect(watchdog).toContain('if (!fired) markSettled()');
+        expect(watchdog).not.toMatch(/\n\s*markSettled\(\);\n\s*child\.off/);
     });
 
     it('keeps visitor keyword search imported directly from the public server-action module', () => {

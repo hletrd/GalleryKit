@@ -5,9 +5,11 @@ Usage:
   npm run check:proxy-topology -- --url https://gallery.example.com [--direct-url http://127.0.0.1:3000]
 
 Read-only public-edge check for the deployed proxy topology. The check sends
-syntactically invalid POST probes that should fail before mutation/rate-limit
-work. A safe edge overwrites inbound X-Forwarded-Host, X-Forwarded-Proto, and
-X-Forwarded-For before traffic reaches the app.
+valid JSON POST probes to the public semantic-search route so the request
+reaches same-origin and client-IP/rate-limit handling before failing on normal
+disabled-mode or invalid-query validation. A safe edge overwrites inbound
+X-Forwarded-Host, X-Forwarded-Proto, and X-Forwarded-For before traffic reaches
+the app.
 `;
 
 function parseArgs(argv) {
@@ -56,6 +58,7 @@ function classifyBaseline(status) {
   if (status >= 500) {
     throw new Error(`Baseline same-origin probe returned ${status}; app or edge is unhealthy.`);
   }
+  throw new Error(`Baseline same-origin probe returned unexpected HTTP ${status}; expected a validation/config/rate-limit failure.`);
 }
 
 function classifySpoof(status) {
@@ -66,6 +69,7 @@ function classifySpoof(status) {
   }
   if ([400, 404, 405, 415, 429, 503].includes(status)) return;
   if (status >= 500) throw new Error(`Spoofed-header probe returned ${status}; app or edge is unhealthy.`);
+  throw new Error(`Spoofed-header probe returned unexpected HTTP ${status}; expected a validation/config/rate-limit failure.`);
 }
 
 async function checkDirectExposure(directUrl) {
@@ -99,9 +103,9 @@ async function main() {
     method: 'POST',
     headers: {
       Origin: origin,
-      'Content-Type': 'text/plain',
+      'Content-Type': 'application/json',
     },
-    body: '',
+    body: JSON.stringify({ query: '', topK: 1 }),
   });
   classifyBaseline(baseline.status);
 
@@ -109,12 +113,12 @@ async function main() {
     method: 'POST',
     headers: {
       Origin: origin,
-      'Content-Type': 'text/plain',
+      'Content-Type': 'application/json',
       'X-Forwarded-Host': 'attacker.invalid',
       'X-Forwarded-Proto': edgeUrl.protocol === 'https:' ? 'http' : 'https',
       'X-Forwarded-For': '198.51.100.44, 203.0.113.99',
     },
-    body: '',
+    body: JSON.stringify({ query: '', topK: 1 }),
   });
   classifySpoof(spoofed.status);
 

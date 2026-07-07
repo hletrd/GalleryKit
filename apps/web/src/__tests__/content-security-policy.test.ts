@@ -23,7 +23,7 @@ describe('buildContentSecurityPolicy', () => {
       // (region1.google-analytics.com for EU data residency) that the
       // previous literal www. hosts silently blocked.
       expect(cspWithGa).toContain("script-src 'nonce-abc123' 'self' https://*.googletagmanager.com");
-      expect(cspWithGa).toContain("connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com");
+      expect(cspWithGa).toContain("connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://www.google.com");
       expect(cspWithGa).toContain("img-src 'self' data: blob: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org https://*.google-analytics.com https://*.googletagmanager.com");
       expect(cspWithGa).not.toContain("script-src 'unsafe-inline'");
       // Analytics tier ONLY — advertising hosts must never creep in.
@@ -42,6 +42,7 @@ describe('buildContentSecurityPolicy', () => {
       expect(cspNoGa).not.toContain('googletagmanager.com');
       expect(cspNoGa).not.toContain('google-analytics.com');
       expect(cspNoGa).not.toContain('analytics.google.com');
+      expect(cspNoGa).not.toContain('www.google.com');
       expect(cspNoGa).toContain("connect-src 'self'");
       expect(cspNoGa).toContain("img-src 'self' data: blob: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org;");
     } finally {

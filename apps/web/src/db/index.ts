@@ -88,8 +88,9 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
         // C4-C1: Race the init query against a 10-second timeout. If MySQL
         // accepts the TCP connection but never responds to the init query
         // (e.g., server under extreme load), the connection would be held
-        // indefinitely, starving the pool. On timeout, release the connection
-        // and throw so the caller can retry or fail fast.
+        // indefinitely, starving the pool. On timeout, destroy the connection
+        // rather than releasing a potentially still-busy session back to the
+        // pool, then throw so the caller can retry or fail fast.
         // R10-C3-TRC-H6: On timeout, ALSO clear the stored init promise so the
         // next getConnection() attempt on this underlying connection re-runs
         // the init query instead of racing against an already-lost race.
@@ -107,10 +108,10 @@ poolConnection.getConnection = (async (...args: Parameters<typeof poolConnection
         try {
             await Promise.race([initPromise, initTimeout]);
         } catch (err) {
-            connection.release();
+            connection.destroy();
             // Clear the stale init promise so a future getConnection() on this
-            // same underlying connection retries the SET command instead of
-            // re-racing the lost race.
+            // physical session does not re-race the lost race. The destroyed
+            // connection will not be reused by the pool.
             if (underlying) {
                 underlying[connectionInitSymbol] = undefined;
             }
