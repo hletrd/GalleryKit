@@ -33,12 +33,44 @@ export function wheelStep(current: number, deltaY: number): number {
 
 /**
  * Compute the clamped pan position after a zoom or pan operation.
- * x/y are expressed as percentages of the container size.
+ *
+ * x/y are "percent-points" of the container size: applyTransform emits
+ * `translate(${x / level}%, ...)` and the surrounding `scale(level)`
+ * multiplies that back, so the NET visual displacement of the zoomed image
+ * is exactly x% of the container width (independent of level).
+ *
+ * CMP-01 / AGG8b-07 (run-10 c8b): the bound is level-aware. A centered
+ * image scaled to `level` overflows the container by (level - 1) * 50
+ * percent-points per side — precisely the pan that brings an image EDGE to
+ * the container edge. The previous fixed ±100 clamp both over-panned at low
+ * zoom (level 1.5 only needs ±25) and made the corners UNREACHABLE at 5×
+ * zoom (which needs ±200).
  */
-export function clampPan(x: number, y: number): { x: number; y: number } {
+export function clampPan(x: number, y: number, level: number): { x: number; y: number } {
+    const maxPan = Math.max(0, (level - 1) * 50);
     return {
-        x: Math.max(-100, Math.min(100, x)),
-        y: Math.max(-100, Math.min(100, y)),
+        x: Math.max(-maxPan, Math.min(maxPan, x)),
+        y: Math.max(-maxPan, Math.min(maxPan, y)),
+    };
+}
+
+/**
+ * CMP-01 / AGG8b-07: convert a pointer drag delta (CSS pixels) into the
+ * percent-point pan space. Because percent-points translate 1:1 into
+ * container-relative visual displacement (see clampPan), 1:1 pointer
+ * tracking is `deltaPx / containerSize * 100`. The drag paths previously
+ * fed raw pixel deltas into percent space, so pan speed scaled with the
+ * container width (~10× too fast on a 1000 px viewport).
+ */
+export function dragDeltaToPanPct(
+    deltaXPx: number,
+    deltaYPx: number,
+    rect: { width: number; height: number },
+): { x: number; y: number } {
+    if (rect.width <= 0 || rect.height <= 0) return { x: 0, y: 0 };
+    return {
+        x: (deltaXPx / rect.width) * 100,
+        y: (deltaYPx / rect.height) * 100,
     };
 }
 
@@ -89,5 +121,6 @@ export function anchoredZoomPosition(
     return clampPan(
         anchor.x + (position.x - anchor.x) * scaleRatio,
         anchor.y + (position.y - anchor.y) * scaleRatio,
+        newLevel,
     );
 }

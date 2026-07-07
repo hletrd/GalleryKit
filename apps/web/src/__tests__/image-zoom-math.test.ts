@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, anchorPctFromClientPoint, anchoredZoomPosition, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
+import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, anchorPctFromClientPoint, anchoredZoomPosition, clampPan, clampZoom, dragDeltaToPanPct, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
 
 describe('touchDistance', () => {
     it('returns 0 for coincident points', () => {
@@ -93,17 +93,58 @@ describe('wheelStep', () => {
     });
 });
 
+/**
+ * CMP-01 / AGG8b-07 (run-10 c8b): clampPan is level-aware. A centered image
+ * scaled to `level` overflows by (level - 1) * 50 percent-points per side —
+ * the exact pan that brings an image edge to the container edge. The old
+ * fixed ±100 bound over-panned at low zoom and made corners unreachable at 5×.
+ */
 describe('clampPan', () => {
-    it('passes through values within bounds', () => {
-        expect(clampPan(50, -50)).toEqual({ x: 50, y: -50 });
+    it('passes through values within the level bound', () => {
+        expect(clampPan(50, -50, 3)).toEqual({ x: 50, y: -50 });
     });
-    it('clamps x to -100..100', () => {
-        expect(clampPan(-200, 0).x).toBe(-100);
-        expect(clampPan(200, 0).x).toBe(100);
+    it('pins to (0, 0) at level 1 (nothing to pan)', () => {
+        const out = clampPan(40, -40, 1);
+        expect(out.x).toBeCloseTo(0);
+        expect(out.y).toBeCloseTo(0);
     });
-    it('clamps y to -100..100', () => {
-        expect(clampPan(0, -200).y).toBe(-100);
-        expect(clampPan(0, 200).y).toBe(100);
+    it('clamps at ±(level-1)*50 — level 3 → ±100', () => {
+        expect(clampPan(-200, 0, 3).x).toBe(-100);
+        expect(clampPan(200, 0, 3).x).toBe(100);
+        expect(clampPan(0, -200, 3).y).toBe(-100);
+        expect(clampPan(0, 200, 3).y).toBe(100);
+    });
+    it('allows the full ±200 needed to reach corners at MAX_ZOOM (5×)', () => {
+        expect(clampPan(-250, 250, MAX_ZOOM)).toEqual({ x: -200, y: 200 });
+        expect(clampPan(-180, 180, MAX_ZOOM)).toEqual({ x: -180, y: 180 });
+    });
+    it('tightens the bound at low zoom — level 1.5 → ±25', () => {
+        expect(clampPan(40, -40, 1.5)).toEqual({ x: 25, y: -25 });
+    });
+});
+
+/**
+ * CMP-01 / AGG8b-07: drag deltas arrive in CSS pixels; the pan space is
+ * percent-points (1 percent-point = 1% of container size of net visual
+ * displacement). 1:1 pointer tracking therefore requires deltaPx / size * 100.
+ */
+describe('dragDeltaToPanPct', () => {
+    const rect = { width: 1000, height: 800 };
+    it('converts a pixel delta into percent of the container size', () => {
+        expect(dragDeltaToPanPct(100, 80, rect)).toEqual({ x: 10, y: 10 });
+    });
+    it('gives 1:1 visual tracking (delta% of width equals the dragged pixels)', () => {
+        const dragged = 137;
+        const pct = dragDeltaToPanPct(dragged, 0, rect).x;
+        // Net visual displacement = pct% of container width (see clampPan doc).
+        expect((pct / 100) * rect.width).toBeCloseTo(dragged);
+    });
+    it('is direction-preserving for negative deltas', () => {
+        expect(dragDeltaToPanPct(-50, -40, rect)).toEqual({ x: -5, y: -5 });
+    });
+    it('returns zero for a degenerate zero-size rect', () => {
+        expect(dragDeltaToPanPct(100, 100, { width: 0, height: 0 })).toEqual({ x: 0, y: 0 });
+        expect(dragDeltaToPanPct(100, 100, { width: 1000, height: 0 })).toEqual({ x: 0, y: 0 });
     });
 });
 
@@ -138,7 +179,8 @@ describe('anchoredZoomPosition', () => {
         expect(anchoredZoomPosition(MIN_ZOOM, DEFAULT_ZOOM, { x: 0, y: 0 }, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 });
     });
     it('matches the pre-extraction wheel arithmetic verbatim', () => {
-        // Reference: newX = anchorX + (posX - anchorX) * (newLevel / currentLevel)
+        // Reference: newX = anchorX + (posX - anchorX) * (newLevel / currentLevel),
+        // clamped at the NEW level's pan bound (CMP-01 level-aware clamp).
         const currentLevel = 1.4;
         const newLevel = wheelStep(currentLevel, -100);
         const anchor = { x: -30, y: 12.5 };
@@ -147,6 +189,7 @@ describe('anchoredZoomPosition', () => {
         const expected = clampPan(
             anchor.x + (pos.x - anchor.x) * ratio,
             anchor.y + (pos.y - anchor.y) * ratio,
+            newLevel,
         );
         expect(anchoredZoomPosition(currentLevel, newLevel, anchor, pos)).toEqual(expected);
     });
@@ -156,8 +199,11 @@ describe('anchoredZoomPosition', () => {
         expect(out.x).toBeCloseTo(-30 * (1 - DEFAULT_ZOOM));
         expect(out.y).toBeCloseTo(20 * (1 - DEFAULT_ZOOM));
     });
-    it('saturates at the pan clamp for extreme corner anchors', () => {
+    it('reaches the exact corner pan for extreme corner anchors at MAX_ZOOM', () => {
+        // Unclamped result = anchor * (1 - MAX_ZOOM) = ∓200 — exactly the
+        // level-aware bound (level 5 → ±200), so corners are now reachable
+        // (the old fixed ±100 clamp cut this in half; CMP-01 / AGG8b-07).
         const out = anchoredZoomPosition(MIN_ZOOM, MAX_ZOOM, { x: 50, y: -50 }, { x: 0, y: 0 });
-        expect(out).toEqual({ x: -100, y: 100 });
+        expect(out).toEqual({ x: -200, y: 200 });
     });
 });

@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/components/i18n-provider';
-import { DEFAULT_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, anchorPctFromClientPoint, anchoredZoomPosition, clampPan, clampZoom, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
+import { DEFAULT_ZOOM, MIN_ZOOM, SNAP_THRESHOLD, anchorPctFromClientPoint, anchoredZoomPosition, clampPan, clampZoom, dragDeltaToPanPct, touchDistance, touchMidpoint, wheelStep } from '@/lib/image-zoom-math';
 
 interface ImageZoomProps {
     children: React.ReactNode;
@@ -26,15 +26,18 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
     // Last intentional pinch zoom level (for double-tap toggle target)
     const lastPinchLevelRef = useRef(DEFAULT_ZOOM);
 
-    // Mouse drag state
+    // Mouse drag state. CMP-01 / AGG8b-07: drag starts capture the pointer's
+    // CLIENT-PIXEL origin plus the pan position (percent-points) separately —
+    // the two spaces must never be mixed (deltas are converted px→percent via
+    // the container rect at move time).
     const mouseDownRef = useRef(false);
-    const mouseDragStartRef = useRef({ x: 0, y: 0 });
+    const mouseDragStartRef = useRef({ clientX: 0, clientY: 0, baseX: 0, baseY: 0 });
     const mouseHasMovedRef = useRef(false);
     const [isMouseDragging, setIsMouseDragging] = useState(false);
 
-    // Touch drag state (single-finger pan)
+    // Touch drag state (single-finger pan) — same px/percent split as above.
     const isDraggingRef = useRef(false);
-    const dragStartRef = useRef({ x: 0, y: 0 });
+    const dragStartRef = useRef({ clientX: 0, clientY: 0, baseX: 0, baseY: 0 });
 
     // Pinch state
     const isPinchingRef = useRef(false);
@@ -125,18 +128,23 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
         mouseHasMovedRef.current = false;
         setIsMouseDragging(true);
         mouseDragStartRef.current = {
-            x: e.clientX - positionRef.current.x,
-            y: e.clientY - positionRef.current.y,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            baseX: positionRef.current.x,
+            baseY: positionRef.current.y,
         };
     }, []);
 
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
-        if (!mouseDownRef.current || zoomLevelRef.current <= MIN_ZOOM) return;
+        if (!mouseDownRef.current || zoomLevelRef.current <= MIN_ZOOM || !containerRef.current) return;
         mouseHasMovedRef.current = true;
-        const clamped = clampPan(
-            e.clientX - mouseDragStartRef.current.x,
-            e.clientY - mouseDragStartRef.current.y,
-        );
+        // CMP-01 / AGG8b-07: convert the pixel delta into percent-points so the
+        // image tracks the pointer 1:1 regardless of container size, and clamp
+        // at the level-aware pan bound.
+        const rect = containerRef.current.getBoundingClientRect();
+        const start = mouseDragStartRef.current;
+        const delta = dragDeltaToPanPct(e.clientX - start.clientX, e.clientY - start.clientY, rect);
+        const clamped = clampPan(start.baseX + delta.x, start.baseY + delta.y, zoomLevelRef.current);
         positionRef.current = clamped;
         applyTransform(zoomLevelRef.current, clamped.x, clamped.y, false);
     }, [applyTransform]);
@@ -252,8 +260,10 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
         e.stopPropagation();
         isDraggingRef.current = true;
         dragStartRef.current = {
-            x: e.touches[0].clientX - positionRef.current.x,
-            y: e.touches[0].clientY - positionRef.current.y,
+            clientX: e.touches[0].clientX,
+            clientY: e.touches[0].clientY,
+            baseX: positionRef.current.x,
+            baseY: positionRef.current.y,
         };
     }, []);
 
@@ -298,10 +308,12 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
         if (!isDraggingRef.current || zoomLevelRef.current <= MIN_ZOOM || e.touches.length !== 1 || !containerRef.current) return;
         e.preventDefault();
         e.stopPropagation();
-        const clamped = clampPan(
-            e.touches[0].clientX - dragStartRef.current.x,
-            e.touches[0].clientY - dragStartRef.current.y,
-        );
+        // CMP-01 / AGG8b-07: same px→percent conversion + level-aware clamp as
+        // the mouse drag path (see handleMouseMove).
+        const rect = containerRef.current.getBoundingClientRect();
+        const start = dragStartRef.current;
+        const delta = dragDeltaToPanPct(e.touches[0].clientX - start.clientX, e.touches[0].clientY - start.clientY, rect);
+        const clamped = clampPan(start.baseX + delta.x, start.baseY + delta.y, zoomLevelRef.current);
         positionRef.current = clamped;
         applyTransform(zoomLevelRef.current, clamped.x, clamped.y, false);
     }, [applyTransform]);
