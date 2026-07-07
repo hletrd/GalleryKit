@@ -1,106 +1,104 @@
-# GalleryKit Designer Review — Cycle 5 Prompt 1
+# GalleryKit Designer Review — Cycle 6 Prompt 1
 
 Date: 2026-07-07
+Reviewed HEAD: `c5d6b27e`
 Lane: designer
-Mode: source-backed UI/UX review, except this artifact.
+Mode: read-only UI/UX review with browser tooling, source inspection, and focused a11y/i18n tests. No source edits, commits, or pushes.
 
 ## Inventory
 
-Examined UI-relevant groups:
+Reviewed UI-relevant surfaces:
 
-- Public routes: home, topic, photo detail, smart collection, share/group, map, timeline, year/archive pages under `apps/web/src/app/[locale]/(public)/**`.
-- Admin routes and navigation under `apps/web/src/app/[locale]/admin/**` and `apps/web/src/components/admin-nav.tsx`.
-- Components: nav/search/photo-viewer/home-client/upload/settings/admin UI primitives under `apps/web/src/components/**`.
-- Styling/accessibility contracts: `apps/web/src/app/globals.css`, UI primitives, touch-target tests, i18n catalogs.
-- Browser-flow test evidence: `apps/web/e2e/public.spec.ts`, `apps/web/e2e/focus-restore.spec.ts`, `apps/web/e2e/nav-visual-check.spec.ts`.
+- Prompt/docs: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/prompts/common_review_scope.md`, `.context/reviews/prompts/designer.md`, latest `.context/reviews/_aggregate.md`, Cycle 5 plan/deferred register.
+- Public routes: home/topic/photo/share/group/smart-collection/map/timeline/year/privacy/error/not-found under `apps/web/src/app/[locale]/(public)/**` plus `apps/web/src/app/[locale]/{layout,error,not-found}.tsx`.
+- Admin routes: login and protected admin shell/routes under `apps/web/src/app/[locale]/admin/**`.
+- Components: `nav-client.tsx`, `search.tsx`, `home-client.tsx`, `masonry-card.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `upload-dropzone.tsx`, `admin-nav.tsx`, `admin-header.tsx`, UI primitives.
+- Tests/contracts: touch target audit, focus-visible scan, skip-link/a11y contracts, password form a11y, error shell, i18n parity, public/admin Playwright specs.
 
-No dev server/browser automation was run in this lane because the prompt permits writing only the review artifacts, while local browser validation would create runtime/test artifacts. Findings are therefore code-backed, and live LCP/CLS/INP are listed as manual validation.
+Browser/runtime evidence:
+
+- `next dev --hostname 127.0.0.1 --port 3000` failed before serving with a Turbopack lockfile I/O error. I used `next start --hostname 127.0.0.1 --port 3000` from the existing build.
+- Local MySQL was not reachable (`ECONNREFUSED 127.0.0.1:3306`), so DB-backed public gallery/photo/topic routes rendered the localized error shell. Static/admin-login/privacy surfaces were reachable.
+- Agent-browser checks:
+  - `/en` desktop light and mobile dark: HTTP 500 error shell with `h1` "Error", `Try again`, `Return to Gallery`; buttons/links measured at 44 px high.
+  - `/en/admin` desktop and `/ko/admin` mobile dark: HTTP 200; visible labels, required username/password fields, password reveal button, submit button; inputs/buttons measured at 44 px high.
+  - `/en/privacy`: HTTP 200; nav/search/theme/locale/footer controls all 44 px high in DOM measurements.
+  - Search dialog from privacy page: `#search-dialog` opened, `#search-input` focused with `role="combobox"` and neutral `Ctrl/⌘ K` copy; Escape closed the dialog and restored focus to the trigger. Filling `test` under DB outage produced the visible/live status "Search is temporarily unavailable. Please try again later."
+
+Focused validation:
+
+- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/password-form-a11y.test.ts src/__tests__/error-shell.test.ts src/__tests__/error-shell-heading.test.ts`
+- Result: pass, 7 files / 59 tests.
 
 ## Confirmed Issues
 
-No new confirmed UI blocker was found in this pass. The current source has explicit regression coverage for the highest-risk accessibility areas:
+No new confirmed UI/UX, WCAG 2.2, keyboard/focus, responsive, dark/light, i18n, loading/empty/error, or form-validation defect was found in this pass.
 
-- Search dialog autofocus, focus trap, and focus restore: `apps/web/e2e/public.spec.ts:21-40`.
-- Photo page heading hierarchy and lightbox open/close: `apps/web/e2e/public.spec.ts:61-95`.
-- Lightbox and mobile info-sheet focus return: `apps/web/e2e/focus-restore.spec.ts:10-75`.
-- i18n key parity for English/Korean: `apps/web/src/__tests__/i18n-key-parity.test.ts:1-24` and `apps/web/src/__tests__/i18n-key-parity.test.ts:135-158`.
+## Re-Verified Deferred Item
 
-## Likely Issues
+### DES-C6-D1 — Smart collections remain public-readable but not admin-operable
 
-### DES-C5-01 — Search footer shortcut label can be wrong on non-Mac platforms until verified
+Status: already tracked as `DEF-C5-20`; not a new finding.
 
 Evidence:
 
-- `apps/web/src/components/search.tsx:138-142` initializes `isMac` from `navigator.userAgentData?.platform ?? navigator.platform`, but returns `true` when `navigator` is unavailable.
-- `apps/web/src/components/search.tsx:516-522` renders the footer shortcut as either `⌘K` or `Ctrl+K`.
-- Existing search e2e coverage asserts focus, trap, restore, and results behavior (`apps/web/e2e/public.spec.ts:21-59`), but does not assert the platform-specific footer copy.
+- Public smart-collection route renders collections through `HomeClient`: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-164`.
+- Hardened create/update/delete server actions exist: `apps/web/src/app/actions/collections.ts:16-150`.
+- Admin navigation still has no Collections entry: `apps/web/src/components/admin-nav.tsx:15-25`.
+- Product docs explicitly say no admin UI invokes the actions and rows are authored by direct DB insert: `CLAUDE.md:162`.
 
-Concrete failure scenario:
+Why it matters:
 
-On Windows/Linux, hydration or test environment differences could leave the footer showing `⌘K` even though users expect `Ctrl+K`. The keyboard handler may still work, but the visible affordance is misleading and reduces discoverability.
+This is a real IA/product gap if smart collections are meant to be admin-operable. An admin can view a public `/c/[slug]` feature only after out-of-band DB authoring; there is no discoverable create/edit/delete or predicate-preview workflow.
 
-Suggested fix:
+Concrete fix:
 
-Move platform detection into a mount-time effect with an explicit default that does not over-promise, or render a neutral "Ctrl/⌘ K" label. Add a browser test that emulates a non-Mac platform and asserts the footer copy.
+Either keep smart collections internal in all user-facing docs, or ship an admin Collections section with list/create/edit/delete, localized validation, safe predicate builder, preview count, visibility toggle, and destructive-delete confirmation.
 
-Confidence: Medium. The source pattern is real; this pass did not run a Windows/Linux browser to prove the UI state.
+Severity/confidence: Medium product/UX issue, High confidence.
 
-## Manual-Validation Risks
+## Risks Requiring Manual Validation
 
-### DES-C5-M01 — Live Core Web Vitals were not measured in this lane
-
-Evidence:
-
-- The source has performance-conscious patterns and tests, but this lane did not run Lighthouse, Playwright tracing, or Chrome performance capture.
-- Public route tests cover behavior and heading/focus contracts, not LCP/CLS/INP metrics.
-
-Risk scenario:
-
-Photo-heavy gallery pages can regress LCP or INP through image sizing, masonry layout, search hydration, or service-worker behavior without being caught by static review alone.
-
-Suggested validation:
-
-Run a local or staging browser pass with representative photo data and measure LCP, CLS, and INP on home, photo detail, topic, and mobile admin routes. Keep findings tied to DOM/code regions, not screenshots alone.
-
-Confidence: Medium.
-
-### DES-C5-M02 — RTL support is structural but not product-ready for a future RTL locale
+### DES-C6-M1 — Data-backed browser flows could not be fully exercised locally
 
 Evidence:
 
-- `apps/web/src/app/[locale]/layout.tsx:103-109` sets the HTML `lang` and `dir`.
-- `apps/web/src/lib/locale-path.ts:37-40` currently has an empty RTL locale set, and the shipped locales are English/Korean.
-- Many layouts are written for LTR expectations; current tests validate English/Korean parity, not RTL rendering.
+- Runtime logs showed repeated `ECONNREFUSED 127.0.0.1:3306`.
+- `/en` and unknown topic routes rendered the route error shell instead of real gallery/not-found data states.
+- The review therefore could not live-exercise representative home masonry, photo viewer/lightbox, topic/share/group, map, timeline/year, or authenticated admin workflows with real data.
 
-Risk scenario:
+Concrete validation:
 
-If an RTL locale is added, directional spacing, icon direction, focus movement expectations, and gallery/sidebar composition may read wrong even though the root `dir` attribute exists.
+Run `npm run test:e2e --workspace=apps/web` or a manual browser pass against a seeded local MySQL/production-like staging dataset. Cover desktop/mobile home, topic, photo viewer, lightbox, search results, share/group routes, map, timeline/year, and authenticated admin upload/settings/db flows.
 
-Suggested validation/fix:
+Severity/confidence: Medium validation risk, High confidence.
 
-Before adding an RTL locale, run an RTL design pass over nav, search dialog, photo viewer, admin forms, and masonry controls. Add representative RTL visual/accessibility tests at that time.
-
-Confidence: Medium.
-
-### DES-C5-M03 — Smart collections are not discoverable or authorable from admin UI
+### DES-C6-M2 — Core Web Vitals/perceived performance still need representative measurement
 
 Evidence:
 
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-164` renders public smart collections.
-- `apps/web/src/app/actions/collections.ts:16-150` provides hardened create/update/delete server actions.
-- `apps/web/src/components/admin-nav.tsx:15-25` has dashboard/categories/tags/seo/settings/tokens/password/users/db/analytics links, but no Collections navigation.
-- `CLAUDE.md:162` states rows are currently authored by direct DB INSERT and no admin UI invokes these actions.
+- Source shows performance-conscious patterns for masonry sizing, image preload selection, blur placeholders, reduced motion, and SW caching, but this lane did not capture LCP/CLS/INP traces.
+- The missing local DB prevented representative photo-heavy route measurement.
 
-Risk scenario:
+Concrete validation:
 
-From an information-architecture perspective, a feature exists in route/action code but has no discoverable workflow. Admin users cannot safely create or maintain the public collection surface without direct DB access.
+Capture browser performance traces or Lighthouse/Web Vitals on seeded home/topic/photo/share pages and mobile admin. Tie any regression to concrete DOM/code regions such as `home-client.tsx`, `masonry-card.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, or service-worker image caching.
 
-Suggested fix:
+Severity/confidence: Medium manual-validation risk, Medium confidence.
 
-Either ship a collections admin section with list/create/edit/delete, validation feedback, and a safe predicate builder, or keep smart collections clearly internal and avoid exposing them as a user-facing capability.
+### DES-C6-M3 — Future RTL locale remains unvalidated
 
-Confidence: High for current UX gap; product priority remains a decision.
+Evidence:
+
+- Root layout sets `lang` and `dir`: `apps/web/src/app/[locale]/layout.tsx:103-109`.
+- Current locales are English and Korean; both are LTR. Existing parity tests cover key sets, not RTL layout behavior.
+
+Concrete validation:
+
+Before adding an RTL locale, run a full RTL pass over nav, search, photo viewer, lightbox, info sheet, upload/admin forms, map, and timeline. Add representative RTL visual/accessibility tests.
+
+Severity/confidence: Low future-locale risk, Medium confidence.
 
 ## Final Sweep
 
-Covered affordances, keyboard/focus, WCAG 2.2 basics, responsive/mobile risks, loading/error/empty state patterns, dark/light source surfaces, English/Korean i18n, future RTL, and performance validation boundaries. No screenshot-only findings are reported.
+Covered IA, affordances, keyboard/focus restore, WCAG 2.2 target/focus basics, responsive breakpoints, loading/empty/error states, forms, dark/light mode, English/Korean i18n, future RTL, and perceived-performance boundaries. The previous Cycle 5 search-shortcut issue is fixed in current source (`search.tsx:511-517` renders `Ctrl/⌘ K`). No new confirmed designer finding is reported beyond the already-deferred smart-collection authoring gap and the runtime validation limits above.

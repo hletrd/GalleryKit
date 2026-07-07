@@ -1,101 +1,94 @@
-# GalleryKit Document Specialist Review — Cycle 5 Prompt 1
+# GalleryKit Document Specialist Review - Cycle 6 Prompt 1
 
 Date: 2026-07-07
 Lane: document-specialist
-Mode: read-only source/docs review, except this artifact.
+Mode: read-only documentation/source review, except this artifact.
 
 ## Inventory
 
-Authoritative and public documentation examined:
+Authoritative docs examined:
 
-- `AGENTS.md` and `CLAUDE.md`
-- `.context/plans/README.md`, current cycle plan/deferred registers, recent review artifacts
+- `AGENTS.md`
+- `CLAUDE.md`
 - `README.md`
 - `apps/web/README.md`
-- Deploy/config references: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`
-- Source used to verify doc claims: `apps/web/src/instrumentation.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/public/sw.template.js`, `apps/web/src/app/actions/collections.ts`, public smart-collection route, `apps/web/src/components/admin-nav.tsx`, message catalogs and i18n tests.
+- `.context/plans/README.md`
+- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
+- `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
 
-I did not run build, tests, dev server, or browser automation because this review prompt only permits writes to the five review artifacts. Findings below are document/source backed.
+Implementation/config surfaces checked against those docs:
 
-## Confirmed Issues
+- Root/app package scripts: `package.json`, `apps/web/package.json`
+- Deploy path: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`, `apps/web/.env.local.example`
+- Build/config path: `apps/web/next.config.ts`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`
+- SEO/site config code: `apps/web/src/lib/data.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/app/actions/seo.ts`, `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/components/nav.tsx`, `apps/web/src/components/nav-client.tsx`, `apps/web/src/components/footer.tsx`
+- Schema/migration gates: `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration journal tests
+- Quality gates/source contracts: `apps/web/src/__tests__/deploy-script-contract.test.ts`, `migration-journal*.test.ts`, `check-*` lint-gate tests, recent `cycle-*-source-contracts.test.ts`
+- Upload/API contract: `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/admin-tokens.ts`
 
-### DOC-C5-01 — Public PWA documentation omits the same-origin-only image-cache condition
+No external official docs were needed for the confirmed findings below; they are repo-internal documentation/code ownership mismatches. I did not run build/test gates because this was a read-only review request and the evidence is static source/docs.
 
-Evidence:
+## Confirmed Findings
 
-- `README.md:43` says the PWA has "a service worker for visited image caching and an offline HTML fallback".
-- `README.md:146-163` documents optional `IMAGE_BASE_URL=https://cdn.example.com` and says the value must be set before build, but does not connect that setting to the PWA image-cache limitation.
-- `apps/web/README.md:49-51` likewise documents `IMAGE_BASE_URL` as an optional CDN origin/path prefix and says to leave it unset for local/self-hosted uploads, but does not mention SW cache behavior.
-- `CLAUDE.md:427-434` is more precise: the image strategy caches same-origin 200 responses only, and cross-origin CDN derivatives are opaque and deliberately not cached.
-- Source confirms the authoritative doc: `apps/web/public/sw.template.js:323-334` returns non-OK network responses without `imageCache.put(...)`; opaque CDN fetches have status `0`.
+### DOC-C6-01 - `CLAUDE.md` says SEO locale is not DB-overridable, but the admin SEO path persists and serves it
 
-Concrete failure scenario:
-
-An operator follows the README, configures a cross-origin CDN using `IMAGE_BASE_URL`, and later relies on "visited image caching" for offline or poor-network gallery use. The HTML fallback may still be available, but the photo derivatives will not have been cached by the SW under that topology.
-
-Suggested fix:
-
-Amend `README.md` PWA and `IMAGE_BASE_URL` sections, plus `apps/web/README.md:49-51`, to say visited image caching applies to same-origin derivative responses. Point advanced operators to the CLAUDE.md C4-25 note for CDN choices: same-origin proxy, or accept network-only CDN derivatives.
-
-Confidence: High.
-
-### DOC-C5-02 — Smart-collection operability is documented only in CLAUDE.md, while source exposes hardened actions and a public route
+Severity: Low
+Confidence: High
 
 Evidence:
 
-- `CLAUDE.md:162` correctly states that `smart_collections` rows exist, `/c/[slug]` renders public smart collections, hardened create/update/delete actions exist, but no admin UI/API surface invokes them yet and rows are authored by direct DB INSERT.
-- `apps/web/src/app/actions/collections.ts:16-69`, `apps/web/src/app/actions/collections.ts:71-123`, and `apps/web/src/app/actions/collections.ts:125-150` expose create/update/delete server actions with admin/origin/restore-fence guards.
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-164` implements the public read route.
-- `apps/web/src/components/admin-nav.tsx:15-25` lists admin destinations but has no Collections entry.
+- `CLAUDE.md:148` says fields not DB-overridable include `locale`.
+- `README.md:52` correctly says admin-editable SEO/branding fields include `locale` and override file defaults at runtime.
+- `apps/web/src/lib/gallery-config-shared.ts:89-96` includes `seo_locale` in `SEO_SETTING_KEYS`.
+- `apps/web/src/app/actions/seo.ts:41-46` reads `seo_locale` for the admin SEO page, and `apps/web/src/app/actions/seo.ts:123-128` validates it before persistence.
+- `apps/web/src/lib/data.ts:1814-1835` reads `admin_settings` and returns `locale: settingsMap.get('seo_locale') || siteConfig.locale`.
+- `apps/web/src/app/[locale]/layout.tsx:17-20` passes `seo.locale` into OpenGraph locale resolution.
 
-Concrete failure scenario:
+Failure scenario:
 
-A future contributor or operator sees the collection route/actions and treats smart collections as a shipped admin feature, then cannot create or manage them from the UI. That can lead to hand-authored JSON predicate rows, support burden, or docs that overstate feature readiness.
+An operator or future maintainer follows `CLAUDE.md:148`, assumes locale changes require editing `site-config.json` plus an image rebuild, and misses the live admin SEO override path. That can leave OpenGraph locale metadata stale or lead to unnecessary rebuild/deploy work when a DB row update is the intended runtime path.
 
-Suggested fix:
+Concrete fix:
 
-Keep CLAUDE.md's warning as the authoritative contract and avoid mentioning smart-collection authoring in public-facing docs until the admin UI ships. If the feature is promoted, add docs for the exact admin workflow and validation semantics in the same change as the UI.
+Update `CLAUDE.md:148` to remove `locale` from the "not DB-overridable" list, or spell out the distinction precisely: `site-config.json.locale` is the fallback, while `admin_settings.seo_locale` is runtime-overridable for SEO/OpenGraph metadata.
 
-Confidence: High.
+### DOC-C6-02 - `CLAUDE.md` overstates what `site-config.json` `title` and `locale` control
 
-## Likely Issues
-
-### DOC-C5-03 — Lifecycle ownership docs still point readers at `image-queue.ts` for non-image retention work
-
-Evidence:
-
-- `CLAUDE.md:159` describes anonymous analytics retention and says the hourly background GC in `image-queue.ts` runs `purgeOldViewEvents()`.
-- `apps/web/src/lib/image-queue.ts:1244-1274` confirms that is currently true, but the current carry-forward register schedules extraction of maintenance scheduling to instrumentation.
-
-Concrete failure scenario:
-
-After the planned extraction, maintainers may update code but miss this architectural paragraph, leaving future readers looking in `image-queue.ts` for retention scheduling that has moved.
-
-Suggested fix:
-
-When ARCH-C5-01/C4-17 is implemented, update `CLAUDE.md:159` and the Service Worker/PWA or lifecycle sections to name the new maintenance scheduler module and its instrumentation owner.
-
-Confidence: Medium. This is a pending-doc-sync risk tied to a planned code change, not a current mismatch.
-
-## Manual-Validation Risks
-
-### DOC-C5-M01 — Public marketing claims around semantic search still require deployed-host verification
+Severity: Low
+Confidence: High
 
 Evidence:
 
-- `README.md:42` is appropriately cautious: semantic search is operator-enabled, disabled by default, and requires model weights/backfill/env opt-in.
-- `CLAUDE.md:160` is even more explicit that the repo proves gates/runbook, not current live production row count.
+- `CLAUDE.md:704` says `title` is displayed in nav, footer, and OG title.
+- Actual nav display uses `seo.nav_title`: `apps/web/src/components/nav.tsx:20-23` passes `seo.nav_title`, and `apps/web/src/components/nav-client.tsx:101-102` renders `navTitle`.
+- Actual footer text uses `siteConfig.footer_text`: `apps/web/src/components/footer.tsx:35-36`.
+- OG title uses `seo.title`: `apps/web/src/app/[locale]/layout.tsx:24-27` and `apps/web/src/app/[locale]/layout.tsx:42-47`.
+- `CLAUDE.md:707` says `locale` is "OG/HTML locale".
+- Actual HTML language is route-driven, not site-config-driven: `apps/web/src/app/[locale]/layout.tsx:88-92` validates the route locale and `apps/web/src/app/[locale]/layout.tsx:103-108` renders `<html lang={locale}>`.
+- Actual OG locale uses route locale plus SEO fallback: `apps/web/src/app/[locale]/layout.tsx:17-20` and `apps/web/src/app/[locale]/layout.tsx:47-48`.
 
-Risk scenario:
+Failure scenario:
 
-If product copy outside the repo shortens this to "AI search included" without the operator-enabled caveat, fresh-install expectations will be wrong.
+An operator edits `site-config.json.title` expecting the nav brand or footer to change. The nav remains governed by `nav_title` / `seo_nav_title`, and the footer remains governed by `footer_text`. Similarly, editing `site-config.json.locale` cannot change the HTML route locale; it only participates in metadata fallback. This creates confusing branding/SEO deploys where the rebuilt image still appears "unchanged" in the surfaces the doc names.
 
-Suggested validation/fix:
+Concrete fix:
 
-Keep public copy in the current cautious shape unless a deployment artifact proves production mode, weight seed, and embedding backfill status.
+Revise `CLAUDE.md:704-713` field descriptions:
 
-Confidence: Medium.
+- `title`: fallback site title and OG/title metadata unless DB `seo_title` overrides it.
+- `nav_title`: nav-bar brand fallback unless DB `seo_nav_title` overrides it.
+- `footer_text`: footer text.
+- `locale`: OpenGraph/SEO locale fallback unless DB `seo_locale` overrides it; HTML `lang` comes from the `[locale]` route.
+
+## Verified Aligned Areas
+
+- Deploy docs match `scripts/deploy-remote.sh` and `apps/web/deploy.sh`: config-driven `.env.deploy`, unsafe permission refusal, host `git pull --ff-only`, compose rebuild, `/api/live` health check, then Docker prune.
+- Docker persistence docs match compose/deploy: `./data`, `./public/uploads`, `./public/resources`, and read-only `./src/site-config.json` are bind mounts; immutable public assets come from the image.
+- Schema docs match current migration safeguards: journal tag/file parity, post-migrate hash assertion, pending-vs-drift split, DML-baseline guard, and `when` monotonicity tests are present.
+- Quality-gate docs match package scripts and lint scanners for ESLint, API auth, action origin, public route rate limits, typecheck, build, Vitest, and Playwright.
+- Upload API docs match the route: `POST /api/admin/lr/upload`, `X-GalleryKit-Token`, `lr:upload`, multipart `file`/`topic`/optional title/description, 200 MiB file cap, 2 GiB window, 100-file window, and `{ success: true, id }` response.
+- CLIP docs under `docs/superpowers/` are clearly marked historical, and current operator guidance lives in `CLAUDE.md` / `apps/web/README.md`.
 
 ## Final Sweep
 
-Checked docs for env var defaults, build-time/runtime config distinctions, deploy helper paths, schema/migration journal guidance, service-worker generated-source contract, smart-collection status, i18n parity, and privacy/security wording. Aside from the confirmed PWA/CDN caveat and smart-collection operability boundary, no additional doc/code mismatches were found in the examined file groups.
+Checked README/CLAUDE/AGENTS/app README against deploy scripts, compose, Dockerfile, nginx template, env examples, site config consumers, SEO actions, migration journal/migrator, lint-gate scripts, package scripts, upload API, and committed source-contract tests. Aside from DOC-C6-01 and DOC-C6-02, I did not find additional current documentation-code mismatches in the reviewed surfaces.

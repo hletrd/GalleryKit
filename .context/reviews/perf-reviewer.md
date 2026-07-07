@@ -1,92 +1,98 @@
-# Performance Reviewer Findings - review-plan-fix cycle 5/100
+# Performance Reviewer - Cycle 6
 
-- **Reviewer:** performance-reviewer lane
-- **Date:** 2026-07-07
-- **Scope:** performance, concurrency, CPU/memory, image processing, DB/query cost, queues, service worker cache, UI responsiveness, CLS/LCP/INP risks, shared state hazards.
-- **Write scope:** source read-only; only this artifact was rewritten.
+Review date: 2026-07-07
+Scope: full repository performance/concurrency/CPU/memory/DB/query/cache/build/runtime/UI responsiveness review.
+Mode: review-only. No source code edits.
 
-## Inventory Built First
+## Inventory
 
-Review-relevant file groups identified before deep inspection:
+Repository guidance and historical context:
+- `AGENTS.md` / prompt-provided workspace rules: review-only artifact, no source edits, exact citations, final sweep.
+- `CLAUDE.md`: architecture, runtime topology, image pipeline, CLIP semantic search, queue/backfill, deploy and quality gates.
+- Prior performance reviews inspected for stale/regressed items: `.context/reviews/perf-reviewer.md`, `.context/reviews/run9-cycle8/perf-reviewer.md`, `.context/reviews/run9-cycle7/perf-reviewer.md`, `.context/reviews/run8-cycle2/perf-reviewer.md`.
 
-- **DB/query and schema:** `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/db/index.ts`, feed/sitemap routes, public server actions.
-- **Image pipeline and queues:** `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/process-topic-image.ts`, advisory/single-writer/contract locks, shutdown and background DB write helpers.
-- **Search/embedding:** `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`.
-- **Service worker/cache:** `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/lib/sw-cache.ts`, `apps/web/scripts/build-sw.ts`, `apps/web/src/components/register-service-worker.tsx`, derivative cache headers in `apps/web/next.config.ts`.
-- **Public UI responsiveness:** public home/photo pages, `apps/web/src/components/home-client.tsx`, `masonry-card.tsx`, `grid-picture.tsx`, `load-more.tsx`, `photo-viewer.tsx`, `similar-photos.tsx`, lightbox/zoom components.
-- **Analytics/rate limiting:** `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/view-retention.ts`, rate-limit helpers and analytics tables/indexes.
+Performance-relevant implementation surfaces inspected:
+- DB schema/migrations/query helpers: `apps/web/src/db/schema.ts`, `apps/web/drizzle/0029_feed_updated_indexes.sql`, `apps/web/src/db/index.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/bounded-map.ts`.
+- Public SSR/API/actions: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`.
+- Image/CPU/background work: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`.
+- Caching/static/runtime: `apps/web/public/sw.template.js`, `apps/web/src/lib/sw-cache.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/lib/revalidation.ts`, `apps/web/next.config.ts`, `apps/web/nginx/default.conf`.
+- UI responsiveness: `apps/web/src/components/home-client.tsx`, `apps/web/src/components/masonry-card.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/photo-navigation.tsx`, `apps/web/src/components/on-this-day-widget.tsx`.
+- Build/deploy/package surfaces: `package.json`, `apps/web/package.json`, `apps/web/Dockerfile`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`.
 
-## Confirmed Issues
+## Findings
 
-### PERF-C1 - Feed and sitemap `updated_at` ordering lacks a matching `images` index
+### PERF-C6-01 - Timeline/date archive queries remain non-sargable on every uncached public render
 
-- **Code regions:** `apps/web/src/lib/data.ts:845-871` (`getImagesForFeed`), `apps/web/src/lib/data.ts:873-890` (`getFeedUpdatedAt`), `apps/web/src/lib/data.ts:1718-1729` (`getImageIdsForSitemap`), `apps/web/src/lib/data.ts:533-546` (`getTopicsWithLatestUpdate`), indexes at `apps/web/src/db/schema.ts:117-123`.
-- **Failure scenario:** public feed or sitemap cache expiry on a larger gallery makes MySQL filter processed rows and sort by `updated_at DESC, created_at DESC, id DESC` without an index that matches that order. Existing indexes cover `processed/capture_date/created_at`, `processed/created_at`, and `topic/processed/capture_date/created_at`, so root feed/sitemap and topic feed freshness can fall back to filesort/temp work. On bursts, those reads compete with normal requests through the 10-connection pool in `apps/web/src/db/index.ts:23-34`.
-- **Suggested fix:** add a migration and schema update for an index shaped like `(processed, updated_at, created_at, id)` and a topic variant such as `(topic, processed, updated_at, created_at, id)`. Validate with `EXPLAIN` for root feed, topic feed, sitemap, and per-topic latest-update query at representative row counts.
-- **Confidence:** High.
+Severity: Low today; Medium if the archive grows substantially or crawler traffic concentrates on `/timeline` and `/year/*`.
+Confidence: High.
 
-### PERF-C2 - Background analytics writes have no global concurrency or backlog bound
+Evidence:
+- The home page is explicitly uncached (`revalidate = 0`) and always renders `OnThisDayWidget` after the masonry payload: `apps/web/src/app/[locale]/(public)/page.tsx:17-19`, `apps/web/src/app/[locale]/(public)/page.tsx:232-235`.
+- `OnThisDayWidget` runs `getOnThisDayImages()` during the home SSR pass: `apps/web/src/components/on-this-day-widget.tsx:15-22`.
+- `getOnThisDayImages()` filters with `MONTH(capture_date)` and `DAY(capture_date)`, then joins tags and groups by image id: `apps/web/src/lib/data-timeline.ts:88-116`.
+- `/timeline` is also `revalidate = 0`, calls `getTimelineYears()` for every render, then calls `getTimelineImages(selectedYear)`: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:19-19`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72-94`.
+- `getTimelineYears()` uses `YEAR(capture_date)` in `SELECT DISTINCT` and `ORDER BY`: `apps/web/src/lib/data-timeline.ts:125-145`.
+- `getTimelineImages()` filters with `YEAR(capture_date)` and optional `MONTH(capture_date)`, then joins tags, groups, sorts, and reads up to 501 rows: `apps/web/src/lib/data-timeline.ts:172-207`.
+- `/year/[year]` is also uncached and delegates to `getYearInReviewImages()`, which delegates to `getTimelineImages(year)`: `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:20-20`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:92-103`, `apps/web/src/lib/data-timeline.ts:231-237`.
+- The code comments correctly acknowledge that these predicates are non-sargable and only acceptable at personal-gallery scale: `apps/web/src/lib/data-timeline.ts:92-95`, `apps/web/src/lib/data-timeline.ts:178-184`.
 
-- **Code regions:** `apps/web/src/lib/background-db-writes.ts:3-25`, `apps/web/src/app/actions/public.ts:341-350`, `apps/web/src/app/actions/public.ts:436-461`, `apps/web/src/app/actions/public.ts:464-493`, `apps/web/src/app/actions/public.ts:496-529`, pool limits at `apps/web/src/db/index.ts:23-34`.
-- **Failure scenario:** distributed traffic can stay below the per-IP view budget while still admitting many concurrent `recordPhotoView`, `recordTopicView`, or `recordSharedGroupView` calls. Each call immediately starts a DB insert promise and stores it in the global `Set`; there is no process-wide max pending count, worker concurrency, batcher, or drop/coalesce policy. Under crawler or botnet-style traffic, the app can accumulate promises, saturate the MySQL pool/driver queue, log insert failures, and compete with foreground reads before view-retention cleanup ever matters.
-- **Suggested fix:** put analytics inserts behind a bounded low-concurrency queue, for example 1-2 workers with a max pending count and explicit dropped/coalesced metrics. A stronger version batches inserts per table. Keep the per-IP limiter, but add global admission before scheduling the write and preferably before target validation when the product semantics allow it.
-- **Confidence:** Medium-High.
+Failure scenario:
+When `images` grows from a few thousand to tens/hundreds of thousands of processed rows, the existing `(processed, capture_date, created_at)` index can only use the `processed = true` prefix for the `YEAR()`, `MONTH()`, and `DAY()` filters. A normal home-page hit then pays an extra per-row date-function scan for the On This Day widget before returning HTML. Timeline/year routes add the same scan plus tag joins/grouping and a 501-row sort window. Under crawler bursts or shared links, this burns DB CPU and connection time even though each individual query is bounded by `LIMIT`.
 
-## Likely Issues
+Concrete fix:
+- For yearly views, replace `YEAR(capture_date) = ?` with range predicates: `capture_date >= '${year}-01-01' AND capture_date < '${year + 1}-01-01'`. For month views, add month range bounds inside the year. That lets `idx_images_processed_capture_date` serve the filter and sort shape.
+- For On This Day, add generated/stored columns such as `capture_month` and `capture_day` with an index like `(processed, capture_month, capture_day, capture_date, created_at, id)`, or add a stored `capture_month_day` key and index `(processed, capture_month_day, capture_date, created_at, id)`.
+- Add `EXPLAIN ANALYZE` notes or regression tests around the generated SQL for these helpers so future changes keep range/index access.
 
-### PERF-L1 - Service worker stale image revalidation is not lifetime-covered
+### PERF-C6-02 - Public text search still uses leading-wildcard LIKE scans across multiple query branches
 
-- **Code regions:** `apps/web/public/sw.template.js:290-302` (`extendLifetime` helper), `apps/web/public/sw.template.js:427-430` (`startRevalidate(); return cached;` stale image path), mirrored logic reference `apps/web/src/lib/sw-cache.ts`.
-- **Failure scenario:** when a cached image is stale and the service worker returns cached bytes immediately, the background revalidation promise is started but not passed to `event.waitUntil`. Browsers may terminate the service worker after the response settles, which can drop the cache refresh/cache metadata write. Users can keep seeing stale derivative bytes until a later navigation happens to complete the revalidate work.
-- **Suggested fix:** wrap the stale-path background work with the existing lifetime helper: `void extendLifetime(event, startRevalidate())`. Add/adjust the service-worker template contract test so the built worker preserves that lifetime coverage.
-- **Confidence:** Medium.
+Severity: Low today; Medium if public search receives sustained traffic or the corpus grows beyond personal-gallery scale.
+Confidence: Medium-high.
 
-### PERF-L2 - Timeline/on-this-day queries use non-sargable date functions on public page paths
+Evidence:
+- The public server action sanitizes and rate-limits search before calling `searchImages(sanitizedQuery, 20)`: `apps/web/src/app/actions/public.ts:248-329`.
+- `searchImages()` caps result count and query length, but the main branch applies `containsLike()` to title, description, camera model, lens model, topic slug, and topic label: `apps/web/src/lib/data.ts:1573-1646`.
+- If the main branch does not fill the limit, tag and topic-alias branches run in parallel and each uses another `containsLike()` branch with joins/grouping/sort: `apps/web/src/lib/data.ts:1648-1704`.
+- The implementation bounds over-fetch to `2 * effectiveLimit` after the main query, but the scanned rows behind each `%term%` predicate are not bounded by that final row cap: `apps/web/src/lib/data.ts:1660-1669`.
 
-- **Code regions:** `apps/web/src/lib/data-timeline.ts:88-116`, `apps/web/src/lib/data-timeline.ts:129-142`, `apps/web/src/lib/data-timeline.ts:178-207`; home page includes `OnThisDayWidget` at `apps/web/src/app/[locale]/(public)/page.tsx:232-235`.
-- **Failure scenario:** `YEAR(capture_date)`, `MONTH(capture_date)`, and `DAY(capture_date)` prevent the existing `(processed, capture_date, created_at)` index from being used beyond the processed prefix. At larger gallery sizes, every uncached home render that includes the on-this-day widget can scan processed images, and timeline/year views do the same for calendar slices.
-- **Suggested fix:** rewrite year/month queries as range predicates so `idx_images_processed_capture_date` can be used. For on-this-day across years, add generated `capture_month`/`capture_day` columns or an equivalent functional index keyed with `processed`, or cache the daily result with a TTL because it changes at most once per day.
-- **Confidence:** Medium.
+Failure scenario:
+The rate limit protects against floods, but each allowed query can still require several table/index scans because leading-wildcard LIKE cannot use ordinary b-tree indexes for selectivity. Short terms such as common Korean syllables, camera-brand fragments, or two-character tags are valid after the action-level checks and can fan out into the main query plus two joined fallback queries. On a larger catalog, a few concurrent users can consume DB CPU and sort memory disproportionate to the 20-row response.
 
-## Validation-Needed Risks
+Concrete fix:
+- Move public text search to a searchable index strategy: MySQL FULLTEXT where language/tokenization is acceptable, an n-gram/generated-token table for Korean/substring search, or the existing CLIP/semantic path for semantic discovery with a small metadata filter.
+- If substring search must remain, add a query-shape budget: reject or degrade very short high-cardinality terms, collect slow-query metrics for the three branches, and stop after the main branch when DB latency crosses a threshold.
+- Keep the current rate-limit pre-increment; it is the right concurrency guard. The fix is query selectivity, not removing the limiter.
 
-### PERF-V1 - Cached derivative display path performs a synchronous HEAD probe per cached image tile
+### PERF-C6-03 - Cached image tiles can still put a HEAD revalidation round trip on the paint path
 
-- **Code regions:** `apps/web/public/sw.template.js:365-397`, image cache constants at `apps/web/public/sw.template.js:31-39`.
-- **Failure scenario:** a warm masonry page with 30 cached derivative images can issue roughly 30 concurrent HEAD requests before returning cached image responses. The timeout is bounded to 300 ms, and the design preserves freshness for same-filename derivative re-encodes, but mobile or high-latency networks may still delay image paint and add server request load.
-- **Suggested validation/fix:** measure warm-cache masonry LCP and image completion under throttled latency. If material, add a metadata-based probe cooldown, age gate, or probabilistic HEAD strategy while preserving immediate freshness for admin-visible derivative changes.
-- **Confidence:** Medium-Low until measured.
+Severity: Low.
+Confidence: Medium.
 
-### PERF-V2 - Public LIKE search remains a multi-query leading-wildcard scan
+Evidence:
+- The service worker's stale-while-revalidate image path performs a conditional `HEAD` when cached metadata has an ETag or Last-Modified value: `apps/web/public/sw.template.js:376-383`.
+- The HEAD probe is bounded to 300 ms: `apps/web/public/sw.template.js:39-39`, `apps/web/public/sw.template.js:379-382`.
+- A stale cached response only returns immediately after the HEAD path fails, times out, returns 304/same ETag, or completes a changed-resource fetch: `apps/web/public/sw.template.js:384-430`.
+- The server-side upload route has been optimized for HEAD/304: no body stream or fd open on the 304/HEAD branches, and the settings hash is behind a 5 s stale-while-revalidate module cache: `apps/web/src/lib/serve-upload.ts:42-106`, `apps/web/src/lib/serve-upload.ts:221-301`.
 
-- **Code regions:** `apps/web/src/lib/data.ts:1573-1716`, especially `apps/web/src/lib/data.ts:1628-1646` and `apps/web/src/lib/data.ts:1673-1704`; action limiter at `apps/web/src/app/actions/public.ts:247-329`.
-- **Failure scenario:** `%term%` predicates across title, description, camera/lens fields, topic fields, tags, and aliases cannot use normal b-tree indexes. The route is rate-limited and capped, but one admitted search can still scan a large processed image/tag corpus and run up to three query shapes when the first result set underfills.
-- **Suggested validation/fix:** keep the current shape for personal-gallery scale, but verify with slow-query logs or `EXPLAIN ANALYZE` on production-like data. If it becomes hot, move to FULLTEXT/generated search rows or a prefix/tokenized search strategy with a minimum query length.
-- **Confidence:** Medium.
+Failure scenario:
+On a warm-cache gallery revisit with many cached tiles, the SW still waits on a per-image HEAD probe before returning the cached body. The timeout keeps the delay bounded, and the server path is cheap, but flaky mobile networks or a transient slow upstream can add up to 300 ms to visible cached tiles. Because the home grid uses many images, the user-visible symptom is delayed first paint of images that were already available locally.
 
-## Final Sweep / Non-Findings
+Concrete fix:
+- Change the stale path to return cached bytes immediately and move conditional HEAD/fetch revalidation fully into `event.waitUntil()`, or add a short freshness cooldown so a cached tile is not HEAD-probed more than once per N minutes.
+- Preserve the existing ETag/Last-Modified logic and the `extendLifetime()` wrapper; the issue is whether the HEAD gate sits before returning the cached response.
+- Add a browser-level regression test that simulates slow HEAD responses and asserts cached images paint without waiting for the HEAD timeout.
 
-- **Image queue:** `apps/web/src/lib/image-queue.ts` clamps queue concurrency against DB-pool budget, uses per-image advisory locks, bounded retry maps, embedding scan limits, chunked bootstrap batches, and shutdown drain hooks. No confirmed unbounded worker or retry loop issue found.
-- **Sharp/image processing:** `apps/web/src/lib/process-image.ts` disables Sharp cache, derives conservative Sharp concurrency, caps input pixels, verifies only file heads for derivative integrity, and uses atomic writes/backups. The multi-format fan-out is CPU-heavy by design but bounded.
-- **Admin backfill:** `apps/web/src/lib/admin-backfill-runner.ts` uses bounded concurrency and advisory locking; no broad queue hazard found in the inspected paths.
-- **Semantic/similar search:** embedding scans are explicitly capped by `SEMANTIC_SCAN_LIMIT` and the embedding table has `(model_version, updated_at)` indexing. This remains a scale-sensitive area but no confirmed unbounded scan was found.
-- **Client masonry/CLS:** `apps/web/src/components/masonry-card.tsx`, `grid-picture.tsx`, and `home-client.tsx` reserve dimensions/aspect ratio and prioritize above-fold images. No current CLS regression found in the inspected masonry path.
-- **Load more/UI loops:** `apps/web/src/components/load-more.tsx` uses `loadingRef`, cursor guards, and intersection observer throttling. No runaway infinite-load loop found.
-- **Service worker cache size:** `apps/web/public/sw.template.js` keeps serialized metadata mutations ordered and enforces a 50 MB image cache cap. The main open questions are lifetime coverage and the per-tile HEAD cost above.
-- **Analytics retention:** `apps/web/src/lib/view-retention.ts` deletes in indexed, capped chunks. Retention bounds storage growth; it does not bound live write pressure, which is why PERF-C2 remains separate.
+## Final Sweep
 
-## File Groups Examined
+No critical or high-confidence medium performance defects found in this cycle. The current tree already contains concrete mitigations for several historically risky paths:
+- Feed/sitemap `updated_at` ordering now has matching indexes in schema and migration: `apps/web/src/db/schema.ts:117-125`, `apps/web/drizzle/0029_feed_updated_indexes.sql:1-3`; feed/sitemap helpers use those orderings: `apps/web/src/lib/data.ts:845-890`, `apps/web/src/lib/data.ts:1718-1729`.
+- Analytics/view background writes are bounded by a concurrency-2 queue with a 1000 pending cap: `apps/web/src/lib/background-db-writes.ts:3-10`, `apps/web/src/lib/background-db-writes.ts:34-75`.
+- DB connection pool pressure is capped at pool/queue level: `apps/web/src/db/index.ts:23-34`.
+- Image processing constrains libvips thread fan-out and disables Sharp cache for steady RSS: `apps/web/src/lib/process-image.ts:36-57`.
+- Live upload processing, admin backfill, semantic embedding, and CLIP inference all have explicit concurrency/cap controls: `apps/web/src/lib/image-queue.ts:123-152`, `apps/web/src/lib/admin-backfill-runner.ts:12-40`, `apps/web/src/lib/clip-model.ts:53-72`, `apps/web/src/app/api/search/semantic/route.ts:263-284`.
+- Image-serving hot path avoids per-request settings SELECTs and avoids fd/body work for HEAD/304: `apps/web/src/lib/serve-upload.ts:42-106`, `apps/web/src/lib/serve-upload.ts:221-301`.
+- Public SSR/image surfaces are protected by nginx request/connection limiters and dedicated Next image optimizer throttling: `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:244-260`, `apps/web/nginx/default.conf:272-309`.
+- UI hot paths reserve masonry dimensions, avoid link prefetch fan-out, use passive/guarded scroll/resize listeners, and keep pagination observer churn bounded: `apps/web/src/components/masonry-card.tsx:50-81`, `apps/web/src/components/home-client.tsx:20-79`, `apps/web/src/components/home-client.tsx:217-242`, `apps/web/src/components/load-more.tsx:43-159`.
+- Build/runtime packaging uses standalone output, externalizes native packages, and sets deterministic shutdown ownership for buffered analytics flushes: `apps/web/next.config.ts:36-50`, `apps/web/Dockerfile:121-147`, `apps/web/Dockerfile:187-197`.
 
-- Data access and query construction: `data.ts`, `data-timeline.ts`, smart collection/tag/analytics helpers, public server actions, feed and sitemap routes.
-- DB configuration and indexes: `db/index.ts`, `db/schema.ts`, Drizzle schema areas for images, embeddings, analytics, tags, shared groups.
-- Image processing and background work: `process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, topic image processing, advisory locks, queue shutdown, background DB writes.
-- Search and embeddings: semantic and similar API routes, CLIP model/concurrency helpers, embedding decode/top-K helpers.
-- Service worker and derivative caching: SW template/built worker, SW cache model tests/helpers, service-worker registration, Next cache headers.
-- Public UI: home page, photo page, masonry card/grid picture, load-more, photo viewer, lightbox/zoom, similar photos.
-
-## Finding Count
-
-- **Confirmed issues:** 2
-- **Likely issues:** 2
-- **Validation-needed risks:** 2
-- **Total findings:** 6
+Validation note: this was a static review pass. I did not run lint/typecheck/tests because the task requested a no-source-edit performance review artifact; the review claims above are grounded in source inspection and exact file/line citations.

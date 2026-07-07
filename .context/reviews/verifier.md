@@ -1,95 +1,108 @@
-# Verifier Review - Run-10 Cycle 5 Prompt 1
+# Cycle 6 - Verifier Lane Report
 
-Reviewer: verifier lane. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `591b44bd`.
-Mode: read-only verification except this artifact. I did not run build/test/e2e because the lane was constrained to review-artifact writes only; validation here is static evidence plus `git diff --check HEAD~10..HEAD` (clean).
+Date: 2026-07-07
+Repository: `/Users/hletrd/flash-shared/gallery`
+HEAD reviewed: `423fa6c1f599` (`docs(plans): close cycle-5 deploy recovery ledger`)
+Mode: verifier, read-only source review. The only intended write is this artifact.
 
 ## Inventory
 
-I built the inventory before checking claims by combining:
-- `git diff --name-only HEAD~10..HEAD`
-- current cycle-4 plan/deferred ledgers
-- `rg` over callers/tests for `bootstrapMissingActiveEmbeddings`, `embeddingScanCursorId`, `syncPhotoQueryBasePath`, `PhotoNavigation`, `photoId`, `SHARE_MAX_REQUESTS`, and `SEMANTIC_SCAN_LIMIT`
+I inventoried the review surface before checking claims, per `.context/reviews/prompts/verifier.md:1-5` and `.context/reviews/prompts/common_review_scope.md:1-14`.
 
-Files examined from the verifier angle:
-- `AGENTS.md` instructions supplied in the prompt
-- `CLAUDE.md`
-- `.context/plans/README.md`
-- `.context/plans/cycle-4-2026-07-07-plan.md`
-- `.context/plans/cycle-4-2026-07-07-deferred.md`
-- `.context/plans/deferred-carry-forward.md`
-- `apps/web/README.md`
-- `apps/web/src/lib/image-queue.ts`
-- `apps/web/src/lib/clip-embeddings.ts`
-- `apps/web/src/__tests__/image-queue-embedding-bootstrap-cap.test.ts`
-- `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/photo-navigation.tsx`
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
-- `apps/web/e2e/swipe-visual-reset.spec.ts`
-- `apps/web/e2e/public.spec.ts`
-- `apps/web/e2e/hydration-photo-page.spec.ts`
-- source/test references located by `rg` for image-queue side effects, queue shutdown, semantic scan limits, and shared-group navigation
+Primary docs and invariants examined:
+- `AGENTS.md:17-38` - deploy, migration, privacy, and gate policy.
+- `CLAUDE.md:140-161`, `CLAUDE.md:190-238`, `CLAUDE.md:652-670`, `CLAUDE.md:699+` - security architecture, PAT contract, page/rate-limit notes, lint gates, deploy notes.
+
+Route/auth/action guards examined:
+- `apps/web/scripts/check-api-auth.ts:1-208` and `apps/web/src/__tests__/check-api-auth.test.ts:14-178`.
+- `apps/web/scripts/check-action-origin.ts:1-1180` and `apps/web/src/__tests__/check-action-origin.test.ts:27-542`.
+- `apps/web/scripts/check-public-route-rate-limit.ts:1-998` and `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:6-1268`.
+- `apps/web/src/lib/api-auth.ts:58-144`, `apps/web/src/lib/request-origin.ts:45-109`, `apps/web/src/lib/action-guards.ts:37-44`.
+- Current route/action inventory from the lint gates: 2 admin API routes, 10 public route files, all files under `apps/web/src/app/actions/`, plus `apps/web/src/app/[locale]/admin/db-actions.ts` and `apps/web/src/app/actions.ts`.
+
+Privacy and migration surfaces examined:
+- `apps/web/src/lib/data.ts:251-430`, `apps/web/src/lib/search-enrichment-fields.ts:1-47`, `apps/web/src/lib/data-timeline.ts:1-73`.
+- `apps/web/src/__tests__/privacy-fields.test.ts:7-167`.
+- `apps/web/src/db/schema.ts:19-125`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js:180-227`, `apps/web/scripts/migrate.js:348-751`, `apps/web/scripts/migrate.js:758-958`.
+- `apps/web/src/__tests__/migration-journal-monotonicity.test.ts:1-120`, `apps/web/src/__tests__/migrate-pending-migrations.test.ts:1-320`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:1-254`.
+
+Deploy/gate surfaces examined:
+- `package.json:1-23`, `apps/web/package.json:1-72`.
+- `scripts/deploy-remote.sh:1-93`, `apps/web/deploy.sh:1-108`, `apps/web/src/__tests__/deploy-script-contract.test.ts:23-293`.
+- `apps/web/e2e/origin-guard.spec.ts:1-88`, `apps/web/e2e/helpers.ts:28-148`.
 
 ## Confirmed Issues
 
-### VER-C5-01 - The missing-embedding bootstrap does not prove the stated scan-cap behavior for arbitrary valid limits
+None found in the reviewed source surfaces.
 
-- Severity: Medium
-- Confidence: High
-- File/region: `apps/web/src/lib/image-queue.ts:569-595`; tests at `apps/web/src/__tests__/image-queue-embedding-bootstrap-cap.test.ts:161-179,244-307`
-- Stated behavior being checked: the bootstrap retry is bounded by `SEMANTIC_SCAN_LIMIT` and "stops once SEMANTIC_SCAN_LIMIT rows have been scanned" (test comment at `image-queue-embedding-bootstrap-cap.test.ts:4-14` and code comment at `image-queue.ts:570-575`).
-
-Evidence: `BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE` is 50 (`image-queue.ts:112`). The loop checks `scanned >= SEMANTIC_SCAN_LIMIT` before the query, but the query then always fetches up to 50 rows (`image-queue.ts:573-593`) and only afterwards increments `scanned` (`image-queue.ts:595`). The tests set `scanLimit: 100`, exactly two 50-row batches, so they do not exercise a non-multiple cap. `SEMANTIC_SCAN_LIMIT` is parsed from env as any positive integer up to 25,000 (`clip-embeddings.ts:37-44`), so non-multiple values are valid.
-
-Concrete failure scenario: with `SEMANTIC_SCAN_LIMIT=75` and many missing embeddings, the bootstrap scans two 50-row batches and logs the cap at 100. With `SEMANTIC_SCAN_LIMIT=1`, it scans 50 rows. That violates the cap as an operator budget. The semantic/similar route cap may still be correct; this finding is limited to `bootstrapMissingActiveEmbeddings`.
-
-Suggested fix: limit each query by remaining budget:
-
-```ts
-const remainingScanBudget = SEMANTIC_SCAN_LIMIT - scanned;
-if (remainingScanBudget <= 0) {
-  state.embeddingScanCursorId = cursorId;
-  console.warn(...);
-  break;
-}
-const rows = await db.select(...).limit(Math.min(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE, remainingScanBudget));
-```
-
-Add a regression test using `scanLimit: 75` to prove the second query is limited to 25 rows and the cursor resumes after id 75, not 100.
+The implementation and tests match the stated behavior for the specific invariants requested:
+- Admin API route exports are scanned recursively under `src/app/api/admin` and must be direct `withAdminAuth(...)` exports from the approved module (`check-api-auth.ts:17-43`, `check-api-auth.ts:63-94`, `check-api-auth.ts:121-177`). Current gate output showed both admin API routes OK.
+- Cookie-auth admin API requests perform same-origin verification before `isAdmin()` (`api-auth.ts:114-129`); PAT-auth requests intentionally bypass same-origin only when a verified token has the required scope (`api-auth.ts:68-111`, `admin-tokens.ts:141-168`). Scope and response-header behavior are tested in `api-auth-response-headers.test.ts:50-149`, and the LR route is source-locked to `allowTokenScope: 'lr:upload'` in `lr-upload-hdr-gate.test.ts:63-66`.
+- Mutating server actions are covered by recursive discovery (`check-action-origin.ts:83-113`) and require an effective top-level guard plus early return before protected reads/writes (`check-action-origin.ts:984-1030`). Auth actions use the approved `hasTrustedSameOrigin` shape (`auth.ts:77-103`, `auth.ts:267-287`, `auth.ts:290-297`).
+- Public mutating/expensive API routes are scanned, excluding admin routes, and must call approved pre-increment helpers before protected work or carry a reasoned exemption (`check-public-route-rate-limit.ts:1-18`, `check-public-route-rate-limit.ts:133-138`, `check-public-route-rate-limit.ts:391-469`, `check-public-route-rate-limit.ts:934-968`). Current gate output showed all 10 public routes OK.
+- Public image field privacy is guarded at three levels: explicit omissions in `data.ts:374-407`, compile-time guards in `search-enrichment-fields.ts:43-47` and `data-timeline.ts:62-67`, and symmetric runtime tests in `privacy-fields.test.ts:91-128` plus enrichment/timeline checks in `privacy-fields.test.ts:139-166`.
+- Migration safety is covered by journal monotonicity/post-condition tests (`migration-journal-monotonicity.test.ts:56-119`), pending-vs-drift path tests (`migrate-pending-migrations.test.ts:89-175`), DML-baseline refusal tests (`migrate-pending-migrations.test.ts:209-318`), and reconcile source tripwires for tables, columns, indexes, FKs, and drops (`migrate-reconcile-coverage.test.ts:76-254`). `migrate.js` also enforces the same post-condition after `drizzle.migrate()` (`migrate.js:933-958`).
+- Deploy scripts preserve the documented disk hygiene contract: remote target is config-driven (`deploy-remote.sh:22-53`), env files are permission-checked before sourcing/Compose consumption (`deploy-remote.sh:55-85`, `deploy.sh:15-43`), health is checked before pruning (`deploy.sh:57-77`), and Docker prune runs only after a healthy `up -d` without `volume prune -a` (`deploy.sh:79-104`). The deploy contract tests pin these points (`deploy-script-contract.test.ts:23-106`, `deploy-script-contract.test.ts:222-293`).
 
 ## Likely Issues
 
-None confirmed beyond VER-C5-01. I specifically re-checked the current patches against their claimed behavior:
+None.
 
-- Hydration fix: `photo-viewer.tsx:111-125` renders deterministic `false` first, then restores persisted/desktop pin state post-mount. The e2e spec now navigates to `/` before locating a photo (`hydration-photo-page.spec.ts:29-34`), so the test setup is coherent.
-- Shared-group shallow stepping: `photo-viewer.tsx:337-352` updates only browser history when `syncPhotoQueryBasePath` is present, while `g/[key]/page.tsx:199-209` disables prefetch on shared-grid photo links. This matches the plan's limiter-burn fix shape.
-- Swipe visual reset: `photo-navigation.tsx:119-132,204-221` resets visuals on successful swipe and skips one hard reset to preserve the settle animation. `swipe-visual-reset.spec.ts:59-131` covers sub-threshold snap-back, threshold in-place navigation, chevron navigation, and repeated shallow stepping.
-- Model-version flip: `image-queue.ts:542-558` resets cursor when the active embedding model version changes; `image-queue-embedding-bootstrap-cap.test.ts:275-307` covers stub-to-production flip with the env gate enabled.
+I did not find a gap where the current code contradicts the documented invariants for route guards, privacy guards, migrations, deploy scripts, or the local quality gates.
 
-## Manual-Validation Risks
+## Risks Requiring Manual Validation
 
-### RISK-VER-C5-01 - Cycle-4 deploy and e2e release evidence is not proven by committed artifacts
+### VER-C6-R1 - Authenticated cross-origin e2e coverage is conditional, not proven by this local verifier run
 
-- Severity: Medium evidence gap
-- Confidence: High that evidence is missing from artifacts; unknown runtime state
-- File/region: `.context/plans/cycle-4-2026-07-07-plan.md:213-239`
-
-The plan records all non-e2e gates green, but says Playwright e2e remained infrastructure-blocked in this lane and that deploy was pending for the docs-artifact head. `AGENTS.md`/`CLAUDE.md` require per-iteration deploys after pushed commits. I did not run deploy or e2e in this read-only lane. The next planning step should preserve this as a manual-validation item unless another artifact proves the final head was deployed and smoke-checked.
-
-### RISK-VER-C5-02 - C4-17 "SCHEDULED-NEXT" needs explicit Prompt 2 disposition
-
-- Severity: Low-Medium process risk
+- Severity: Medium evidence risk
 - Confidence: High
-- File/region: `.context/plans/cycle-4-2026-07-07-deferred.md:62-74`; `.context/plans/deferred-carry-forward.md:98-100`
+- File/region: `apps/web/e2e/origin-guard.spec.ts:27-73`; `apps/web/e2e/helpers.ts:28-45`, `apps/web/e2e/helpers.ts:120-148`.
 
-The deferred register explicitly says the maintenance-scheduler extraction should be picked up in cycle 5. Prompt 1 should not implement it, but Prompt 2 should either schedule it or record a concrete re-justification. Silent carry-forward would contradict the register's own "SCHEDULED-NEXT" disposition.
+Evidence: The e2e suite has the right authenticated test shape: it creates a real session cookie and expects a spoofed `Origin` request to `/api/admin/db/download` to return 403 (`origin-guard.spec.ts:55-73`). But that branch is skipped unless `adminE2EEnabled` is true (`origin-guard.spec.ts:55-56`), and admin enablement depends on local plaintext credentials or explicit env (`helpers.ts:28-45`). I did not run `npm run test:e2e --workspace=apps/web` in this verifier lane.
+
+Concrete failure scenario: a future Next/Playwright/server integration change breaks cookie-authenticated admin API origin checks only at runtime. The unit scanner and mocked `api-auth` tests still pass, while the authenticated e2e branch would have caught the real HTTP behavior if the env were configured and the suite were run.
+
+Suggested fix: run the e2e suite with admin credentials for release validation, or make the authenticated origin-guard test a required CI job with the documented local disposable DB/session setup. Keep the unauthenticated smoke (`origin-guard.spec.ts:33-53`) as a cheap route-existence guard, but do not treat it as proof of the authenticated origin branch.
+
+### VER-C6-R2 - Production deploy/smoke evidence is not established by local gates
+
+- Severity: Medium manual-validation risk
+- Confidence: High
+- File/region: `AGENTS.md:17-19`; `scripts/deploy-remote.sh:55-93`; `apps/web/deploy.sh:51-76`, `apps/web/deploy.sh:79-104`; `deploy-script-contract.test.ts:23-106`.
+
+Evidence: The deploy policy requires `npm run deploy` after pushed master commits (`AGENTS.md:17`). The scripts and tests prove the local deploy helper shape and safety contract, but I did not execute `npm run deploy` or verify the remote host. Local `npm run build --workspace=apps/web` passed; during static generation the local DB was unavailable and sitemap correctly fell back to homepage-only, then the build completed with exit 0.
+
+Concrete failure scenario: all local gates pass and the deploy scripts remain source-valid, but the remote deploy env file is missing/unsafe, SSH target config is wrong, Docker health never reaches healthy, or the host has a runtime-only issue. None of those are falsified by source tests or local build.
+
+Suggested fix: for an iteration intended to reach production, run the repo-root deploy path with the configured deploy env, then record the remote deploy exit code and a smoke check against `/api/live` or the public homepage. If deploy is intentionally out of scope for a verifier-only artifact, carry this as manual validation rather than claiming production behavior.
+
+## Verification Evidence
+
+Commands run at HEAD:
+- `npm run lint:api-auth --workspace=apps/web` - PASS. Output listed 2 admin routes OK.
+- `npm run lint:action-origin --workspace=apps/web` - PASS. Output ended with "All mutating server actions enforce same-origin provenance."
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - PASS. Output listed 10 public routes OK.
+- Targeted invariant suite:
+  `npm test --workspace=apps/web -- src/__tests__/privacy-fields.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-pending-migrations.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/check-api-auth.test.ts src/__tests__/check-action-origin.test.ts src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/api-auth-response-headers.test.ts src/__tests__/semantic-search-rate-limit.test.ts`
+  - PASS: 10 files, 354 tests.
+- `npm run typecheck --workspace=apps/web` - PASS. Included `next typegen`, app `tsc`, JS script checker, and script `tsc`.
+- `npm run lint --workspace=apps/web` - PASS.
+- `npm test --workspace=apps/web` - PASS: 336 passed, 2 skipped files; 3126 passed tests, 4 skipped tests.
+- `npm run build --workspace=apps/web` - PASS. Build completed after the expected local-DB-unavailable sitemap fallback.
+
+Not run:
+- `npm run test:e2e --workspace=apps/web` - not run in this lane; see VER-C6-R1.
+- `npm run deploy` - not run in this lane; see VER-C6-R2.
 
 ## Final Sweep
 
-Evidence collected:
-- `git diff --check HEAD~10..HEAD` reported no whitespace errors.
-- Static arithmetic check of the bootstrap cap showed valid limits `1`, `49`, `51`, `75`, `99`, and `101` overshoot to the next 50-row multiple.
-- `rg` confirmed `SEMANTIC_SCAN_LIMIT` is env-tunable and used by routes/backfill/bootstrap; the confirmed issue applies only to the bootstrap loop's fixed query batch.
-- Shared-group and swipe-navigation claims were checked across component, route, and e2e files rather than from comments alone.
-- Plan/deferred files were checked for no-silent-drop shape and carry-forward linkage.
+Final sweep checks:
+- Re-read the common verifier prompt and required scope before writing.
+- Confirmed current API/action route inventory with `find` and lint gate output.
+- Checked source-level guard implementation, scanner implementation, scanner fixtures, and actual route/action behavior instead of relying on comments alone.
+- Checked privacy field omissions, compile-time guards, and runtime symmetric allowlist tests across `data.ts`, `data-timeline.ts`, and semantic/similar enrichment.
+- Checked migration journal policy, reconcile coverage, DML-baseline refusal, pending migration handling, and deploy post-condition.
+- Checked deploy script ordering, env-file permission checks, config-driven SSH wrapper, health-before-prune, and no all-volume prune.
+- Verified the main non-e2e gates fresh at HEAD.
 
-File groups examined: cycle-4 plan/deferred ledgers, current plan index/carry-forward register, image-queue/CLIP embedding bootstrap source and tests, photo viewer/navigation components, shared-group page, shared-group/swipe/hydration e2e specs, README/CLAUDE operational claims relevant to deploy, CLIP, and per-cycle policy.
+Worktree note: while this verifier pass was running, other review artifacts under `.context/reviews/` appeared modified independently, currently including `critic.md` and `perf-reviewer.md`. I did not inspect or revert them, and this report intentionally writes only `.context/reviews/verifier.md`.

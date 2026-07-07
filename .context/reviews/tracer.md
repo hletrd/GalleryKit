@@ -1,112 +1,70 @@
-# Tracer Review - Cycle 5 Prompt 1
+# Tracer Review - Cycle 6 Prompt 1
 
-Scope: causal tracing of upload, process, delete, restore, settings, config/cache, and backfill flows. Read-only source review; only this artifact was written.
+Scope: causal tracing of scheduled jobs, restore/maintenance, auth, rate limits, migrations, media ingestion, ML/search queues, and deployment/runtime side effects. Source code was not edited; only this review artifact was written.
 
 ## Inventory
 
-Traced flows and files:
-- Browser/admin upload: `apps/web/src/app/actions/images.ts:129-653`
-- Lightroom upload: `apps/web/src/app/api/admin/lr/upload/route.ts:84-609`
-- Queue continuation and restore pause/resume: `apps/web/src/lib/image-queue.ts:694-1344`
-- Image write/derivative processing: `apps/web/src/lib/process-image.ts:887-1485`, `apps/web/src/lib/upload-paths.ts:1-193`
-- Delete/bulk delete: `apps/web/src/app/actions/images.ts:655-923`
-- Database restore and maintenance barriers: `apps/web/src/app/[locale]/admin/db-actions.ts:403-933`, `apps/web/src/lib/restore-maintenance*.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`
-- Settings/cache/static file serving: `apps/web/src/app/actions/settings.ts:44-239`, `apps/web/src/lib/gallery-config.ts:1-256`, `apps/web/src/lib/settings-hash.ts:1-181`, `apps/web/src/lib/serve-upload.ts:69-382`
-- Color backfill: `apps/web/src/lib/admin-backfill-runner.ts:401-431`, `apps/web/scripts/backfill-color-pipeline.ts:379-560`
+Primary files and docs inspected:
+- Repo contract: `AGENTS.md`, `CLAUDE.md`, prior tracer artifact `.context/reviews/tracer.md`, recent run brief `.context/reviews/run9-cycle7/_brief.md`.
+- Scheduled/background jobs: `apps/web/src/instrumentation.ts:1-108`, `apps/web/src/lib/maintenance-scheduler.ts:1-45`, `apps/web/src/lib/background-db-writes.ts:1-84`, `apps/web/src/lib/audit.ts:112-146`, `apps/web/src/lib/view-retention.ts:64-90`, `apps/web/src/lib/rate-limit.ts:567-583`.
+- Restore/maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts:403-933`, `apps/web/src/lib/restore-maintenance.ts:21-59`, `apps/web/src/lib/restore-maintenance-durable.ts:57-115`, `apps/web/src/lib/admin-mutation-barrier.ts:1-135`, `apps/web/src/lib/upload-processing-contract-lock.ts:9-74`, `apps/web/src/lib/db-restore.ts:21-63`, `apps/web/src/lib/sql-restore-scan.ts:1-260`.
+- Auth/rate limits: `apps/web/src/app/actions/auth.ts:77-265`, `apps/web/src/app/actions/auth.ts:290-380`, `apps/web/src/lib/auth-rate-limit.ts:1-146`, `apps/web/src/lib/api-auth.ts:58-144`, `apps/web/src/lib/rate-limit.ts:135-583`.
+- Media ingestion and processing: `apps/web/src/app/actions/images.ts:129-653`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-611`, `apps/web/src/lib/image-queue.ts:270-1311`, `apps/web/src/lib/upload-tracker.ts:19-33`.
+- ML/search queues: `apps/web/src/app/api/search/semantic/route.ts:107-320`, `apps/web/src/app/api/search/similar/[id]/route.ts:68-285`, `apps/web/src/app/actions/embeddings.ts:58-211`, `apps/web/scripts/backfill-clip-embeddings.ts:106-264`, `apps/web/scripts/backfill-color-pipeline.ts:367-613`, `apps/web/src/lib/admin-backfill-runner.ts:390-860`.
+- Migrations/deploy/runtime: `apps/web/scripts/migrate.js:180-958`, `apps/web/drizzle/meta/_journal.json:1-216`, `scripts/deploy-remote.sh:1-92`, `apps/web/deploy.sh:1-108`, `apps/web/docker-compose.yml:1-32`, `apps/web/nginx/default.conf:1-280`, `apps/web/src/app/api/health/route.ts:1-81`, `apps/web/src/app/api/live/route.ts:1-10`.
 
-## Confirmed Issues
+## Confirmed Defect
 
-### TR-1: Sidecar color backfill violates its own bounded-batch causal contract
+### TRC6-01 - Site-wide maintenance sweeps can mutate the database inside a restore window
 
-Trace:
-1. `apps/web/scripts/backfill-color-pipeline.ts:379-382` states the intent: batch size should bound DB reads and in-memory arrays.
-2. The sidecar then runs a single candidate query in `apps/web/scripts/backfill-color-pipeline.ts:383-400`.
-3. It keeps all candidates in `rows` and builds processing promises over that full list in `apps/web/scripts/backfill-color-pipeline.ts:525-560`.
-4. The in-app backfill flow uses keyset pagination in `apps/web/src/lib/admin-backfill-runner.ts:401-431`, so the repo already has the safer causal shape.
+Severity: Medium. Confidence: High.
 
-Failure scenario:
-- On a large gallery, a manual sidecar backfill can spend startup time and memory materializing every candidate before bounded processing helps. With `FORCE_REENCODE=1`, the candidate set can approach the full image table.
-
-Suggested fix:
-- Reuse the in-app runner's cursor loop: fetch one `BATCH_SIZE` page, process it with existing concurrency, flush progress, then fetch the next page by `id`.
-- Add a regression test or dry-run mode that proves only one page is materialized at once.
-
-Confidence: Medium.
-
-## Likely Issues
-
-### TR-2: Lightroom upload success/failure ordering is hard to verify from current tests
-
-Trace:
-1. Route entry takes token/cookie actor, maintenance guard, content-length gate, tracker preclaim, and multipart parse slot in `apps/web/src/app/api/admin/lr/upload/route.ts:84-186`.
-2. It takes the upload-processing contract lock after parsing and before topic/config/disk work in `apps/web/src/app/api/admin/lr/upload/route.ts:252-279`.
-3. It saves original data and reads metadata in `apps/web/src/app/api/admin/lr/upload/route.ts:340-410`.
-4. It can reject late for maintenance, HDR policy, GPS stripping, DB insert errors, audit failures, or queue failures across `apps/web/src/app/api/admin/lr/upload/route.ts:412-609`.
-5. Focused tests in `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:38-335` verify text shape instead of running the route.
+Causal trace:
+1. App startup synchronizes a durable restore marker, then starts the maintenance scheduler before bootstrapping the image queue: `apps/web/src/instrumentation.ts:3-10`.
+2. `startMaintenanceScheduler()` immediately runs a startup sweep and arms an hourly interval: `apps/web/src/lib/maintenance-scheduler.ts:28-36`.
+3. `runMaintenanceSweep()` fires four DB-mutating jobs without checking `isRestoreMaintenanceActive()` and without tracking their in-flight promises: `apps/web/src/lib/maintenance-scheduler.ts:21-25`.
+4. Those jobs delete from `sessions`, `rate_limit_buckets`, `audit_log`, and analytics view tables: `apps/web/src/lib/maintenance-scheduler.ts:13-25`, `apps/web/src/lib/rate-limit.ts:567-583`, `apps/web/src/lib/audit.ts:112-146`, `apps/web/src/lib/view-retention.ts:64-90`.
+5. Restore sets durable maintenance, quiesces the image queue, drains background DB writes, and drains foreground admin mutations before importing SQL: `apps/web/src/app/[locale]/admin/db-actions.ts:495-562`. That drain covers tracked background writes (`apps/web/src/lib/background-db-writes.ts:77-84`) and admin mutation slots (`apps/web/src/lib/admin-mutation-barrier.ts:102-135`), but the scheduler jobs are neither tracked there nor stopped.
 
 Failure scenario:
-- A late policy rejection after the original file is written could regress cleanup or tracker settlement while source-contract assertions still pass. This is especially risky because the browser upload action has a separate implementation in `apps/web/src/app/actions/images.ts:367-562`.
+- An admin starts a large DB restore near the top of the hour, or a process boots while a stale durable restore marker is present. The scheduler can start or continue retention deletes while `mysql --one-database` is dropping/recreating/loading app tables and while post-restore migrations run. Best case: the sweep logs noisy failures or holds locks during import. Worse case: it deletes restored sessions/audit/view/rate-limit rows after the dump has loaded those tables but before restore success, so "restore this dump" is not causally exact. This also violates the restore contract that the database is not authoritative during the maintenance window, a contract other flows honor.
 
-Suggested fix:
-- Add an executable route trace test for one late rejection and one success path. Assert the emitted side effects in order: tracker claim, lock acquire, save original, policy result, DB insert or cleanup, queue enqueue, tracker settle, lock release.
+Competing hypotheses checked:
+- Foreground admin mutations are fenced by `acquireAdminMutationSlot()` and drained before import; that does not include scheduler jobs because they never acquire a slot (`apps/web/src/lib/admin-mutation-barrier.ts:76-130`, `apps/web/src/lib/maintenance-scheduler.ts:21-25`).
+- Queue and ML side effects are quiesced or restore-guarded (`apps/web/src/lib/image-queue.ts:490-509`, `apps/web/src/lib/image-queue.ts:1252-1299`); scheduler deletes are outside that path.
+- Sidecar scripts fail closed on the durable restore marker (`apps/web/src/lib/restore-maintenance-durable.ts:57-63`, `apps/web/scripts/backfill-color-pipeline.ts:367-370`, `apps/web/scripts/backfill-clip-embeddings.ts:109-128`); the in-process scheduler does not call the durable guard.
 
-Confidence: Medium.
+Concrete fix:
+- Make maintenance sweeps restore-aware and drainable. Minimal shape: import `isRestoreMaintenanceActive()` in `maintenance-scheduler.ts`; skip starting a sweep when active; wrap each purge task in the same tracked background-write mechanism or maintain a local `maintenancePromises` set; expose `drainMaintenanceSweepsForRestore()` and call it after `beginDurableRestoreMaintenance()` and before `runRestore()`.
+- Add tests that fail on the current shape: a source/behavior test proving `runMaintenanceSweep()` is a no-op during restore maintenance, plus a restore-source test proving `restoreDatabase()` drains any already-started maintenance sweep before the import child is spawned.
 
-### TR-3: Restore path has many lock layers with limited executable failure tracing
+## Clean Traces
 
-Trace:
-1. Restore enters nested coordination in `apps/web/src/app/[locale]/admin/db-actions.ts:403-605`: DB restore lock, upload-processing lock, color backfill lock, semantic backfill lock, durable maintenance marker, queue quiesce, background DB write drain.
-2. The SQL import child is spawned and watched in `apps/web/src/app/[locale]/admin/db-actions.ts:760-848`.
-3. Post-restore migrations run through a second child/watchdog path in `apps/web/src/app/[locale]/admin/db-actions.ts:856-933`.
-4. Cleanup and release are split between inner restore logic and the outer `finally` in `apps/web/src/app/[locale]/admin/db-actions.ts:606-629`.
+### Restore and maintenance barriers
 
-Failure scenario:
-- A timeout or stream failure in either child process can produce a partial restore state. The desired causal result differs by failure point: temp file cleanup should happen, locks should release, durable maintenance may need to remain if `keepMaintenance` was set, and queues must resume only when safe.
+Restore now takes the DB-restore advisory lock, upload-processing contract lock, color backfill lock, and semantic backfill lock before entering durable maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts:428-493`. It then starts durable maintenance, drains queued image processing and background DB writes, drains foreground admin mutations, runs import, runs post-restore migrations, and clears/resumes only on safe branches: `apps/web/src/app/[locale]/admin/db-actions.ts:495-605`, `apps/web/src/app/[locale]/admin/db-actions.ts:760-933`. SQL restore validation has header/trailer checks and dangerous-SQL scanning: `apps/web/src/app/[locale]/admin/db-actions.ts:661-740`, `apps/web/src/lib/db-restore.ts:21-63`, `apps/web/src/lib/sql-restore-scan.ts:61-260`. No new restore-lock release defect found.
 
-Suggested fix:
-- Add failure-trace tests with injected child events for timeout, nonzero close, stdin error, and post-migration error. The assertions should be about final state of every lock/marker/queue flag, not only source text.
+### Media ingestion
 
-Confidence: Medium.
+Browser upload checks restore maintenance at entry, holds the admin mutation slot, acquires the upload-processing contract lock, preclaims upload quota synchronously, rechecks maintenance after original write/GPS stripping, inserts the row, and enqueues a snapshot carrying all processing settings: `apps/web/src/app/actions/images.ts:129-269`, `apps/web/src/app/actions/images.ts:425-558`, `apps/web/src/app/actions/images.ts:650-652`. Lightroom upload mirrors the same late restore check and six-setting queue snapshot: `apps/web/src/app/api/admin/lr/upload/route.ts:252-314`, `apps/web/src/app/api/admin/lr/upload/route.ts:427-565`, `apps/web/src/app/api/admin/lr/upload/route.ts:605-609`. No new browser/LR divergence found.
 
-## Manual-Validation Risks
+### Queues, ML, and search
 
-### TR-4: Settings-derived static files intentionally remain stale until backfill
+The processing queue rejects new jobs during restore, uses per-image advisory claims, verifies rows still exist before and after encode, drains caption/embedding side effects on restore/shutdown, and resets bootstrap state after restore: `apps/web/src/lib/image-queue.ts:691-715`, `apps/web/src/lib/image-queue.ts:773-890`, `apps/web/src/lib/image-queue.ts:895-961`, `apps/web/src/lib/image-queue.ts:1252-1311`. Semantic/similar routes gate origin, restore maintenance, request size, mode, rate limiting, model version, scan cap, and public enrichment: `apps/web/src/app/api/search/semantic/route.ts:107-320`, `apps/web/src/app/api/search/similar/[id]/route.ts:68-285`. Known semantic scan/storage design issues remain carry-forward/deferred; no new tracer-only ML/search defect was confirmed.
 
-Trace:
-1. Settings update normalizes and persists image sizes/quality/GPS options in `apps/web/src/app/actions/settings.ts:44-167`.
-2. The action detects existing images needing backfill and returns a warning in `apps/web/src/app/actions/settings.ts:168-199`.
-3. Static upload serving uses existing files and stable ETags in `apps/web/src/lib/serve-upload.ts:162-382`.
-4. The upload path resolver keeps public and original paths separate in `apps/web/src/lib/upload-paths.ts:1-193`.
+### Auth and rate limits
 
-Failure scenario:
-- After settings change, old derivatives remain causally valid from the static server's perspective. User-visible output changes only after backfill regenerates files.
+Login checks restore maintenance and same-origin before pre-incrementing IP and account buckets, rolls back only pre-auth over-limit rejections, and intentionally does not refund infrastructure errors after auth work starts: `apps/web/src/app/actions/auth.ts:77-169`, `apps/web/src/app/actions/auth.ts:171-265`. Password change uses same-origin, current-user, maintenance, validation-before-preincrement, and DB/in-memory rate checks: `apps/web/src/app/actions/auth.ts:290-380`. PAT admin API auth applies pre-auth token rate limiting and no-store/nosniff headers: `apps/web/src/lib/api-auth.ts:72-144`. No new auth/rate-limit bypass found.
 
-Suggested fix:
-- Treat the warning as part of the settings flow contract. For releases touching this path, manually verify the warning and backfill operation together.
+### Migrations and deployment/runtime side effects
 
-Confidence: Medium.
-
-### TR-5: Delete flow clears queue state before DB/file deletion, making partial failures operationally important
-
-Trace:
-1. Single delete clears queue state in `apps/web/src/app/actions/images.ts:707-718`, then deletes DB row and files in `apps/web/src/app/actions/images.ts:719-756`.
-2. Bulk delete clears queue state for all IDs in `apps/web/src/app/actions/images.ts:825-835`, then deletes DB rows and files in `apps/web/src/app/actions/images.ts:837-923`.
-3. Queue state is in-memory plus timer-driven in `apps/web/src/lib/image-queue.ts:378-480` and `apps/web/src/lib/image-queue.ts:694-1068`.
-
-Failure scenario:
-- If DB/file deletion fails after queue state is cleared, the item can remain in DB without the previous queued/processing state. That may be intentional because delete should cancel work first, but it is a manual trace risk when debugging partial deletes.
-
-Suggested fix:
-- Add logging/assertions around partial delete failures, or include a focused regression test that the chosen state after file deletion failure is intentional and recoverable through retry.
-
-Confidence: Low.
+Migration reconciliation mirrors current schema, guards DML baselining, distinguishes pending migrations from legacy drift, and asserts every journal hash after Drizzle runs: `apps/web/scripts/migrate.js:348-751`, `apps/web/scripts/migrate.js:784-958`; the journal currently includes entries through `0029_feed_updated_indexes`: `apps/web/drizzle/meta/_journal.json:208-214`. Deploy side effects are explicit and bounded: remote env loading refuses group/world-readable deploy secrets, remote deploy verifies runtime env/site config, waits for health, then prunes only unused Docker artifacts after the live container is healthy: `scripts/deploy-remote.sh:55-92`, `apps/web/deploy.sh:15-55`, `apps/web/deploy.sh:57-104`. Docker persistence is bind-mounted, host-networked, single-container: `apps/web/docker-compose.yml:12-32`. No new deploy/prune data-loss path found.
 
 ## Final Sweep
 
-Competing hypotheses checked:
-- Restore versus upload race: both browser upload and Lightroom upload check durable maintenance and upload-processing contract locks before commit; likely protected, with executable route coverage still recommended.
-- Browser upload cleanup: `uploadImages` has late maintenance checks and explicit cleanup in `apps/web/src/app/actions/images.ts:489-562`, plus final tracker settle/release in `apps/web/src/app/actions/images.ts:592-652`.
-- Queue restore behavior: queue quiesce/resume and bootstrap continuation were traced through `apps/web/src/lib/image-queue.ts:1117-1344`.
-- Static cache behavior: cache hash TTL and ETag generation checked in `apps/web/src/lib/serve-upload.ts:69-124`.
+Re-file filters applied:
+- Did not re-file the old foreground-admin-mutation restore race; the current barrier and restore drain address that class (`apps/web/src/lib/admin-mutation-barrier.ts:1-135`, `apps/web/src/app/[locale]/admin/db-actions.ts:544-572`).
+- Did not re-file semantic scan/model-version storage carry-forward issues without new evidence; the current sidecar/action/route paths are consistent with the known deferred architecture tradeoffs.
+- Did not re-file sidecar color-backfill materialization; current sidecar uses keyset paging and page-at-a-time processing (`apps/web/scripts/backfill-color-pipeline.ts:409-427`, `apps/web/scripts/backfill-color-pipeline.ts:573-583`).
 
-No confirmed restore/upload race was found in source review. The strongest causal defect is the sidecar backfill batching mismatch.
+Final verdict: 1 new confirmed defect, `TRC6-01`. The rest of the traced surfaces were either clean in current source or already represented in carry-forward/deferred review history.

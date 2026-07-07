@@ -1,284 +1,187 @@
-# Run-10 Cycle 5/100 Aggregate Review
+# Review Aggregate - Run 10 Cycle 6
 
 Date: 2026-07-07
-Start HEAD reviewed: `591b44bdaa7fb51c2c0ff8aa12d9274563147561`
+Repo: `/Users/hletrd/flash-shared/gallery`
 
-## Agent Coverage
+## Review Lanes
 
-Callable native agent types in this session were `default`, `explorer`, and `worker`; the named reviewer roles were therefore executed as six bounded reviewer lanes using the `default` agent. The project child-agent concurrency cap allowed five initial lanes; the sixth architecture/docs/UI/custom lane was launched as soon as the code-reviewer lane completed. All lanes returned and wrote their artifacts.
+Completed lanes: `code-reviewer`, `perf-reviewer`, `security-reviewer`, `critic`, `verifier`, `test-engineer`, `tracer`, `architect`, `debugger`, `document-specialist`, `designer`, `ui-ux-designer-reviewer`, `product-marketer-reviewer`.
 
-Artifacts written:
+Agent/tooling notes: native subagent concurrency was limited, so the fan-out ran in capacity-bounded waves. `security-reviewer` and `test-engineer` reported that a commit hook requested an OMX co-author trailer; repo policy forbids co-author trailers, so their review artifacts remained uncommitted during Prompt 1. No reviewer failed after retry.
 
-- `.context/reviews/code-reviewer.md`
-- `.context/reviews/perf-reviewer.md`
-- `.context/reviews/security-reviewer.md`
-- `.context/reviews/critic.md`
-- `.context/reviews/verifier.md`
-- `.context/reviews/test-engineer.md`
-- `.context/reviews/tracer.md`
-- `.context/reviews/debugger.md`
-- `.context/reviews/architect.md`
-- `.context/reviews/document-specialist.md`
-- `.context/reviews/designer.md`
-- `.context/reviews/ui-ux-designer-reviewer.md`
-- `.context/reviews/product-marketer-reviewer.md`
+## Merged Findings
 
-## AGENT FAILURES
+### AGG-C6-01 - Maintenance sweeps can write during restore
 
-None. One spawn attempt hit the native thread limit and was retried after a slot was closed; the lane completed successfully.
+- Severity/confidence: Medium / High
+- Status: confirmed source defect
+- Sources: `CQR6-01`, `TRC6-01`
+- Citations: `apps/web/src/lib/maintenance-scheduler.ts:13-36`, `apps/web/src/instrumentation.ts:1-10`, `apps/web/src/app/[locale]/admin/db-actions.ts:538-556`, `apps/web/src/lib/restore-maintenance.ts:21-26`
+- Summary: the independent startup/hourly scheduler deletes sessions, rate-limit buckets, audit rows, and view-retention rows without checking restore maintenance and without being drained before restore import.
+- Required action: make maintenance restore-aware and drainable, then add regression coverage.
 
-## Deduped Findings
+### AGG-C6-02 - Password-change auth mutations bypass the restore mutation barrier
 
-### C5-01 - Maintenance scheduler is coupled to image-queue bootstrap
+- Severity/confidence: Medium / High
+- Status: confirmed source defect
+- Sources: `DBG-C6-01`
+- Citations: `apps/web/src/app/actions/auth.ts:290-410`, `apps/web/src/lib/admin-mutation-barrier.ts:76-129`, `apps/web/src/app/[locale]/admin/db-actions.ts:538-556`
+- Summary: `updatePassword()` checks restore once, then performs Argon2 work and mutates `admin_users`/`sessions` without holding `acquireAdminMutationSlot()`.
+- Required action: acquire the admin mutation slot before long auth work and before the transaction; add source/behavior coverage.
 
-- Severity: Medium
-- Confidence: High
-- Sources: `code-reviewer` CQR5-01, `architect` ARCH-C5-01, `critic` RISK-C5-02, `verifier` RISK-VER-C5-02, `document-specialist` DOC-C5-03
-- Files: `apps/web/src/lib/image-queue.ts:1117-1274`, `apps/web/src/instrumentation.ts:1-9`, `apps/web/src/lib/queue-shutdown.ts:7-30`
-- Problem: session cleanup, rate-limit bucket cleanup, audit retention, and view retention start from image queue bootstrap instead of an independent instrumentation-owned lifecycle.
-- Failure scenario: if image bootstrap is skipped, delayed, or repeatedly fails during restore maintenance/startup, unrelated retention jobs do not run.
-- Suggested fix: extract `startMaintenanceScheduler()` / stop hook, start it from instrumentation, and leave queue-local retry pruning queue-owned.
+### AGG-C6-03 - Dev/build dependency audit fails on nested vulnerable esbuild
 
-### C5-02 - Embedding bootstrap can overshoot `SEMANTIC_SCAN_LIMIT`
+- Severity/confidence: Medium / High
+- Status: confirmed security issue
+- Sources: `SR6-C01`
+- Citations: `apps/web/package.json:77`, `package-lock.json:1261-1276`
+- Summary: `drizzle-kit@0.31.10` pulls `@esbuild-kit/core-utils -> esbuild@0.18.20`; `npm audit --workspace=apps/web --audit-level=moderate` fails.
+- Required action: upgrade/override without breaking Drizzle tooling; verify `npm audit` and `npm ls esbuild`.
 
-- Severity: Medium
-- Confidence: High
-- Sources: `critic` CRIT-C5-01, `verifier` VER-C5-01
-- Files: `apps/web/src/lib/image-queue.ts:569-595`, `apps/web/src/lib/clip-embeddings.ts:37-44`, `apps/web/src/__tests__/image-queue-embedding-bootstrap-cap.test.ts:161-179`
-- Problem: the loop checks the scan cap before each fixed 50-row query, so non-multiple limits like 1, 75, or 101 can scan up to the next 50-row multiple.
-- Failure scenario: an operator lowers `SEMANTIC_SCAN_LIMIT=75`, but startup still scans 100 rows and logs the exceeded value.
-- Suggested fix: compute remaining scan budget before each query, limit the query to `min(50, remaining)`, and add a non-multiple cap regression test.
+### AGG-C6-04 - Nginx template hardcodes the demo domain
 
-### C5-03 - Sidecar color backfill materializes the full candidate table
+- Severity/confidence: Medium / High
+- Status: confirmed operational/product defect
+- Sources: `CRIT-C6-01`, `ARCH-C6-02`, `PM-C6-02`
+- Citations: `apps/web/nginx/default.conf:46-49`, `README.md:48`, `apps/web/README.md:55-56`, `.context/plans/deferred-carry-forward.md:41`
+- Summary: the checked-in self-hosting nginx template binds to `gallery.atik.kr`, creating a footgun for copied deployments.
+- Required action: replace the active demo host with a host-neutral or templated value and add a source-contract test.
 
-- Severity: Medium
-- Confidence: Medium-High
-- Sources: `tracer` TR-1, `debugger` DBG-1, `test-engineer` TE-3
-- Files: `apps/web/scripts/backfill-color-pipeline.ts:379-400`, `apps/web/scripts/backfill-color-pipeline.ts:525-560`, `apps/web/src/lib/admin-backfill-runner.ts:401-431`
-- Problem: the sidecar says batch size bounds DB reads and memory, but the candidate query has no keyset pagination or `LIMIT`.
-- Failure scenario: a forced re-encode on a large gallery reads every candidate into memory before processing concurrency limits help.
-- Suggested fix: use a keyset-paginated `LIMIT BATCH_SIZE` loop like the in-app runner and test that only one page is materialized at a time.
+### AGG-C6-05 - SEO locale and site-config docs are split across code, UI, and docs
 
-### C5-04 - Feed and sitemap freshness ordering lacks matching image indexes
+- Severity/confidence: Low-Medium / High
+- Status: confirmed product/docs contract defect
+- Sources: `CRIT-C6-02`, `ARCH-C6-01`, `DOC-C6-01`, `DOC-C6-02`, `PM-C6-01`
+- Citations: `README.md:50-68`, `CLAUDE.md:148`, `CLAUDE.md:704-713`, `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:151-161`, `apps/web/src/lib/data.ts:1827-1834`, `apps/web/src/lib/locale-path.ts:63-74`, `apps/web/src/app/[locale]/layout.tsx:17-20`
+- Summary: README says runtime SEO fields include locale; CLAUDE says locale is not DB-overridable; `seo_locale` is really an OpenGraph fallback while route locale wins for normal pages. README also makes build-time JSON fields sound live-editable.
+- Required action: align README/CLAUDE/admin copy around runtime DB SEO fields versus build-time JSON fields.
 
-- Severity: Medium
-- Confidence: High
-- Sources: `perf-reviewer` PERF-C1
-- Files: `apps/web/src/lib/data.ts:533-546`, `apps/web/src/lib/data.ts:845-890`, `apps/web/src/lib/data.ts:1718-1729`, `apps/web/src/db/schema.ts:117-123`
-- Problem: feed/sitemap queries order by `updated_at DESC, created_at DESC, id DESC` but current indexes are shaped around capture date or created date.
-- Failure scenario: larger galleries can force MySQL filesort/temp work for public feed/sitemap and topic freshness queries, competing with foreground traffic.
-- Suggested fix: add root and topic processed/updated/created/id indexes, mirror them in schema/migrations/reconcile, and validate with `EXPLAIN`.
+### AGG-C6-06 - Product copy overstates self-service semantics for semantic search and teams
 
-### C5-05 - Background analytics writes have no global concurrency/backlog bound
+- Severity/confidence: Low-Medium / High
+- Status: confirmed product expectation issue
+- Sources: `PM-C6-03`, `PM-C6-04`
+- Citations: `README.md:29`, `README.md:42-44`, `CLAUDE.md:5`, `CLAUDE.md:239`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:824-842`
+- Summary: semantic search is real but operator-runbook-only for production mode, and "small teams" can imply assistant/client roles although all accounts are full root admins.
+- Required action: clarify README audience and capability wording.
 
-- Severity: Medium
-- Confidence: Medium-High
-- Sources: `perf-reviewer` PERF-C2
-- Files: `apps/web/src/lib/background-db-writes.ts:3-25`, `apps/web/src/app/actions/public.ts:341-529`, `apps/web/src/db/index.ts:23-34`
-- Problem: per-IP limits exist, but admitted analytics writes are scheduled immediately into a global promise set with no process-wide queue, pending cap, worker concurrency, or drop/coalesce policy.
-- Failure scenario: distributed traffic below per-IP budgets can saturate the MySQL pool/driver queue and compete with foreground reads.
-- Suggested fix: add a bounded low-concurrency analytics write queue with explicit overflow/drop/coalesce metrics.
+### AGG-C6-07 - Desktop click-to-zoom is blocked by ImageZoom's own role guard
 
-### C5-06 - Service-worker stale image revalidation is not lifetime-covered
+- Severity/confidence: High / High
+- Status: confirmed UI defect
+- Sources: `UXR-C6-01`
+- Citations: `apps/web/src/components/image-zoom.tsx:180-200`, `apps/web/src/components/image-zoom.tsx:355-380`, `apps/web/src/components/photo-viewer.tsx:693-730`
+- Summary: `handleClick()` ignores clicks when `target.closest('[role="button"]')` matches the zoom container itself, so the advertised pointer interaction does nothing.
+- Required action: guard only nested interactive descendants and add regression coverage.
 
-- Severity: Medium-Low
-- Confidence: Medium
-- Sources: `perf-reviewer` PERF-L1
-- Files: `apps/web/public/sw.template.js:290-302`, `apps/web/public/sw.template.js:427-430`, `apps/web/src/lib/sw-cache.ts`
-- Problem: stale cached images start background revalidation without `event.waitUntil`.
-- Failure scenario: the browser can terminate the service worker after returning cached bytes, dropping cache refresh and metadata writes.
-- Suggested fix: call `extendLifetime(event, startRevalidate())` and lock it with the SW template/generated-worker contract tests.
+### AGG-C6-08 - Auto-lightbox state reads sessionStorage during first render
 
-### C5-07 - Timeline/on-this-day queries use non-sargable date functions
+- Severity/confidence: Medium / High
+- Status: confirmed hydration/source defect
+- Sources: `UXR-C6-02`
+- Citations: `apps/web/src/components/photo-viewer.tsx:76-82`, `apps/web/src/components/photo-viewer.tsx:566`, `apps/web/src/components/photo-viewer.tsx:1013-1032`, `apps/web/src/app/[locale]/(public)/p/[id]/loading.tsx:7-18`
+- Summary: `showLightbox` initializes from `sessionStorage`, so client first render can diverge from server HTML.
+- Required action: initialize deterministically and consume the flag after mount; audit the loading fallback.
 
-- Severity: Medium-Low
-- Confidence: Medium
-- Sources: `perf-reviewer` PERF-L2
-- Files: `apps/web/src/lib/data-timeline.ts:88-116`, `apps/web/src/lib/data-timeline.ts:129-142`, `apps/web/src/lib/data-timeline.ts:178-207`, `apps/web/src/app/[locale]/(public)/page.tsx:232-235`
-- Problem: `YEAR`, `MONTH`, and `DAY` predicates block efficient use of the existing processed/capture-date index beyond the prefix.
-- Failure scenario: public home/timeline/year pages can scan more processed rows as the gallery grows.
-- Suggested fix: rewrite year/month queries as ranges; for on-this-day, add generated month/day columns or cache daily results.
+### AGG-C6-09 - Smart collections remain public-readable but not admin-operable
 
-### C5-08 - Public LIKE search remains a multi-query leading-wildcard scan
+- Severity/confidence: Medium / High
+- Status: already tracked carry-forward, still open
+- Sources: `DES-C6-D1`, `UXR-C6-03`
+- Citations: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-164`, `apps/web/src/app/actions/collections.ts:16-150`, `apps/web/src/components/admin-nav.tsx:15-25`, `CLAUDE.md:162`
+- Summary: public route and hardened actions exist, but admins still cannot author collections through UI.
+- Disposition: deferred carry-forward unless this cycle explicitly builds the admin workflow.
 
-- Severity: Low-Medium
-- Confidence: Medium
-- Sources: `perf-reviewer` PERF-V2
-- Files: `apps/web/src/lib/data.ts:1573-1716`, `apps/web/src/app/actions/public.ts:247-329`
-- Problem: `%term%` predicates across multiple fields and joins cannot use ordinary b-tree indexes.
-- Failure scenario: one admitted search can scan a large processed image/tag corpus and run multiple fallback query shapes.
-- Suggested fix: validate with production-like slow-query data; if hot, move to FULLTEXT/generated search rows or tokenized search.
+### AGG-C6-10 - Archive/date queries remain non-sargable
 
-### C5-09 - Warm-cache service-worker HEAD probes may delay image paint
+- Severity/confidence: Low today, Medium at larger scale / High
+- Status: performance issue
+- Sources: `PERF-C6-01`
+- Citations: `apps/web/src/lib/data-timeline.ts:88-116`, `apps/web/src/lib/data-timeline.ts:125-207`
+- Summary: `YEAR()`, `MONTH()`, and `DAY()` predicates limit index use on uncached archive/home renders.
+- Disposition: deferred performance/schema work.
 
-- Severity: Low-Medium
-- Confidence: Medium-Low
-- Sources: `perf-reviewer` PERF-V1
-- Files: `apps/web/public/sw.template.js:31-39`, `apps/web/public/sw.template.js:365-397`
-- Problem: each cached derivative can synchronously attempt a 300 ms HEAD freshness probe before returning cached bytes.
-- Failure scenario: warm masonry pages can issue dozens of HEAD probes on high-latency networks, delaying image completion and increasing server load.
-- Suggested fix: measure under throttled latency; consider a probe cooldown/age gate/probabilistic strategy if material.
+### AGG-C6-11 - Public text search uses leading-wildcard LIKE scans
 
-### C5-10 - Dev/build dependency audit remains blocked on vulnerable esbuild transitively via drizzle-kit
+- Severity/confidence: Low today, Medium at larger scale / Medium-High
+- Status: performance issue
+- Sources: `PERF-C6-02`
+- Citations: `apps/web/src/app/actions/public.ts:248-329`, `apps/web/src/lib/data.ts:1573-1704`
+- Summary: `%term%` metadata/tag/topic branches can scan heavily despite rate limits and response caps.
+- Disposition: deferred search-index work.
 
-- Severity: Medium
-- Confidence: High
-- Sources: `security-reviewer` SR-C01
-- Files: `apps/web/package.json:70-85`, `package-lock.json`, `apps/web/Dockerfile:67-84`, `apps/web/Dockerfile:163-169`
-- Problem: current `drizzle-kit@0.31.10` still pulls `@esbuild-kit/* -> esbuild@0.18.20`, triggering GHSA-67mh-4wv8-2f99 in dev/build tooling.
-- Failure scenario: affected dev tooling exposed beyond loopback can be read by a malicious browser-origin request. Production runtime risk is reduced by `npm ci --omit=dev`.
-- Suggested fix: track upstream `drizzle-kit`; avoid `npm audit fix --force`; optionally test a safe override only if drizzle-kit remains functional.
+### AGG-C6-12 - Cached images can wait on HEAD revalidation before paint
 
-### C5-11 - Production CSP allows inline styles
+- Severity/confidence: Low / Medium
+- Status: performance issue
+- Sources: `PERF-C6-03`
+- Citations: `apps/web/public/sw.template.js:376-430`, `apps/web/src/lib/serve-upload.ts:42-106`
+- Summary: stale image responses can wait up to 300 ms on conditional `HEAD` before returning cached bytes.
+- Disposition: deferred service-worker performance work.
 
-- Severity: Low
-- Confidence: Medium
-- Sources: `security-reviewer` SR-L01
-- Files: `apps/web/src/lib/content-security-policy.ts:138-150`
-- Problem: production CSP includes `style-src 'self' 'unsafe-inline'`.
-- Failure scenario: a future style injection bug could support UI redress or limited data inference even with nonce-based scripts.
-- Suggested fix: document the framework tradeoff or move toward style nonces/hashes/static classes where feasible.
+### AGG-C6-13 - CSP allows inline styles in production
 
-### C5-12 - Lightroom upload route lacks executable behavior coverage
+- Severity/confidence: Low / Medium
+- Status: likely security hardening issue
+- Sources: `SR6-L01`
+- Citations: `apps/web/src/lib/content-security-policy.ts:138-155`
+- Summary: production `style-src` includes `'unsafe-inline'`; script policy is stricter.
+- Disposition: deferred hardening unless browser compatibility work proves removal safe.
 
-- Severity: Medium
-- Confidence: High
-- Sources: `test-engineer` TE-1, `tracer` TR-2, `debugger` DBG-3
-- Files: `apps/web/src/app/api/admin/lr/upload/route.ts:84-609`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-335`, `apps/web/src/app/actions/images.ts:129-653`
-- Problem: a large stateful route is covered mostly by source-contract tests rather than an executable route success/failure test.
-- Failure scenario: source strings remain present while live `NextRequest.formData`, tracker settlement, lock release, cleanup, or insert-before-enqueue ordering regresses.
-- Suggested fix: add behavioral tests for one success path and one late policy rejection, with mocks asserting cleanup, tracker, lock, insert, enqueue, and response shape.
+### AGG-C6-14 - Deployment/operator validation risks remain
 
-### C5-13 - Restore child-process cleanup lacks failure-mode behavior tests
+- Severity/confidence: Medium evidence risks / Medium-High
+- Status: manual validation
+- Sources: `SR6-M01`, `SR6-M02`, `SR6-M03`, `SR6-M04`, `CRIT-RISK-C6-01`, `ARCH-C6-R1`, `VER-C6-R2`
+- Citations: `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:46-69`, `apps/web/docker-compose.yml:15-22`, `CLAUDE.md:483-495`, `scripts/deploy-remote.sh:55-93`, `apps/web/deploy.sh:51-104`
+- Summary: TLS edge, proxy trust/IP attribution, historical secret rotation, plaintext backup handling, and live nginx limiter application need operator evidence.
+- Disposition: deferred/manual validation; do not claim closed on source commits alone.
 
-- Severity: Medium
-- Confidence: Medium
-- Sources: `test-engineer` TE-2, `tracer` TR-3, `debugger` DBG-2, `security-reviewer` SR-M01
-- Files: `apps/web/src/app/[locale]/admin/db-actions.ts:42-80`, `apps/web/src/app/[locale]/admin/db-actions.ts:403-933`, `apps/web/src/__tests__/db-restore.test.ts:47-115`, `apps/web/src/lib/sql-restore-scan.ts:61-265`
-- Problem: restore uses many locks, markers, child processes, timeouts, and cleanup paths, but current focused tests assert source shape more than child-process failure behavior.
-- Failure scenario: timeout, stream error, nonzero close, or post-migration failure can leak temp files/locks/markers or resume queues incorrectly while source-contract tests pass.
-- Suggested fix: extract or inject a child-process runner and test success, nonzero close, timeout kill, stream error, and post-migration failure with final lock/marker/queue assertions.
+### AGG-C6-15 - Storage abstraction remains a local-only product-boundary trap
 
-### C5-14 - CLIP production activation tests are intentionally outside default CI
+- Severity/confidence: Low-Medium / High
+- Status: architectural carry-forward
+- Sources: `CRIT-RISK-C6-02`, `ARCH-C6-R2`
+- Citations: `CLAUDE.md:150`, `apps/web/src/lib/storage/index.ts`, `apps/web/src/lib/storage/local.ts`, `apps/web/src/lib/storage/types.ts`, `.context/plans/deferred-carry-forward.md:75`
+- Summary: storage interfaces exist while upload/processing/serving/backup remain local-filesystem only.
+- Disposition: deferred product decision.
 
-- Severity: Medium manual-validation risk
-- Confidence: High
-- Sources: `test-engineer` TE-4, `debugger` DBG-5, `product-marketer-reviewer` PM-C5-03
-- Files: `apps/web/src/__tests__/clip-offline-load.test.ts:1-65`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:1-80`, `README.md:42`, `CLAUDE.md:160`
-- Problem: real model loading and semantic ranking only run with seeded weights and explicit env flags.
-- Failure scenario: model path/provider/runtime drift breaks production activation while default CI remains green.
-- Suggested fix: keep manual gate evidence before production activation or CLIP changes; add a CI-light manifest check only if it does not require weights.
+### AGG-C6-16 - Restore/import and upload-stream edge coverage gaps
 
-### C5-15 - Authenticated admin browser coverage can be skipped in local loops
+- Severity/confidence: Low to Medium / Medium
+- Status: likely issue and validation risk
+- Sources: `DBG-C6-02`, `DBG-C6-03`, `CQR6-RISK-03`
+- Citations: `apps/web/src/lib/serve-upload.ts:330-366`, `apps/web/src/app/[locale]/admin/db-actions.ts:42-80`, `apps/web/src/app/[locale]/admin/db-actions.ts:760-848`
+- Summary: upload abort listener cleanup is likely harmless but unclean; restore child-process failure paths are mostly source-shape tested.
+- Disposition: defer listener cleanup and broader restore harness after core restore barriers are fixed.
 
-- Severity: Medium manual-validation risk
-- Confidence: Medium
-- Sources: `test-engineer` TE-5, `debugger` DBG-5, `ui-ux-designer-reviewer` UXR-C5-M01
-- Files: `apps/web/e2e/admin.spec.ts:6-12`, `apps/web/e2e/origin-guard.spec.ts:28-30`, `apps/web/e2e/origin-guard.spec.ts:55-57`
-- Problem: local review runs may skip authenticated admin/upload/delete/settings/origin-guard browser flows when credentials are absent.
-- Failure scenario: local green gates miss admin browser regressions for changed admin flows.
-- Suggested fix: require configured e2e evidence for admin/upload/delete/settings/restore/origin changes or add targeted behavior tests.
+### AGG-C6-17 - Test/e2e/coverage gaps remain
 
-### C5-16 - Static derivative setting changes remain operationally stale until backfill
+- Severity/confidence: Low to Medium / High
+- Status: test coverage findings
+- Sources: `TE-C6-01` through `TE-C6-06`, `VER-C6-R1`, `DES-C6-M1`
+- Citations: `apps/web/package.json:13-27`, `apps/web/vitest.config.ts:16-39`, `apps/web/e2e/public.spec.ts:4-153`, `apps/web/scripts/seed-e2e.ts:36-267`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-609`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-280`, `apps/web/e2e/nav-visual-check.spec.ts:58-85`, `apps/web/e2e/origin-guard.spec.ts:27-73`
+- Summary: no coverage thresholds, missing positive public route e2e flows, missing real LR PAT upload integration, token UI interaction gaps, visual screenshots not compared, CLIP teardown flake risk, and authenticated origin-guard/data-backed browser flows need configured environments.
+- Disposition: deferred test-infra/e2e work except targeted tests required for this cycle's fixes.
 
-- Severity: Medium manual-validation risk
-- Confidence: Medium
-- Sources: `test-engineer` TE-6, `tracer` TR-4
-- Files: `apps/web/src/app/actions/settings.ts:86-199`, `apps/web/src/lib/serve-upload.ts:240-265`, `CLAUDE.md` cache invalidation/backfill notes
-- Problem: settings updates return a backfill warning, but existing static derivative bytes remain unchanged until a backfill runs.
-- Failure scenario: an operator saves derivative settings and still serves old dimensions/metadata.
-- Suggested fix: preserve/runbook-test the warning and backfill affordance together; do not treat save success as byte update.
+### AGG-C6-18 - CLIP and analytics validation risks remain
 
-### C5-17 - Delete flow clears queue state before DB/file deletion
+- Severity/confidence: Low-Medium to Medium / Medium-High
+- Status: manual validation / design risk
+- Sources: `CQR6-RISK-01`, `CQR6-RISK-02`, `TE-C6-06`
+- Citations: `apps/web/src/lib/background-db-writes.ts:42-75`, `apps/web/src/app/actions/public.ts:436-525`, `apps/web/src/lib/clip-model.ts:200-229`, `apps/web/src/__tests__/clip-offline-load.test.ts:23-65`
+- Summary: admitted analytics writes can be dropped at queue capacity by design; real CLIP model activation remains opt-in/manual and carries native teardown flake risk.
+- Disposition: deferred/manual validation.
 
-- Severity: Low
-- Confidence: Low
-- Sources: `tracer` TR-5, `debugger` final sweep
-- Files: `apps/web/src/app/actions/images.ts:707-756`, `apps/web/src/app/actions/images.ts:825-923`, `apps/web/src/lib/image-queue.ts:378-480`
-- Problem: delete cancels queue state before subsequent DB/file deletion work completes.
-- Failure scenario: if deletion fails after queue state clears, an image can remain in DB without the previous queued/processing state.
-- Suggested fix: add logging or a focused regression test documenting that this partial state is intentional and recoverable.
+### AGG-C6-19 - UI performance, data-backed browser, and future RTL evidence gaps remain
 
-### C5-18 - `ProcessingQueueState` remains too broad
+- Severity/confidence: Low to Medium / Medium-High
+- Status: manual validation
+- Sources: `DES-C6-M1`, `DES-C6-M2`, `DES-C6-M3`
+- Citations: `apps/web/src/app/[locale]/layout.tsx:103-109`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/masonry-card.tsx`, `apps/web/src/components/photo-viewer.tsx`
+- Summary: local DB outage prevented live data-backed UI review; Web Vitals and future RTL layout need representative validation.
+- Disposition: deferred/manual validation.
 
-- Severity: Low-Medium
-- Confidence: Medium
-- Sources: `architect` ARCH-C5-02
-- Files: `apps/web/src/lib/image-queue.ts:317-433`
-- Problem: queue work, retry maps, permanent failure diagnostics, bootstrap cursors/timers, shutdown, maintenance interval, embedding scan state, and retry timers share one global mutable object.
-- Failure scenario: future state additions can miss hot-reload backfill, malformed-state replacement, shutdown, or retry paths.
-- Suggested fix: incrementally split sub-objects with explicit initializer/backfill/reset owners, starting with maintenance and embedding scan state.
+## Prompt 2 Handoff
 
-### C5-19 - Public PWA docs overstate visited-image caching for CDN deployments
-
-- Severity: Medium docs/product issue
-- Confidence: High
-- Sources: `document-specialist` DOC-C5-01, `product-marketer-reviewer` PM-C5-01, `architect` ARCH-C5-M01
-- Files: `README.md:43`, `README.md:146-163`, `apps/web/README.md:49-51`, `CLAUDE.md:427-434`, `apps/web/public/sw.template.js:323-334`
-- Problem: README copy says visited image caching while `IMAGE_BASE_URL` can move derivatives to a cross-origin CDN that the SW intentionally does not cache.
-- Failure scenario: an operator enables CDN derivatives and expects visited-photo offline resilience that does not exist.
-- Suggested fix: update public docs to say visited-image caching applies to same-origin derivative responses; CDN-origin derivatives are network-only unless proxied same-origin.
-
-### C5-20 - Smart collections are public/action-real but not admin-operable
-
-- Severity: Medium product/UX issue
-- Confidence: High
-- Sources: `document-specialist` DOC-C5-02, `designer` DES-C5-M03, `ui-ux-designer-reviewer` UXR-C5-01, `product-marketer-reviewer` PM-C5-02
-- Files: `CLAUDE.md:162`, `apps/web/src/app/actions/collections.ts:16-150`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-164`, `apps/web/src/components/admin-nav.tsx:15-25`
-- Problem: smart-collection actions and public rendering exist, but no admin UI or nav exposes safe authoring.
-- Failure scenario: contributors/operators infer a shipped admin feature and resort to direct DB writes or product copy overclaims.
-- Suggested fix: either ship an admin Collections workflow or keep authoring clearly internal and avoid marketing/admin-doc claims.
-
-### C5-21 - Search shortcut copy may mislead non-Mac users
-
-- Severity: Low
-- Confidence: Medium
-- Sources: `designer` DES-C5-01, `ui-ux-designer-reviewer` UXR-C5-02
-- Files: `apps/web/src/components/search.tsx:138-142`, `apps/web/src/components/search.tsx:516-522`, `apps/web/e2e/public.spec.ts:21-59`
-- Problem: shortcut hint defaults toward Mac when `navigator` is unavailable; tests do not assert non-Mac footer copy.
-- Failure scenario: Windows/Linux users see `⌘K` instead of `Ctrl+K`.
-- Suggested fix: use neutral `Ctrl/Command K` copy or mount-time platform detection with non-Mac e2e coverage.
-
-### C5-22 - Live Core Web Vitals were not measured
-
-- Severity: Medium manual-validation risk
-- Confidence: Medium
-- Sources: `designer` DES-C5-M01, `ui-ux-designer-reviewer` UXR-C5-M02, `product-marketer-reviewer` PM-C5-M01
-- Files: public home/topic/photo/share flows and mobile admin routes
-- Problem: source/tests cover many behavior invariants, but no LCP/CLS/INP capture was run in this review lane.
-- Failure scenario: photo-heavy pages can regress perceived performance while unit/e2e behavior tests remain green.
-- Suggested fix: run browser performance traces on representative data before external launch or after performance-sensitive changes.
-
-### C5-23 - Future RTL locale support is structural but not product-ready
-
-- Severity: Low manual-validation risk
-- Confidence: Medium
-- Sources: `designer` DES-C5-M02
-- Files: `apps/web/src/app/[locale]/layout.tsx:103-109`, `apps/web/src/lib/locale-path.ts:37-40`
-- Problem: `dir` support exists, but shipped locales are English/Korean and no RTL rendering tests exist.
-- Failure scenario: adding an RTL locale can expose directional spacing, icon, focus, and layout issues.
-- Suggested fix: run a targeted RTL design/test pass before adding an RTL locale.
-
-### C5-24 - Proxy trust and edge limiter behavior require deployment validation
-
-- Severity: Medium manual-validation risk
-- Confidence: Medium
-- Sources: `security-reviewer` SR-M02, `security-reviewer` SR-M03, `architect` ARCH-C5-M02
-- Files: `apps/web/src/lib/request-origin.ts:45-107`, `apps/web/src/lib/rate-limit.ts:78-205`, `apps/web/docker-compose.yml:15-23`, `apps/web/nginx/default.conf`, `CLAUDE.md` deploy/nginx sections
-- Problem: origin reconstruction, rate-limit attribution, and edge limiter claims depend on real proxy/header/nginx topology.
-- Failure scenario: untrusted forwarded headers or horizontal scale can multiply/defeat per-IP budgets or origin assumptions.
-- Suggested fix: keep single-instance/trusted-proxy assumptions explicit and capture spoofed-header plus nginx limiter smoke evidence when deployment topology changes.
-
-### C5-25 - Plaintext DB backups rely on host/file permissions
-
-- Severity: Medium manual-validation risk
-- Confidence: Medium
-- Sources: `security-reviewer` SR-M04
-- Files: `apps/web/src/app/[locale]/admin/db-actions.ts:196-353`
-- Problem: backups are mode-restricted but plaintext at rest.
-- Failure scenario: host account, bind mount, disk, or off-host backup compromise exposes backup contents.
-- Suggested fix: validate host volume permissions and encrypt/access-control off-host copies.
-
-## New Findings Count
-
-Deduped findings produced this cycle: 25.
+Schedule AGG-C6-01 through AGG-C6-08 for this cycle because they are correctness, security, operator-template, product-contract, or high-impact user-facing defects that are narrow enough to fix now. Record AGG-C6-09 through AGG-C6-19 in the plan directory as deferred/manual work with original severity/confidence and exit criteria.
