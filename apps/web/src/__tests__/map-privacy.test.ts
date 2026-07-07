@@ -91,7 +91,7 @@ describe('getMapImages topic-filtering predicate (unit)', () => {
         expect(getMapImagesSource).toContain('eq(topics.map_visible, true)');
         expect(getMapImagesSource).toContain('isNotNull(images.latitude)');
         expect(getMapImagesSource).toContain('isNotNull(images.longitude)');
-        expect(getMapImagesSource).toContain('.limit(MAP_MAX_MARKERS)');
+        expect(getMapImagesSource).toContain('.limit(MAP_MAX_MARKERS + 1)');
     });
 
     it('production query keeps the runtime GPS leak guard', () => {

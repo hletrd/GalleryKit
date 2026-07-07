@@ -95,6 +95,7 @@ vi.mock('@/db', () => ({
 }));
 
 import { loadMoreImages, recordPhotoView, recordSharedGroupView, recordTopicView, searchImagesAction } from '@/app/actions/public';
+import { drainBackgroundDbWritesForRestore } from '@/lib/background-db-writes';
 
 describe('searchImagesAction', () => {
     beforeEach(() => {
@@ -242,6 +243,7 @@ describe('searchImagesAction', () => {
         await recordPhotoView(7);
         await recordTopicView('seoul');
         await recordSharedGroupView(11, '23456789AB');
+        await drainBackgroundDbWritesForRestore();
 
         expect(incrementRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'view_record', 60_000, 1_700_000_000);
         expect(checkRateLimitMock).toHaveBeenCalledWith('203.0.113.42', 'view_record', 120, 60_000, 1_700_000_000);
@@ -263,6 +265,7 @@ describe('searchImagesAction', () => {
         await recordPhotoView(7);
         await recordTopicView('seoul');
         await recordSharedGroupView(11, '23456789AB');
+        await drainBackgroundDbWritesForRestore();
 
         expect(dbSelectMock).toHaveBeenCalledTimes(3);
         expect(headersMock).toHaveBeenCalledTimes(3);
@@ -278,6 +281,7 @@ describe('searchImagesAction', () => {
         });
 
         await recordSharedGroupView(11, '23456789AB');
+        await drainBackgroundDbWritesForRestore();
 
         expect(dbSelectMock).toHaveBeenCalledOnce();
         expect(dbInsertMock).not.toHaveBeenCalled();
@@ -317,6 +321,7 @@ describe('searchImagesAction', () => {
         ));
 
         await recordPhotoView(999);
+        await drainBackgroundDbWritesForRestore();
 
         expect(dbInsertMock).not.toHaveBeenCalled();
         expect(dbSelectMock).not.toHaveBeenCalled();
@@ -327,8 +332,14 @@ describe('searchImagesAction', () => {
     it('skips public analytics writes when restore maintenance begins after target validation', async () => {
         isRestoreMaintenanceActiveMock
             .mockReturnValueOnce(false)
-            .mockReturnValueOnce(true)
             .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(false)
+            .mockReturnValueOnce(true)
             .mockReturnValueOnce(true)
             .mockReturnValueOnce(false)
             .mockReturnValueOnce(true);
@@ -336,6 +347,7 @@ describe('searchImagesAction', () => {
         await recordPhotoView(7);
         await recordTopicView('seoul');
         await recordSharedGroupView(11, '23456789AB');
+        await drainBackgroundDbWritesForRestore();
 
         expect(dbSelectMock).toHaveBeenCalledTimes(3);
         expect(dbInsertMock).not.toHaveBeenCalled();
@@ -350,6 +362,7 @@ describe('searchImagesAction', () => {
         await expect(recordPhotoView(7)).resolves.toBeUndefined();
         await expect(recordTopicView('seoul')).resolves.toBeUndefined();
         await expect(recordSharedGroupView(11, '23456789AB')).resolves.toBeUndefined();
+        await drainBackgroundDbWritesForRestore();
 
         expect(dbInsertMock).not.toHaveBeenCalled();
         expect(warnSpy).toHaveBeenCalledTimes(3);

@@ -203,6 +203,23 @@ describe('serveUploadFile', () => {
         await expect(reader.cancel('client aborted')).resolves.toBeUndefined();
     });
 
+    it('removes the abort listener after a successful streamed response', async () => {
+        const jpegPath = path.join(uploadRoot, 'jpeg', 'listener.jpg');
+        await fsp.writeFile(jpegPath, 'listener-data');
+
+        const { serveUploadFile } = await import('@/lib/serve-upload');
+        const controller = new AbortController();
+        const addSpy = vi.spyOn(controller.signal, 'addEventListener');
+        const removeSpy = vi.spyOn(controller.signal, 'removeEventListener');
+
+        const response = await serveUploadFile(['jpeg', 'listener.jpg'], null, 'GET', controller.signal);
+        expect(response.status).toBe(200);
+        await expect(response.text()).resolves.toBe('listener-data');
+
+        expect(addSpy).toHaveBeenCalledWith('abort', expect.any(Function), { once: true });
+        expect(removeSpy).toHaveBeenCalledWith('abort', expect.any(Function));
+    });
+
     it('rejects extension/directory mismatches', async () => {
         const { serveUploadFile } = await import('@/lib/serve-upload');
 

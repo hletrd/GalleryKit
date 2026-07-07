@@ -71,6 +71,8 @@ GalleryKit ships a fully self-hosted, multilingual **natural-language photo sear
 - **Scan scope:** searches the newest embeddings first (bounded scan); large galleries may not surface relevant older photos unless they are re-uploaded or re-embedded after a backfill.
 - **Public route posture:** same-origin guard on the query endpoints plus bounded per-IP rate limiting. The semantic/similar limiter is process-local; use the shipped reverse-proxy limits or an edge limiter for stronger cross-restart abuse resistance.
 
+Activation requires all three conditions: model files present under `CLIP_MODELS_ROOT`, matching `image_embeddings.model_version` rows from a production backfill, and `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in the running container environment. Changing only the database setting is not enough; the resolver heals unauthorized `production` mode back to `disabled`.
+
 ### Going live (operator-only, deliberate)
 
 The resolver heals a stored `semantic_search_mode='production'` back to `disabled` **unless** the env opt-in is set — there is intentionally no one-click production toggle in the admin UI (it offers only Disabled/Stub). To activate:

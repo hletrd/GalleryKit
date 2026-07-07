@@ -2,6 +2,8 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { Nav } from '@/components/nav';
 import { Footer } from '@/components/footer';
+import { NotFoundDocumentTitle } from '@/components/not-found-document-title';
+import { getSeoSettings } from '@/lib/data';
 import { localizePath } from '@/lib/locale-path';
 
 // F-4 / F-22: this not-found surface previously rendered as a stripped page
@@ -10,13 +12,16 @@ import { localizePath } from '@/lib/locale-path';
 // reproduces the public layout shell so users can navigate to topics,
 // search, switch locale, etc., even from a dead-end URL.
 export default async function NotFound() {
-  const [t, locale] = await Promise.all([
+  const [t, locale, seo] = await Promise.all([
     getTranslations('notFound'),
     getLocale(),
+    getSeoSettings(),
   ]);
+  const pageTitle = `${t('title')} | ${seo.title}`;
 
   return (
     <>
+      <NotFoundDocumentTitle title={pageTitle} />
       <Nav />
       <main
         id="main-content"

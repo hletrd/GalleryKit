@@ -39,7 +39,7 @@ export default async function MapPage() {
     // PERF-R4C15-02: getGalleryConfig is React cache()-wrapped, so this
     // costs nothing extra in a request where Nav already resolved it; the
     // configured image_sizes drive sized popup thumbnails in MapClient.
-    const [t, locale, mapImages, config] = await Promise.all([
+    const [t, locale, mapResult, config] = await Promise.all([
         getTranslations('map'),
         getLocale(),
         getMapImages(),
@@ -48,7 +48,7 @@ export default async function MapPage() {
     const tPhoto = await getTranslations('photo');
 
     // Only pass images that have non-null lat/lng (type-narrowed for the client).
-    const markers = mapImages
+    const markers = mapResult.images
         .filter((img): img is typeof img & { latitude: number; longitude: number } =>
             img.latitude !== null && img.longitude !== null
         )
@@ -72,6 +72,11 @@ export default async function MapPage() {
                 <p className="text-muted-foreground">{t('noPhotos')}</p>
             ) : (
                 <>
+                    {mapResult.truncated && (
+                        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-100">
+                            {t('truncatedNotice', { count: markers.length })}
+                        </p>
+                    )}
                     <a
                         href="#map-photo-list"
                         className="sr-only focus-visible:not-sr-only focus-visible:mb-3 focus-visible:inline-flex focus-visible:min-h-11 focus-visible:items-center focus-visible:rounded-md focus-visible:bg-primary focus-visible:px-4 focus-visible:py-2 focus-visible:text-sm focus-visible:font-medium focus-visible:text-primary-foreground"

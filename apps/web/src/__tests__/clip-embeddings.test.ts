@@ -232,6 +232,26 @@ describe('topK', () => {
         expect(results).toHaveLength(3);
     });
 
+    it('keeps only bounded winners when high scores arrive late', () => {
+        const matches = [
+            { imageId: 1, score: 0.21 },
+            { imageId: 2, score: 0.22 },
+            { imageId: 3, score: 0.23 },
+            { imageId: 4, score: 0.99 },
+            { imageId: 5, score: 0.98 },
+        ];
+
+        expect(topK(matches, 2, 0.2)).toEqual([
+            { imageId: 4, score: 0.99 },
+            { imageId: 5, score: 0.98 },
+        ]);
+    });
+
+    it('returns empty for non-positive K', () => {
+        expect(topK([{ imageId: 1, score: 1 }], 0, 0)).toEqual([]);
+        expect(topK([{ imageId: 1, score: 1 }], -1, 0)).toEqual([]);
+    });
+
     it('does not mutate the input array', () => {
         const matches = [
             { imageId: 2, score: 0.5 },

@@ -438,6 +438,7 @@
     "similarError": "갤러리가 추천을 준비하는 동안 비슷한 사진을 잠시 사용할 수 없습니다."
   },
   "notFound": {
+    "title": "페이지를 찾을 수 없습니다",
     "description": "페이지를 찾을 수 없습니다.",
     "backHome": "갤러리로 돌아가기"
   },
@@ -502,6 +503,7 @@
     "invalidTitle": "잘못된 제목입니다",
     "invalidDescription": "잘못된 설명입니다",
     "cannotDeleteCategoryWithImages": "이미지가 포함된 카테고리는 삭제할 수 없습니다. 이미지를 먼저 삭제하세요.",
+    "cannotDeleteCategoryReferencedByCollection": "이 카테고리를 참조하는 스마트 컬렉션을 먼저 수정해 주세요.",
     "failedToDeleteTopic": "카테고리 삭제에 실패했습니다.",
     "invalidTopicSlug": "잘못된 카테고리 슬러그입니다",
     "invalidAliasFormat": "별칭 형식이 올바르지 않습니다.",
@@ -813,9 +815,20 @@
     "backfillLastRunError": "마지막 오류: {error}"
   },
   "footer": {
+    "about": "GalleryKit",
     "admin": "관리자",
     "privacy": "개인정보",
     "opensInNewWindow": "새 창에서 열림"
+  },
+  "aboutGalleryKit": {
+    "title": "GalleryKit",
+    "description": "GalleryKit은 완성된 사진을 게시하기 위한 직접 호스팅 갤러리입니다. 원본은 비공개로 보관하고, 공개 파생 이미지를 제공하며, 색상 전달과 검색 기능을 운영자가 통제합니다.",
+    "forTitle": "무엇을 위한 도구인가",
+    "forBody": "GalleryKit은 편집이 끝난 사진을 공개하고, 카테고리와 공유 링크로 정리하며, 원본을 공개 웹에서 분리하고, 자체 인프라 안에서 1차 분석 데이터를 보관하기 위한 도구입니다.",
+    "operatorTitle": "운영자가 통제하는 기능",
+    "operatorBody": "의미 기반 검색, 비슷한 사진, 외부 업로드 토큰, 백업, 배포 시점 설정은 운영자가 의도적으로 수행하는 작업입니다. 프로덕션 의미 검색은 로컬 모델 가중치, 임베딩 백필, 명시적인 환경 변수 opt-in이 있어야 실제 결과를 제공합니다.",
+    "notForTitle": "무엇을 위한 도구가 아닌가",
+    "notForBody": "GalleryKit은 편집기, 셀렉션 도구, 점수 매기기 도구, 프루핑 포털, 결제 시스템, 호스팅 SaaS 워크플로, 번들 Lightroom Classic 플러그인이 아닙니다."
   },
   "privacy": {
     "title": "개인정보",
@@ -848,7 +861,8 @@
     "skipToPhotoList": "지도를 건너뛰고 사진 목록으로 이동",
     "mapRegionLabel": "사진 지도",
     "mapInstructions": "마커를 선택해 위치 정보가 있는 사진을 미리 보고, 팝업 버튼으로 사진을 열거나 아래의 접근 가능한 사진 목록으로 이동하세요.",
-    "photoListLabel": "위치 정보가 있는 사진 목록"
+    "photoListLabel": "위치 정보가 있는 사진 목록",
+    "truncatedNotice": "위치가 표시된 최신 사진 {count}장만 보여 줍니다. 더 오래된 위치 표시 사진은 표시되지 않습니다."
   },
   "timeline": {
     "title": "타임라인",

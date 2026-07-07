@@ -211,10 +211,23 @@ export interface ScoredMatch {
  * Input array is not mutated. Returns results sorted by descending score.
  */
 export function topK(matches: ScoredMatch[], k: number, threshold: number): ScoredMatch[] {
-    return matches
-        .filter(m => m.score >= threshold)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, k);
+    if (k <= 0) return [];
+
+    const winners: ScoredMatch[] = [];
+    for (const match of matches) {
+        if (match.score < threshold) continue;
+
+        let insertAt = winners.length;
+        while (insertAt > 0 && winners[insertAt - 1].score < match.score) {
+            insertAt--;
+        }
+
+        if (insertAt >= k) continue;
+        winners.splice(insertAt, 0, match);
+        if (winners.length > k) winners.pop();
+    }
+
+    return winners;
 }
 
 // Real production encoder identity (set in this cycle). Stays <= 32 chars for the

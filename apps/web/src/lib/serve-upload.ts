@@ -347,16 +347,19 @@ export async function serveUploadFile(
         // destroys the fd if the runtime aborts the request without cancelling
         // the body stream. destroy() is idempotent, so a double-fire is safe.
         const streamForCleanup = fileStream;
+        const removeAbortListener = signal
+            ? (() => signal.removeEventListener('abort', abortHandler))
+            : () => {};
+        function abortHandler() {
+            if (!streamForCleanup.destroyed) {
+                streamForCleanup.destroy();
+            }
+        }
         if (signal) {
-            signal.addEventListener(
-                'abort',
-                () => {
-                    if (!streamForCleanup.destroyed) {
-                        streamForCleanup.destroy();
-                    }
-                },
-                { once: true },
-            );
+            streamForCleanup.once('close', removeAbortListener);
+            streamForCleanup.once('end', removeAbortListener);
+            streamForCleanup.once('error', removeAbortListener);
+            signal.addEventListener('abort', abortHandler, { once: true });
         }
 
         const webStream = Readable.toWeb(fileStream) as ReadableStream;

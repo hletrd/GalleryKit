@@ -549,6 +549,17 @@ export function remapTopicSlugInQuery(
     return { ast, changed: false };
 }
 
+export function queryReferencesTopicSlug(ast: SmartCollectionQuery, slug: string): boolean {
+    if (ast.type === 'and' || ast.type === 'or') {
+        return ast.children.some((child) => queryReferencesTopicSlug(child, slug));
+    }
+
+    if (ast.type !== 'predicate' || ast.column !== 'topic') return false;
+    if (ast.operator === 'eq') return ast.value === slug;
+    if (ast.operator === 'in' && Array.isArray(ast.values)) return ast.values.includes(slug);
+    return false;
+}
+
 // ── DB helpers (with I/O — not pure, kept separate from compiler) ─────────────
 
 export type SmartCollectionRow = {

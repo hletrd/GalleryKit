@@ -18,6 +18,9 @@ class TopicRouteLockTimeoutError extends Error {
 class TopicHasImagesError extends Error {
     constructor() { super('Topic still has associated images'); this.name = 'TopicHasImagesError'; }
 }
+class TopicReferencedBySmartCollectionError extends Error {
+    constructor() { super('Topic is referenced by smart collections'); this.name = 'TopicReferencedBySmartCollectionError'; }
+}
 
 import { connection, db, images, topics, topicAliases, topicViews, smartCollections } from '@/db';
 import { eq, and, sql } from 'drizzle-orm';
@@ -28,7 +31,7 @@ import { revalidateAllAppData } from '@/lib/revalidation';
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
 import { isReservedTopicRouteSegment, isValidSlug, isValidTopicAlias, isMySQLError, hasMySQLErrorCode } from '@/lib/validation';
 import { logAuditEvent } from '@/lib/audit';
-import { parseSmartCollectionQuery, remapTopicSlugInQuery } from '@/lib/smart-collections';
+import { parseSmartCollectionQuery, queryReferencesTopicSlug, remapTopicSlugInQuery } from '@/lib/smart-collections';
 import { requireCleanInput, sanitizeAdminString } from '@/lib/sanitize';
 import { countCodePoints } from '@/lib/utils';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
@@ -455,6 +458,25 @@ export async function deleteTopic(slug: string) {
                 if (headerImages.length > 0) {
                     throw new TopicHasImagesError();
                 }
+                const smartCollectionRows = await tx.select({
+                    id: smartCollections.id,
+                    query_json: smartCollections.query_json,
+                }).from(smartCollections);
+                for (const collection of smartCollectionRows) {
+                    if (typeof collection.query_json !== 'string') continue;
+                    try {
+                        const ast = parseSmartCollectionQuery(collection.query_json);
+                        if (queryReferencesTopicSlug(ast, cleanSlug)) {
+                            throw new TopicReferencedBySmartCollectionError();
+                        }
+                    } catch (err) {
+                        if (err instanceof TopicReferencedBySmartCollectionError) throw err;
+                        console.warn(
+                            `[deleteTopic] smart_collection ${collection.id} has unparseable query_json — skipping topic-reference delete guard`,
+                            err,
+                        );
+                    }
+                }
                 const [topicRecord] = await tx.select({ image_filename: topics.image_filename }).from(topics).where(eq(topics.slug, cleanSlug)).limit(1);
                 deletedImageFilename = topicRecord?.image_filename ?? null;
                 const [delResult] = await tx.delete(topics).where(eq(topics.slug, cleanSlug));
@@ -486,6 +508,9 @@ export async function deleteTopic(slug: string) {
     } catch (e) {
          if (e instanceof TopicHasImagesError) {
              return { error: t('cannotDeleteCategoryWithImages') };
+         }
+         if (e instanceof TopicReferencedBySmartCollectionError) {
+             return { error: t('cannotDeleteCategoryReferencedByCollection') };
          }
          if (hasMySQLErrorCode(e, 'ER_ROW_IS_REFERENCED_2')) {
              return { error: t('cannotDeleteCategoryWithImages') };

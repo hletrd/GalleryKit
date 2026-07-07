@@ -599,7 +599,9 @@ CLIP_INTEGRATION=1 CLIP_MODELS_ROOT=<abs-models-root> npx vitest run src/__tests
 for semantic search — the maximum number of embedding rows the route will read from the
 DB per query. `SEMANTIC_TOP_K_MAX` (default 50) is the hard ceiling on results returned
 to the client; the admin UI default is 20. Both limits prevent unbounded CPU/DB consumption
-on expensive natural-language queries.
+on expensive natural-language queries. The route still performs a bounded scan rather than
+using a vector index, but top-K selection keeps only the current winner set instead of sorting
+every candidate above threshold.
 
 **Why the binary is already present without extra Dockerfile steps:** `onnxruntime-node` (the CPU inference engine used by `@huggingface/transformers`) bundles its native `.node` binding for all platforms — including `linux/arm64` and `linux/x64` — **directly inside the npm package tarball** (`bin/napi-v3/linux/{arm64,x64}/onnxruntime_binding.node`). Its `postinstall` script only downloads CUDA `.so` files, which are not needed for CPU inference. Since `onnxruntime-node` is a non-dev, non-optional transitive production dependency (via `@huggingface/transformers → onnxruntime-node`), it is installed by `npm ci --omit=dev` in the `prod-deps` stage without any `--include=optional` or explicit extra install step. No Dockerfile change is required to make the CPU binding available at runtime.
 

@@ -31,6 +31,12 @@ GalleryKit is built for photographers and trusted owner/operator teams who want 
 **For:** finished-photo publishing, private original storage, self-hosted sharing, browser-managed color-faithful delivery, and operator-controlled search.  
 **Not for:** editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
 
+## Product shape
+
+- **Visitor experience:** fast public galleries, localized photo pages, map/timeline browsing, per-photo or shared-album links, and optional semantic search once an operator has activated it.
+- **Admin experience:** upload finished photos, edit public metadata, manage categories/tags/share links, review color/GPS handling, and run backups/restores from a trusted admin session.
+- **Operator experience:** deploy with Docker, manage host storage and MySQL, seed CLIP model weights when semantic search is wanted, run embedding/color backfills deliberately, and keep production secrets in env files outside git.
+
 ## Features
 
 - **Masonry Grid Layout** -- responsive, column-balanced photo grid with infinite scroll
@@ -39,7 +45,7 @@ GalleryKit is built for photographers and trusted owner/operator teams who want 
 - **Categories & Sharing** -- organize photos into categories with slug aliases and publish per-photo or group share links with Base56 short keys
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin). Review GPS stripping before the first upload; once any photo exists, the setting is locked because changing it later would not rewrite already stored originals.
 - **Tagging & Search** -- keyword metadata search across titles, descriptions, cameras, and tags
-- **Semantic Search (AI, self-hosted, operator-runbook)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; production mode is not enabled from the Settings UI** and requires operator setup (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. A production deployment may enable it after the runbook checks; fresh installs do not.
+- **Semantic Search (AI, self-hosted, operator-runbook)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; production mode is not enabled from the Settings UI** and requires operator setup (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index, so very large galleries require repeated backfills or future index work for complete old-photo recall. A production deployment may enable it after the runbook checks; fresh installs do not.
 - **Progressive Web App** -- installable PWA with same-origin visited image caching and an offline HTML fallback; it is not a full offline gallery sync
 - **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, PAT-authenticated upload API for external clients (no Lightroom Classic plugin is bundled), multiple root-admin accounts for trusted co-admins (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
 

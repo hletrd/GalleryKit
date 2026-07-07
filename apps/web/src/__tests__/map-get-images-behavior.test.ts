@@ -98,7 +98,7 @@ describe('getMapImages behavior', () => {
         };
         const { getMapImages, select, innerJoin, where, limit } = await loadGetMapImages([row]);
 
-        await expect(getMapImages()).resolves.toEqual([row]);
+        await expect(getMapImages()).resolves.toEqual({ images: [row], truncated: false });
 
         expect(select).toHaveBeenCalledOnce();
         expect(innerJoin).toHaveBeenCalledOnce();
@@ -113,7 +113,7 @@ describe('getMapImages behavior', () => {
                 { op: 'isNotNull', args: ['images.longitude'] },
             ],
         });
-        expect(limit).toHaveBeenCalledWith(10000);
+        expect(limit).toHaveBeenCalledWith(10001);
     });
 
     it('throws before returning a GPS row if the DB violates map visibility', async () => {
@@ -127,5 +127,20 @@ describe('getMapImages behavior', () => {
         ]);
 
         await expect(getMapImages()).rejects.toThrow(/GPS leak guard: image 321/);
+    });
+
+    it('returns a truncation flag when the sentinel marker row is present', async () => {
+        const rows = Array.from({ length: 10001 }, (_, index) => ({
+            id: index + 1,
+            latitude: 37.5,
+            longitude: 127.0,
+            topic_map_visible: true,
+        }));
+        const { getMapImages } = await loadGetMapImages(rows);
+
+        const result = await getMapImages();
+        expect(result.images).toHaveLength(10000);
+        expect(result.images.at(-1)?.id).toBe(10000);
+        expect(result.truncated).toBe(true);
     });
 });

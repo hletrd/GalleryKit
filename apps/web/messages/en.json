@@ -438,6 +438,7 @@
     "similarError": "Similar photos are temporarily unavailable while the gallery finishes preparing recommendations."
   },
   "notFound": {
+    "title": "Page not found",
     "description": "Page not found.",
     "backHome": "Back to gallery"
   },
@@ -502,6 +503,7 @@
     "invalidTitle": "Invalid title",
     "invalidDescription": "Invalid description",
     "cannotDeleteCategoryWithImages": "Remove photos from this category first.",
+    "cannotDeleteCategoryReferencedByCollection": "Remove this category from smart collections before deleting it.",
     "failedToDeleteTopic": "Could not delete category.",
     "invalidTopicSlug": "Invalid category slug",
     "invalidAliasFormat": "Invalid alias format.",
@@ -813,9 +815,20 @@
     "backfillLastRunError": "Last error: {error}"
   },
   "footer": {
+    "about": "GalleryKit",
     "admin": "Admin",
     "privacy": "Privacy",
     "opensInNewWindow": "opens in a new window"
+  },
+  "aboutGalleryKit": {
+    "title": "GalleryKit",
+    "description": "GalleryKit is a self-hosted gallery for publishing finished photography with private originals, processed public derivatives, color-aware delivery, and operator-controlled search.",
+    "forTitle": "What it is for",
+    "forBody": "Use GalleryKit to publish edited photo work, organize it into categories and share links, keep originals off the public web, and keep first-party analytics on infrastructure you control.",
+    "operatorTitle": "Operator-controlled features",
+    "operatorBody": "Semantic search, similar photos, external upload tokens, backups, and deploy-time settings are deliberate operator workflows. Production semantic search requires local model weights, an embedding backfill, and an explicit environment opt-in before it serves real results.",
+    "notForTitle": "What it is not for",
+    "notForBody": "GalleryKit is not an editor, culling station, scoring tool, proofing portal, payment system, hosted SaaS workflow, or bundled Lightroom Classic plugin."
   },
   "privacy": {
     "title": "Privacy",
@@ -848,7 +861,8 @@
     "skipToPhotoList": "Skip map to photo list",
     "mapRegionLabel": "Photo map",
     "mapInstructions": "Select a marker to preview a geotagged photo, then use the popup button to open it, or skip to the accessible photo list below.",
-    "photoListLabel": "Geotagged photo list"
+    "photoListLabel": "Geotagged photo list",
+    "truncatedNotice": "Showing the newest {count} mapped photos. Older mapped photos are not displayed."
   },
   "lrToken": {
     "title": "Upload API Tokens",

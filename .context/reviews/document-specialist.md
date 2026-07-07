@@ -1,94 +1,63 @@
-# GalleryKit Document Specialist Review - Cycle 6 Prompt 1
+# Document Specialist Review - Cycle 7 Lane E
 
-Date: 2026-07-07
-Lane: document-specialist
-Mode: read-only documentation/source review, except this artifact.
+Reviewer: document-specialist. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `cae5fbd9`.
+Mode: read-only documentation/source review, except this requested review artifact.
 
 ## Inventory
 
-Authoritative docs examined:
+I inventoried documentation and matched it against the code paths that implement the documented behavior:
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `README.md`
-- `apps/web/README.md`
-- `.context/plans/README.md`
-- `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
-- `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
+- Canonical guidance: `AGENTS.md`, `CLAUDE.md`.
+- User/operator docs: `README.md`, `apps/web/README.md`.
+- Package scripts and gates: root `package.json`, `apps/web/package.json`.
+- Deploy/runbooks: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, deploy contract tests.
+- Schema/runbook implementation: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration source-contract tests.
+- Semantic-search docs and implementation: `CLAUDE.md` CLIP runbook, `apps/web/README.md` semantic-search section, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/gallery-config.ts`, `apps/web/src/lib/clip-*`, `apps/web/src/lib/image-queue.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, semantic route/action/components/settings files.
+- Product boundary docs: storage abstraction notes, privacy/data omit guards, upload/serve paths, public route policies, removed payment/download claims, and Lightroom API docs.
 
-Implementation/config surfaces checked against those docs:
+Validation run during review:
 
-- Root/app package scripts: `package.json`, `apps/web/package.json`
-- Deploy path: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/nginx/default.conf`, `apps/web/scripts/entrypoint.sh`, `apps/web/.env.local.example`
-- Build/config path: `apps/web/next.config.ts`, `apps/web/scripts/ensure-site-config.mjs`, `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`
-- SEO/site config code: `apps/web/src/lib/data.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/app/actions/seo.ts`, `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/components/nav.tsx`, `apps/web/src/components/nav-client.tsx`, `apps/web/src/components/footer.tsx`
-- Schema/migration gates: `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration journal tests
-- Quality gates/source contracts: `apps/web/src/__tests__/deploy-script-contract.test.ts`, `migration-journal*.test.ts`, `check-*` lint-gate tests, recent `cycle-*-source-contracts.test.ts`
-- Upload/API contract: `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/admin-tokens.ts`
+- `npm run lint:api-auth --workspace=apps/web` - pass.
+- `npm run lint:action-origin --workspace=apps/web` - pass.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - pass.
+- `npm test --workspace=apps/web -- --run src/__tests__/storage-quarantine.test.ts src/__tests__/gallery-config-semantic-production.test.ts src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts` - pass, 39 tests.
+- `npm test --workspace=apps/web -- --run src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-pending-migrations.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/deploy-script-contract.test.ts` - pass, 129 tests.
 
-No external official docs were needed for the confirmed findings below; they are repo-internal documentation/code ownership mismatches. I did not run build/test gates because this was a read-only review request and the evidence is static source/docs.
+## Findings
 
-## Confirmed Findings
+### DOC-E-01 - Semantic-search docs understate the single-row embedding overwrite limitation
 
-### DOC-C6-01 - `CLAUDE.md` says SEO locale is not DB-overridable, but the admin SEO path persists and serves it
-
-Severity: Low
-Confidence: High
+- Severity: Medium
+- Confidence: High
+- Status: confirmed from code/docs; production-weight behavior was not manually exercised
+- Documentation angle: the docs describe version-filtered serving but do not make the write-time retention limit clear enough for operators planning model rollout, rollback, or upgrades.
 
 Evidence:
 
-- `CLAUDE.md:148` says fields not DB-overridable include `locale`.
-- `README.md:52` correctly says admin-editable SEO/branding fields include `locale` and override file defaults at runtime.
-- `apps/web/src/lib/gallery-config-shared.ts:89-96` includes `seo_locale` in `SEO_SETTING_KEYS`.
-- `apps/web/src/app/actions/seo.ts:41-46` reads `seo_locale` for the admin SEO page, and `apps/web/src/app/actions/seo.ts:123-128` validates it before persistence.
-- `apps/web/src/lib/data.ts:1814-1835` reads `admin_settings` and returns `locale: settingsMap.get('seo_locale') || siteConfig.locale`.
-- `apps/web/src/app/[locale]/layout.tsx:17-20` passes `seo.locale` into OpenGraph locale resolution.
+- `apps/web/README.md:64-72` documents disabled/stub/production semantic search and says production serves only rows matching the active `model_version`.
+- `CLAUDE.md:527-602` is the CLIP activation and weight-seeding runbook. `CLAUDE.md:570-574` says forced production backfill and in-app scans converge, and that a race at worst duplicates one image's inference.
+- The storage contract is single-row per image: `apps/web/drizzle/0012_image_embeddings.sql:5-11` has `PRIMARY KEY (image_id)`, and `apps/web/src/db/schema.ts:286-300` keeps `imageId` as the primary key.
+- Both writers replace the row in place: `apps/web/scripts/backfill-clip-embeddings.ts:25-42` documents replacement for a new model version, `apps/web/scripts/backfill-clip-embeddings.ts:212-223` performs the duplicate-key update, and `apps/web/src/app/actions/embeddings.ts:175-186` does the same from the app worker path.
+- Both readers are model-version filtered: `apps/web/src/app/api/search/semantic/route.ts:270-279`; `apps/web/src/app/api/search/similar/[id]/route.ts:140-148` and `apps/web/src/app/api/search/similar/[id]/route.ts:181-190`.
 
 Failure scenario:
 
-An operator or future maintainer follows `CLAUDE.md:148`, assumes locale changes require editing `site-config.json` plus an image rebuild, and misses the live admin SEO override path. That can leave OpenGraph locale metadata stale or lead to unnecessary rebuild/deploy work when a DB row update is the intended runtime path.
+An operator reads the runbook as meaning old and new model-version rows can safely coexist while search selects only the configured version. They start a production backfill for a new version, stop midway, and then switch or roll back the configured model. Because the table stores only one row per image, rows already processed for the new version have lost the old embedding, while rows not yet processed remain invisible to the new-version filter. The docs explain the read filter but not the write-time overwrite/rollback consequence.
 
-Concrete fix:
+Suggested fix:
 
-Update `CLAUDE.md:148` to remove `locale` from the "not DB-overridable" list, or spell out the distinction precisely: `site-config.json.locale` is the fallback, while `admin_settings.seo_locale` is runtime-overridable for SEO/OpenGraph metadata.
-
-### DOC-C6-02 - `CLAUDE.md` overstates what `site-config.json` `title` and `locale` control
-
-Severity: Low
-Confidence: High
-
-Evidence:
-
-- `CLAUDE.md:704` says `title` is displayed in nav, footer, and OG title.
-- Actual nav display uses `seo.nav_title`: `apps/web/src/components/nav.tsx:20-23` passes `seo.nav_title`, and `apps/web/src/components/nav-client.tsx:101-102` renders `navTitle`.
-- Actual footer text uses `siteConfig.footer_text`: `apps/web/src/components/footer.tsx:35-36`.
-- OG title uses `seo.title`: `apps/web/src/app/[locale]/layout.tsx:24-27` and `apps/web/src/app/[locale]/layout.tsx:42-47`.
-- `CLAUDE.md:707` says `locale` is "OG/HTML locale".
-- Actual HTML language is route-driven, not site-config-driven: `apps/web/src/app/[locale]/layout.tsx:88-92` validates the route locale and `apps/web/src/app/[locale]/layout.tsx:103-108` renders `<html lang={locale}>`.
-- Actual OG locale uses route locale plus SEO fallback: `apps/web/src/app/[locale]/layout.tsx:17-20` and `apps/web/src/app/[locale]/layout.tsx:47-48`.
-
-Failure scenario:
-
-An operator edits `site-config.json.title` expecting the nav brand or footer to change. The nav remains governed by `nav_title` / `seo_nav_title`, and the footer remains governed by `footer_text`. Similarly, editing `site-config.json.locale` cannot change the HTML route locale; it only participates in metadata fallback. This creates confusing branding/SEO deploys where the rebuilt image still appears "unchanged" in the surfaces the doc names.
-
-Concrete fix:
-
-Revise `CLAUDE.md:704-713` field descriptions:
-
-- `title`: fallback site title and OG/title metadata unless DB `seo_title` overrides it.
-- `nav_title`: nav-bar brand fallback unless DB `seo_nav_title` overrides it.
-- `footer_text`: footer text.
-- `locale`: OpenGraph/SEO locale fallback unless DB `seo_locale` overrides it; HTML `lang` comes from the `[locale]` route.
+Update `CLAUDE.md` and `apps/web/README.md` to state the current contract explicitly until the schema changes: `image_embeddings` stores one active embedding per image; production backfills replace prior model-version rows; complete and verify a full backfill before relying on a new production model; rollback to a prior version requires re-embedding affected images. If the intended product contract is true coexistence, the docs should instead point to a migration that keys rows by `(image_id, model_version)`.
 
 ## Verified Aligned Areas
 
-- Deploy docs match `scripts/deploy-remote.sh` and `apps/web/deploy.sh`: config-driven `.env.deploy`, unsafe permission refusal, host `git pull --ff-only`, compose rebuild, `/api/live` health check, then Docker prune.
-- Docker persistence docs match compose/deploy: `./data`, `./public/uploads`, `./public/resources`, and read-only `./src/site-config.json` are bind mounts; immutable public assets come from the image.
-- Schema docs match current migration safeguards: journal tag/file parity, post-migrate hash assertion, pending-vs-drift split, DML-baseline guard, and `when` monotonicity tests are present.
-- Quality-gate docs match package scripts and lint scanners for ESLint, API auth, action origin, public route rate limits, typecheck, build, Vitest, and Playwright.
-- Upload API docs match the route: `POST /api/admin/lr/upload`, `X-GalleryKit-Token`, `lr:upload`, multipart `file`/`topic`/optional title/description, 200 MiB file cap, 2 GiB window, 100-file window, and `{ success: true, id }` response.
-- CLIP docs under `docs/superpowers/` are clearly marked historical, and current operator guidance lives in `CLAUDE.md` / `apps/web/README.md`.
+- Deploy docs match the scripts: root `npm run deploy` loads configured deploy env, refuses unsafe env permissions, performs host-side `git pull --ff-only`, rebuilds via Compose, health-checks `/api/live`, and prunes Docker after `up -d`.
+- Docker persistence docs match compose/deploy behavior: `./data`, `./public/uploads`, `./public/resources`, and read-only `./src/site-config.json` are bind mounts, while immutable public assets come from the image.
+- Schema docs match current safeguards: migration journal/file parity, strictly increasing `when`, hash post-condition assertion, pending-vs-drift separation, reconciler coverage, and DML-baseline protections are all represented in tests.
+- Quality-gate docs match package scripts and scanners for ESLint, API auth, action origin, public route rate limits, typecheck, build, Vitest, and Playwright.
+- Storage docs match implementation: `CLAUDE.md` says the storage backend is not integrated and local filesystem is the only active product path; the quarantine test protects that boundary.
+- Product scope docs match current inspected code: paid downloads/Stripe are removed, and no edit/culling/scoring feature is advertised as an active photographer workflow.
+- Semantic production selection docs match settings behavior: production requires env/DB/weights/real embeddings and cannot be selected directly from the admin UI without satisfying those gates.
 
 ## Final Sweep
 
-Checked README/CLAUDE/AGENTS/app README against deploy scripts, compose, Dockerfile, nginx template, env examples, site config consumers, SEO actions, migration journal/migrator, lint-gate scripts, package scripts, upload API, and committed source-contract tests. Aside from DOC-C6-01 and DOC-C6-02, I did not find additional current documentation-code mismatches in the reviewed surfaces.
+Checked for stale runbooks, overclaimed features, mismatched deployment instructions, undocumented schema constraints, source-contract drift, route-policy gaps, local-vs-remote storage confusion, and product-scope wording around search, similar photos, Lightroom upload, payment, and photo editing/culling/scoring. Aside from DOC-E-01, I did not find another current documentation/code mismatch with enough confidence to file as a finding. Residual risk is limited to live-production validation not covered by a read-only repo review: real CLIP weights, production DB size/performance, and host nginx state were not exercised.

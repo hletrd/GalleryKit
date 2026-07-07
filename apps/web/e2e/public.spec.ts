@@ -107,6 +107,7 @@ test('unknown route renders localized 404 page (AGG-R5C2-18)', async ({ page }) 
   // link with text "Back to gallery". Assert both so a stripped-error page
   // (raw Next.js error output) does not satisfy this check.
   await expect(page.getByRole('heading', { level: 1, name: 'Page not found.' })).toBeVisible();
+  await expect(page).toHaveTitle(/Page not found/);
   await expect(page.getByRole('link', { name: 'Back to gallery' })).toBeVisible();
 });
 
@@ -130,6 +131,39 @@ test('shared-link valid key renders photo page (AGG-R5C2-18)', async ({ page }) 
   // A valid share key renders a photo title heading and the "View Gallery" link.
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(page.getByRole('link', { name: 'View Gallery' })).toBeVisible();
+});
+
+test('public map route exposes the seeded geotagged photo', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/en/map');
+  await expectNoNextError(page);
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Map' })).toBeVisible();
+  await expect(page.getByRole('list', { name: 'Geotagged photo list' }).getByText('E2E Landscape')).toBeVisible();
+});
+
+test('timeline and year archive routes expose seeded 2025 photos', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/en/timeline');
+  await expectNoNextError(page);
+
+  await expect(page.getByRole('heading', { level: 1, name: 'Timeline' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '2025 in Review' })).toBeVisible();
+  await expect(page.getByText('E2E Landscape')).toBeVisible();
+
+  await page.goto('/en/year/2025');
+  await expectNoNextError(page);
+  await expect(page.getByRole('heading', { level: 1, name: '2025 in Review' })).toBeVisible();
+  await expect(page.getByText('E2E Portrait')).toBeVisible();
+});
+
+test('public smart collection route exposes seeded collection photos', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/en/c/e2e-smoke');
+  await expectNoNextError(page);
+
+  await expect(page.getByRole('heading', { level: 1, name: 'E2E Smoke Collection' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'View photo: E2E Landscape' }).first()).toBeVisible();
 });
 
 test('shared-group navigation keeps the shared route context', async ({ page }) => {

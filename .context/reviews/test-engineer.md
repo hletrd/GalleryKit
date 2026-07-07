@@ -1,141 +1,119 @@
-# Test-Engineer Review - Cycle 6 Prompt 1
+# Test-Engineer Review - Cycle 7 Lane D
 
-Scope: read-only review for test coverage gaps, flaky tests, missing regression tests, inadequate e2e coverage, and TDD opportunities across `/Users/hletrd/flash-shared/gallery`. No source files were edited.
+Date: 2026-07-07
+HEAD reviewed: `cae5fbd9` (`fix(app): 🐛 fence restore and photo viewer races`)
+Mode: read-only review; source was not modified. This artifact is the intended write.
 
 ## Inventory
 
-Docs and workflow:
-- `AGENTS.md` / prompt context: quality gates are lint, auth/origin/rate-limit linters, typecheck, build, unit tests, and conditional e2e.
-- `CLAUDE.md`: architecture, security, upload, CLIP, schema, and operational test expectations.
-- Current HEAD: `d66fb08d` on `master`; pre-existing dirty review artifacts observed in `.context/reviews/critic.md`, `.context/reviews/perf-reviewer.md`, and `.context/reviews/verifier.md`.
+Repository review surface inventoried before findings:
+- Harness and gates: `package.json`, `apps/web/package.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, lint scripts in `apps/web/scripts/check-*.ts`.
+- Current counts: 257 non-test TS/TSX source files under `apps/web/src`, 340 Vitest test files under `apps/web/src/__tests__`, 9 Playwright specs, 79 app route/action/page files, 111 lib files, 29 scripts, 33 migration/meta files.
+- Source behavior contracts reviewed: admin API auth, action origin, public route rate limits, LR upload, admin token actions/UI, upload/queue/backfill, privacy field guards, migration/reconcile tests, restore maintenance, semantic search/CLIP, public map/timeline/year/smart-collection pages, nav visual checks.
+- Docs/claims reviewed: `AGENTS.md` quality gates/deploy/schema policy and `CLAUDE.md` architecture/security/upload/CLIP/runbook claims.
 
-Harness:
-- Unit command is plain `vitest run` in `apps/web/package.json:13`; `vitest.config.ts` includes only `src/__tests__/**/*.test.{ts,tsx}` and has no coverage provider/thresholds in `apps/web/vitest.config.ts:16-39`.
-- Playwright runs one serialized Chromium desktop project in `apps/web/playwright.config.ts:48-87`, specifically one `Desktop Chrome` project in `apps/web/playwright.config.ts:72-76`.
-- Inventory count from the filesystem: 257 app TS/TSX source files outside tests, 344 files under `apps/web/src/__tests__`, and 9 e2e specs under `apps/web/e2e`.
+Fresh validation run:
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm run lint --workspace=apps/web` passed.
+- `npm run typecheck --workspace=apps/web` passed.
+- `npm test --workspace=apps/web` passed: 338 files passed, 2 skipped; 3132 tests passed, 4 skipped.
 
-Representative tested surfaces:
-- Public e2e covers home/search/photo/share/404 flows in `apps/web/e2e/public.spec.ts:4-153` and `apps/web/e2e/not-found-status.spec.ts:14-90`.
-- Admin e2e covers login, several navigation links, one GPS-toggle UI flip, topic create/delete, and browser upload in `apps/web/e2e/admin.spec.ts:11-165`.
-- Origin e2e covers a concrete admin API cross-origin route in `apps/web/e2e/origin-guard.spec.ts:27-87`.
-- Source-contract and unit suites cover many high-risk modules, including LR upload, smart collections, timeline, data privacy, queues, restore, rate limits, and CLIP.
+Not run:
+- `npm run test:e2e --workspace=apps/web`: the configured local webServer path runs `npm run init` and `npm run e2e:seed`, and `seed-e2e.ts` deletes/replaces seeded DB rows/files; I treated that as outside this read-only lane.
+- `npm run build --workspace=apps/web`: `prebuild` generates PWA/service-worker artifacts, so I did not run it in a source-read-only review.
+- `npm run deploy`: production/external side effect.
 
 ## Findings
 
-### TE-C6-01 - No coverage instrumentation or threshold catches untested critical files
+### TE-C7-01 - Coverage gate is still pass/fail only; no coverage ratchet protects new critical files
 
 Severity: Medium
 Confidence: High
+Status: confirmed test adequacy gap
+File/region: `apps/web/package.json:13`, `apps/web/vitest.config.ts:16-39`
 
-Evidence:
-- The web unit script is only `vitest run`, with no `--coverage` or alternate coverage script in `apps/web/package.json:13-27`.
-- The Vitest config limits discovery and timeout but defines no `coverage` block or threshold policy in `apps/web/vitest.config.ts:16-39`.
-- The repo has broad file-count coverage by convention, but no objective line/branch/function coverage signal over the 257 non-test TS/TSX files inventoried from `apps/web/src`.
+Evidence: the unit gate is plain `vitest run` (`apps/web/package.json:13`). The Vitest config only includes/excludes tests and sets timeout (`apps/web/vitest.config.ts:16-39`); there is no coverage provider, threshold, or changed-file ratchet. The repo has broad tests, but the gate proves only that existing tests pass, not that new or changed route/action/lib branches are exercised.
 
-Failure scenario:
-- A future change can remove the only behavioral test for a critical helper, or add a new untested route/action, and all gates still pass because the harness only checks that existing tests pass. This is most likely to hide gaps in large route/action files where source-contract tests assert strings rather than executed branches.
+Concrete failure scenario: a future critical helper or route branch can be added under `src/lib`, `src/app/actions`, or `src/app/api` with no executed test. Existing source-contract tests and unit suites still pass because no objective coverage threshold detects the untested branch.
 
-Concrete test/fix:
-- Add a `test:coverage` script using Vitest coverage and start with scoped thresholds for critical directories such as `src/lib`, `src/app/actions`, and `src/app/api`.
-- Begin with a ratcheting baseline rather than a disruptive all-repo threshold; require new or changed critical files to have branch coverage or an explicit review waiver.
-- TDD opportunity: when fixing any future bug, first add a red regression test and verify coverage for the changed branch increases or stays above the ratchet.
+Suggested fix: add a non-blocking `test:coverage` baseline first, then ratchet critical directories or changed files. Require either branch/line coverage for new critical code or an explicit waiver in review.
 
-### TE-C6-02 - Public route e2e misses positive map, timeline, year, and smart-collection flows
+### TE-C7-02 - Public e2e has no positive coverage for map, timeline, year archive, or smart collections
 
 Severity: Medium
 Confidence: High
+Status: confirmed coverage gap
+File/region: `apps/web/e2e/public.spec.ts:4-153`, `apps/web/e2e/not-found-status.spec.ts:35-42`, `apps/web/scripts/seed-e2e.ts:36-67`, `apps/web/scripts/seed-e2e.ts:217-267`
 
-Evidence:
-- Public e2e positive flows visit `/`, search, `/p/[id]`, `/s/[key]`, and `/g/[key]` in `apps/web/e2e/public.spec.ts:4-153`; 404 status tests include invalid `/year` and missing `/c` only in `apps/web/e2e/not-found-status.spec.ts:35-42`.
-- No e2e spec positively visits `/map`, `/timeline`, `/year/{year}`, or a public `/c/{slug}` smart collection; `rg` found no `page.goto('/map')`, `page.goto('/timeline')`, or positive `page.goto('/c/...')` calls under `apps/web/e2e`.
-- The e2e seed creates a topic, two images, tags, a single share key, and one shared group in `apps/web/scripts/seed-e2e.ts:36-67` and `apps/web/scripts/seed-e2e.ts:217-267`; it does not seed `latitude`/`longitude` or `smartCollections`.
-- The unexercised pages have real cross-file behavior: map filters GPS markers and renders `MapLoader` in `apps/web/src/app/[locale]/(public)/map/page.tsx:34-109`; timeline builds year navigation, JSON-LD, truncation notices, and image grids in `apps/web/src/app/[locale]/(public)/timeline/page.tsx:61-220`; smart collection parses stored JSON, compiles it, queries images, and renders `HomeClient` in `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-164`; year pages render archive sections and JSON-LD in `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:76-220`.
+Evidence: public e2e covers home/search/photo/share flows (`public.spec.ts:4-153`) and negative smart-collection/year cases (`not-found-status.spec.ts:35-42`). `rg` found no positive `page.goto('/map')`, `/timeline`, `/year/...`, or `/c/...` tests under `apps/web/e2e`. The e2e seed creates a topic, aliases, two images, tags, one photo share, and one group share (`seed-e2e.ts:36-67`, `217-267`), but no GPS coordinates and no `smartCollections` rows.
 
-Failure scenario:
-- A regression in Leaflet client loading, timeline metadata/JSON-LD nonce wiring, archive grid rendering, or smart-collection page composition can ship with green e2e because only unit/source-contract tests exercise pieces of those flows. A positive `/c/[slug]` 500 caused by query parsing or page composition would not be caught by the current missing-collection 404 test.
+Behavior at risk is non-trivial: map filters GPS markers and renders `MapLoader` (`map/page.tsx:34-109`); timeline builds year navigation, grouped months, JSON-LD, and truncation notices (`timeline/page.tsx:61-225`); smart collections parse/compile stored JSON and feed `HomeClient` (`c/[slug]/page.tsx:84-164`); year pages render archive grids and JSON-LD (`year/[year]/page.tsx:76-225`).
 
-Concrete test/fix:
-- Extend `seed-e2e.ts` with one GPS-enabled image and one public smart collection that selects the existing `e2e` tag or `e2e-smoke` topic.
-- Add Playwright route smokes: `/map` shows the map region or GPS fallback list; `/timeline` shows `2025` and links to `/year/2025`; `/year/2025` renders month sections/photos; `/c/e2e-smart` renders the collection heading and seeded photo.
-- TDD opportunity: write the e2e assertions first against the current seed, watch map/smart collection fail because fixtures are absent, then add the minimal seed rows.
+Concrete failure scenario: a Leaflet loading regression, timeline JSON-LD/nonce drift, smart-collection query compilation error, or year archive rendering failure can ship with green e2e because only negative 404s or lower-level unit/source-contract tests touch these pages.
 
-### TE-C6-03 - Lightroom PAT upload lacks a real auth-to-upload integration test
+Suggested fix: seed one GPS image and one public smart collection selecting the existing `e2e` tag/topic, then add positive Playwright smokes for `/map`, `/timeline`, `/year/2025`, and `/c/<seeded-slug>`.
+
+### TE-C7-03 - LR PAT upload still lacks one real auth-to-upload integration test
 
 Severity: Medium
 Confidence: High
+Status: confirmed integration gap
+File/region: `apps/web/src/app/api/admin/lr/upload/route.ts:84-92`, `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:44-47`, `apps/web/src/lib/api-auth.ts:72-90`, `apps/web/src/__tests__/api-auth-response-headers.test.ts:50-149`, `apps/web/src/__tests__/admin-tokens.test.ts:181-323`
 
-Evidence:
-- `POST /api/admin/lr/upload` is the external publish-client route and is wrapped with `withAdminAuth` at `apps/web/src/app/api/admin/lr/upload/route.ts:84-85`; it resolves PAT/cookie actor identity in `apps/web/src/app/api/admin/lr/upload/route.ts:86-92` and then performs multipart parsing, quota claims, disk checks, save, DB insert, queue enqueue, audit, and revalidation across `apps/web/src/app/api/admin/lr/upload/route.ts:94-609`.
-- The focused behavioral route test mocks `withAdminAuth` to identity in `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:44-47`, so it does not prove a real `X-GalleryKit-Token` reaches the route through the wrapper.
-- The broader LR route tests are source-contract oriented and explicitly justify source text checks for the route in `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:1-16`; they assert implementation strings and ordering across `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:38-172`.
-- Wrapper behavior is tested separately with mocked token verification in `apps/web/src/__tests__/api-auth-response-headers.test.ts:50-149`, and token generation/verification is tested with mocked DB in `apps/web/src/__tests__/admin-tokens.test.ts:179-323`. No e2e/request test connects token creation, real wrapper scope enforcement, multipart upload, DB row creation, `last_used_at`, and queue-visible processing.
+Evidence: the production route is wrapped with `withAdminAuth` and reads the token context from the wrapper (`route.ts:84-92`). The route behavior test replaces `withAdminAuth` with identity (`lr-upload-route-behavior.test.ts:44-47`). Wrapper behavior is tested separately with mocked token verification (`api-auth-response-headers.test.ts:50-149`), and token verification/persistence is tested with mocked DB (`admin-tokens.test.ts:181-323`). No test connects a real `X-GalleryKit-Token`, scope enforcement, `markTokenUsed`, multipart parsing, image row insert, and queue enqueue in one request path.
 
-Failure scenario:
-- A route integration break can preserve the wrapper source string and keep unit mocks green while real publish clients fail: wrong header name/casing, missing token context, scope drift, no `last_used_at`, malformed multipart handling after auth, or success response without image row/queue enqueue.
+Concrete failure scenario: a wrong header name/casing, wrapper context regression, `last_used_at` drift, wrong-scope fallthrough, or multipart route break can keep mocked unit tests green while real Lightroom publish clients fail.
 
-Concrete test/fix:
-- Add a Playwright `request` or Vitest integration smoke against a seeded disposable DB: create an admin token with `lr:upload`, POST multipart JPEG to `/api/admin/lr/upload` with `X-GalleryKit-Token`, assert 200/201 body, image row `uploaded_by`, token `last_used_at`, and eventual processed state or queue enqueue.
-- Also assert a valid `lr:read` token returns 401 without running the handler.
-- TDD opportunity: first write the wrong-scope and success-path tests using the real wrapper; then add only the smallest fixture/helpers needed to keep the test deterministic.
+Suggested fix: add a disposable-DB integration test or Playwright `request` smoke that creates an `lr:upload` token, POSTs multipart JPEG to `/api/admin/lr/upload` with `X-GalleryKit-Token`, asserts success/image row/uploaded actor/`last_used_at`/queue visibility, and asserts an `lr:read` token is rejected before handler work.
 
-### TE-C6-04 - Admin token-management UI is guarded mostly by source contracts, not e2e/component behavior
+### TE-C7-04 - Admin token-management UI is mostly source-contract tested, not behavior tested
 
 Severity: Low
 Confidence: High
+Status: confirmed coverage gap
+File/region: `apps/web/e2e/admin.spec.ts:20-42`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-128`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:167-199`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:250-325`, `apps/web/src/__tests__/client-source-contracts.test.ts:170-222`, `apps/web/src/__tests__/lr-tokens-action.test.ts:16-64`
 
-Evidence:
-- Admin e2e navigation visits categories, tags, users, password, and DB pages in `apps/web/e2e/admin.spec.ts:20-42`; it does not visit `/admin/tokens`, create a token, copy/acknowledge the plaintext, refresh the list, or revoke a token.
-- The token client holds important one-shot UI state: token creation starts at `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-104`, copy acknowledgement at `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:119-127`, list rendering/revoke entry at `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:167-199`, and plaintext display at `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:250-280`.
-- Current UI regression guards for this page are source-contract checks in `apps/web/src/__tests__/client-source-contracts.test.ts:170-222`, not a browser/component interaction test.
-- Action-level tests mock `createToken`, `revokeToken`, `listTokensForUser`, origin guard, and admin auth in `apps/web/src/__tests__/lr-tokens-action.test.ts:16-64`, so they do not prove the hydrated page uses those actions correctly.
+Evidence: admin e2e navigates categories, tags, users, password, and DB pages, but not `/admin/tokens` (`admin.spec.ts:20-42`). The token client has important one-shot/pending flows for create, copy/acknowledge, list, and revoke (`tokens-client.tsx:70-128`, `167-199`, `250-325`). Current UI guards are source-string assertions (`client-source-contracts.test.ts:170-222`) plus mocked server-action tests (`lr-tokens-action.test.ts:16-64`).
 
-Failure scenario:
-- The page can regress in ways source text checks miss: dialog does not open, Enter handling bypasses the pending guard, plaintext modal cannot be acknowledged, copy failure leaves the modal stuck, token list retry does not clear an error, or revoke buttons target the wrong token label.
+Concrete failure scenario: the dialog can fail to open, plaintext can be impossible to acknowledge, copy failure can leave state inconsistent, or revoke can target the wrong row while source strings and mocked action tests still pass.
 
-Concrete test/fix:
-- Add one admin e2e test that opens `/admin/tokens`, creates a disposable token, verifies the plaintext dialog is shown once, acknowledges/copies it, sees the list row, revokes it, and verifies the row disappears.
-- If full e2e mutation is too costly, add a client component test with mocked actions and clipboard for create/copy/revoke/pending flows.
+Suggested fix: add an admin e2e or component test for create -> plaintext shown once -> acknowledge/copy -> list refresh -> revoke -> row removed.
 
-### TE-C6-05 - Nav visual checks save screenshots but do not compare them
+### TE-C7-05 - Nav visual checks save artifacts but do not assert screenshots
 
 Severity: Low
 Confidence: High
+Status: confirmed assertion weakness
+File/region: `apps/web/e2e/nav-visual-check.spec.ts:6-37`, `apps/web/e2e/nav-visual-check.spec.ts:58`, `apps/web/e2e/nav-visual-check.spec.ts:72`, `apps/web/e2e/nav-visual-check.spec.ts:85`
 
-Evidence:
-- `apps/web/e2e/nav-visual-check.spec.ts` computes target size and overlap metrics in `expectVisibleNavTargetsAreStable` at `apps/web/e2e/nav-visual-check.spec.ts:6-37`, which is useful.
-- The same suite writes screenshots with `page.screenshot` at `apps/web/e2e/nav-visual-check.spec.ts:58`, `apps/web/e2e/nav-visual-check.spec.ts:72`, and `apps/web/e2e/nav-visual-check.spec.ts:85`.
-- It never calls `expect(...).toHaveScreenshot(...)`, so color, spacing, clipping, topic-chip wrapping, and visual hierarchy regressions are artifacts only, not assertions.
+Evidence: the nav e2e does useful metric assertions for 44 px target size and overlap (`nav-visual-check.spec.ts:6-37`), but the visual parts are raw `page.screenshot(...)` writes (`:58`, `:72`, `:85`). There is no `expect(...).toHaveScreenshot(...)`.
 
-Failure scenario:
-- A nav layout can remain 44px and non-overlapping while visually degraded, clipped below the fold, low-contrast, or incorrectly themed. The test will pass and merely leave a changed screenshot in `test-results`.
+Concrete failure scenario: spacing, clipping, contrast, or visual hierarchy can regress while all metric assertions pass; the changed screenshots are artifacts only, not gate failures.
 
-Concrete test/fix:
-- Convert these three shots to element-level `await expect(nav).toHaveScreenshot(...)` with stable masks/fonts, or rename the suite to a metrics smoke and add a separate snapshot test for the intended visual contract.
+Suggested fix: either convert stable nav regions to `toHaveScreenshot` assertions with masks, or rename the test as a metrics smoke and add a separate visual snapshot gate.
 
-### TE-C6-06 - Opt-in CLIP integration tests still carry a native teardown flake risk
+### TE-C7-06 - CLIP activation tests are opt-in and one documents a native teardown flake
 
 Severity: Low
 Confidence: Medium
+Status: confirmed manual-gate fragility
+File/region: `apps/web/src/__tests__/clip-offline-load.test.ts:15-25`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-10`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`
 
-Evidence:
-- The real semantic-ranking test is skipped unless `CLIP_INTEGRATION=1` in `apps/web/src/__tests__/clip-semantic-integration.test.ts:27-80`.
-- The offline activation test is skipped unless `CLIP_OFFLINE_LOAD=1` and seeded weights exist in `apps/web/src/__tests__/clip-offline-load.test.ts:32-65`.
-- That offline test documents a known native `onnxruntime-node` abort after assertions complete in `apps/web/src/__tests__/clip-offline-load.test.ts:23-25`.
+Evidence: real CLIP offline load runs only when `CLIP_OFFLINE_LOAD=1` and seeded weights exist (`clip-offline-load.test.ts:15-25`, `32-41`). Semantic ranking runs only with `CLIP_INTEGRATION=1` (`clip-semantic-integration.test.ts:8-10`, `30-31`). The offline-load test documents that `onnxruntime-node` may abort during teardown after assertions (`clip-offline-load.test.ts:23-25`).
 
-Failure scenario:
-- An operator can run the required activation proof, see assertions print expected dims/norm, and still get a worker abort/exit failure after inference. That makes the manual production-readiness gate noisy and risks either ignoring real failures or rerunning until green.
+Concrete failure scenario: production semantic-search activation depends on a manual run that default CI skips; a native teardown abort can make the result noisy enough that operators either ignore a real failure or rerun until green.
 
-Concrete test/fix:
-- Move the real offline-load proof into a child-process harness that treats "assertions completed, then known teardown abort" as a classified result, or isolate the native model session lifecycle if the provider exposes a deterministic cleanup API.
-- Keep default CI skipped, but require recorded opt-in evidence whenever CLIP model paths, pinned revision, Transformers version, or production semantic-search activation changes.
+Suggested fix: wrap the real CLIP activation proof in a child-process harness that classifies “assertions completed then known teardown abort” separately from assertion/model-load failure, and require recorded opt-in evidence when CLIP model paths, pinned revisions, Transformers, or semantic production activation changes.
 
 ## Final Sweep
 
-Checked cross-file behavior and test depth across:
-- Test harnesses and gates: `package.json`, `apps/web/package.json`, `vitest.config.ts`, `playwright.config.ts`.
-- E2E setup and fixtures: `apps/web/e2e/*.spec.ts`, `apps/web/e2e/helpers.ts`, `apps/web/scripts/seed-e2e.ts`.
-- Public route surfaces: home/search/photo/share, map, timeline, year archive, smart collections, 404 status/robots.
-- Admin route/action surfaces: login, origin guard, settings, topics, tokens, LR upload.
-- Regression-test style: behavioral tests, mocked route tests, source-contract tests, skipped integration tests, visual artifacts.
+Commonly missed areas checked:
+- Gate scripts and their fixtures: API auth, action origin, public route rate limits, JS script checking.
+- High-risk runtime paths: LR upload, browser upload/queue snapshots, retry/bootstrap/backfill, restore maintenance, admin token issuance/revoke, DB backup/restore, migration reconcile, privacy select fields.
+- Public UX/runtime pages: home, photo, share/group, map, timeline, year archive, smart collection, feed/OG/search/similar routes.
+- Test quality patterns: source-contract tests, mocked route tests, opt-in integration tests, e2e skip gates, visual artifact-only tests.
+- Docs-test alignment: AGENTS/CLAUDE quality gates, CLIP activation runbook, migration/deploy claims.
 
-I did not run the full gate suite because this was a static review task with no source changes. The report itself was citation-checked against current files after writing.
+No new production code defect was confirmed in this lane. The findings above are coverage, integration-proof, and flakiness risks that can allow future regressions through green local gates.

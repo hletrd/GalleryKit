@@ -771,6 +771,11 @@ function publicActionCallsRateLimitBeforeMutation(
     const publicRateLimitNames = new Set([...booleanRateLimitNames, ...statusRateLimitNames]);
     const booleanRateLimitResultNames = new Set<string>();
     const statusRateLimitResultNames = new Set<string>();
+    const restoreOnlyRateLimitState = () => {
+        booleanRateLimitResultNames.clear();
+        statusRateLimitResultNames.clear();
+        sawRateLimitGate = false;
+    };
 
     const actionBodyShadowsRateLimit = (): boolean => {
         let shadows = false;
@@ -918,6 +923,31 @@ function publicActionCallsRateLimitBeforeMutation(
         return false;
     };
 
+    const trackedAnalyticsCallbackBody = (statement: ts.Statement): ts.Block | null => {
+        let callbackBody: ts.Block | null = null;
+        const visit = (node: ts.Node) => {
+            if (callbackBody) return;
+            if (
+                ts.isCallExpression(node)
+                && ts.isIdentifier(node.expression)
+                && node.expression.text === 'trackAnalyticsDbWrite'
+            ) {
+                const callback = node.arguments[0];
+                if (
+                    callback
+                    && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+                    && ts.isBlock(callback.body)
+                ) {
+                    callbackBody = callback.body;
+                    return;
+                }
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(statement);
+        return callbackBody;
+    };
+
     const visitMutation = (node: ts.Node) => {
         if (sawMutationBeforeRateLimit) return;
         if (ts.isFunctionLike(node)) return;
@@ -950,6 +980,13 @@ function publicActionCallsRateLimitBeforeMutation(
 
         if (ts.isBlock(statement)) {
             for (const nested of statement.statements) processStatement(nested);
+            return;
+        }
+
+        const analyticsCallback = trackedAnalyticsCallbackBody(statement);
+        if (analyticsCallback) {
+            restoreOnlyRateLimitState();
+            for (const nested of analyticsCallback.statements) processStatement(nested);
             return;
         }
 

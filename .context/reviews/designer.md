@@ -1,104 +1,126 @@
-# GalleryKit Designer Review — Cycle 6 Prompt 1
+# GalleryKit Designer Review - Cycle 7 Lane F
 
 Date: 2026-07-07
-Reviewed HEAD: `c5d6b27e`
+Reviewed workspace: `/Users/hletrd/flash-shared/gallery`
 Lane: designer
-Mode: read-only UI/UX review with browser tooling, source inspection, and focused a11y/i18n tests. No source edits, commits, or pushes.
+Mode: read-only UI/UX review, writing only this review artifact.
 
 ## Inventory
 
-Reviewed UI-relevant surfaces:
+Review-relevant inventory was built before selecting findings. I enumerated 605 files across the UI/product surface:
 
-- Prompt/docs: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/prompts/common_review_scope.md`, `.context/reviews/prompts/designer.md`, latest `.context/reviews/_aggregate.md`, Cycle 5 plan/deferred register.
-- Public routes: home/topic/photo/share/group/smart-collection/map/timeline/year/privacy/error/not-found under `apps/web/src/app/[locale]/(public)/**` plus `apps/web/src/app/[locale]/{layout,error,not-found}.tsx`.
-- Admin routes: login and protected admin shell/routes under `apps/web/src/app/[locale]/admin/**`.
-- Components: `nav-client.tsx`, `search.tsx`, `home-client.tsx`, `masonry-card.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, `info-bottom-sheet.tsx`, `upload-dropzone.tsx`, `admin-nav.tsx`, `admin-header.tsx`, UI primitives.
-- Tests/contracts: touch target audit, focus-visible scan, skip-link/a11y contracts, password form a11y, error shell, i18n parity, public/admin Playwright specs.
+- `apps/web/src/app/**`: 80 route/layout/action files covering public home, topic, photo, share/group, map, timeline, year, smart collection, privacy, not-found/error, admin login, and protected admin pages.
+- `apps/web/src/components/**`: 60 UI components, including nav, search, home grid, cards, photo viewer, lightbox, info sheet, map, upload/admin controls, theme provider, and UI primitives.
+- `apps/web/src/lib/**`: 111 supporting files for config, data shaping, i18n paths, image URLs, color/HDR metadata, search, privacy-sensitive selects, and settings.
+- `apps/web/messages/**`: English and Korean message catalogs.
+- `apps/web/e2e/**`: 10 Playwright browser-flow specs.
+- `apps/web/src/__tests__/**`: 342 Vitest contract/unit/a11y files, including touch target, focus-visible, error shell, public/admin route, privacy, lightbox, and i18n tests.
 
-Browser/runtime evidence:
+I also read `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, the local designer/product reviewer instructions, and the project review context. This was not a sample-only pass.
 
-- `next dev --hostname 127.0.0.1 --port 3000` failed before serving with a Turbopack lockfile I/O error. I used `next start --hostname 127.0.0.1 --port 3000` from the existing build.
-- Local MySQL was not reachable (`ECONNREFUSED 127.0.0.1:3306`), so DB-backed public gallery/photo/topic routes rendered the localized error shell. Static/admin-login/privacy surfaces were reachable.
-- Agent-browser checks:
-  - `/en` desktop light and mobile dark: HTTP 500 error shell with `h1` "Error", `Try again`, `Return to Gallery`; buttons/links measured at 44 px high.
-  - `/en/admin` desktop and `/ko/admin` mobile dark: HTTP 200; visible labels, required username/password fields, password reveal button, submit button; inputs/buttons measured at 44 px high.
-  - `/en/privacy`: HTTP 200; nav/search/theme/locale/footer controls all 44 px high in DOM measurements.
-  - Search dialog from privacy page: `#search-dialog` opened, `#search-input` focused with `role="combobox"` and neutral `Ctrl/⌘ K` copy; Escape closed the dialog and restored focus to the trigger. Filling `test` under DB outage produced the visible/live status "Search is temporarily unavailable. Please try again later."
+## Browser And Code Evidence
+
+Local app startup was not attempted because this lane was read-only and the deployed production instance was reachable with real data. I used `BASE_URL=https://gallery.atik.kr` via `agent-browser` and backed browser observations with source/test evidence.
+
+Routes exercised:
+
+- `/en` desktop and mobile: navigation, mobile menu, tag filters, masonry photo links, footer, search trigger, theme and locale controls.
+- `/ko`: Korean localization and `html[lang="ko"]`.
+- `/en/admin`: login form, empty-submit validation, required fields, password reveal, alert text.
+- `/en/p/348`: photo detail, viewer toolbar, keyboard shortcut instructions, similar photos disclosure, histogram controls, download link.
+- `/en/map`: empty geotagged-map state.
+- `/en/nonexistent-topic-cycle7-lane-f`: 404 shell and document metadata.
+
+Representative browser evidence:
+
+- Main nav exposes `navigation "Main navigation"`, skip link, `Expand menu` / `Collapse menu`, `Search photos`, theme, locale, topic links, and footer links.
+- Search dialog exposes `role="dialog"`, `combobox` label `Search photos, tags, cameras...`, Close button, semantic-search switch, live result count, and Escape focus restore.
+- Admin login empty submit produced role alerts `Username is required` and `Password is required`; fields had `required`, `aria-invalid`, and described error regions.
+- Touch-target spot checks on live DOM measured visible public controls at 44 px or larger, matching source contracts such as `nav-client.tsx:101-118`, `nav-client.tsx:140-190`, `home-client.tsx:332-378`, and `footer.tsx:38-57`.
 
 Focused validation:
 
-- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/password-form-a11y.test.ts src/__tests__/error-shell.test.ts src/__tests__/error-shell-heading.test.ts`
-- Result: pass, 7 files / 59 tests.
+```bash
+npm test --workspace=apps/web -- src/__tests__/error-shell-heading.test.ts src/__tests__/privacy-page-landmark.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts src/__tests__/info-bottom-sheet-ia.test.ts
+```
 
-## Confirmed Issues
+Result: 4 files passed, 16 tests passed.
 
-No new confirmed UI/UX, WCAG 2.2, keyboard/focus, responsive, dark/light, i18n, loading/empty/error, or form-validation defect was found in this pass.
+## Findings
 
-## Re-Verified Deferred Item
+### DES-C7F-01 - 404 pages keep the generic gallery document title
 
-### DES-C6-D1 — Smart collections remain public-readable but not admin-operable
-
-Status: already tracked as `DEF-C5-20`; not a new finding.
-
-Evidence:
-
-- Public smart-collection route renders collections through `HomeClient`: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-164`.
-- Hardened create/update/delete server actions exist: `apps/web/src/app/actions/collections.ts:16-150`.
-- Admin navigation still has no Collections entry: `apps/web/src/components/admin-nav.tsx:15-25`.
-- Product docs explicitly say no admin UI invokes the actions and rows are authored by direct DB insert: `CLAUDE.md:162`.
-
-Why it matters:
-
-This is a real IA/product gap if smart collections are meant to be admin-operable. An admin can view a public `/c/[slug]` feature only after out-of-band DB authoring; there is no discoverable create/edit/delete or predicate-preview workflow.
-
-Concrete fix:
-
-Either keep smart collections internal in all user-facing docs, or ship an admin Collections section with list/create/edit/delete, localized validation, safe predicate builder, preview count, visibility toggle, and destructive-delete confirmation.
-
-Severity/confidence: Medium product/UX issue, High confidence.
-
-## Risks Requiring Manual Validation
-
-### DES-C6-M1 — Data-backed browser flows could not be fully exercised locally
+Severity: Medium
+Confidence: High
+Status: confirmed
 
 Evidence:
 
-- Runtime logs showed repeated `ECONNREFUSED 127.0.0.1:3306`.
-- `/en` and unknown topic routes rendered the route error shell instead of real gallery/not-found data states.
-- The review therefore could not live-exercise representative home masonry, photo viewer/lightbox, topic/share/group, map, timeline/year, or authenticated admin workflows with real data.
+- Browser route: `https://gallery.atik.kr/en/nonexistent-topic-cycle7-lane-f`
+- DOM/browser result: visible page correctly showed `404`, heading `Page not found.`, `Back to gallery`, nav, and footer, and emitted a single `noindex` robots tag. `document.title` remained `ATIK.KR Gallery`.
+- Source: `apps/web/src/app/[locale]/not-found.tsx:12-49` renders the not-found shell but has no title override or client title effect.
+- Source: `apps/web/src/app/[locale]/layout.tsx:22-27` supplies the default/template title, and `apps/web/src/app/[locale]/layout.tsx:54-66` documents that `not-found.tsx` cannot export its own metadata in the current route shape.
+- Test gap: `apps/web/e2e/not-found-status.spec.ts:14-89` pins HTTP 404 and robots behavior but does not assert the 404 page title.
 
-Concrete validation:
+Failure scenario:
 
-Run `npm run test:e2e --workspace=apps/web` or a manual browser pass against a seeded local MySQL/production-like staging dataset. Cover desktop/mobile home, topic, photo viewer, lightbox, search results, share/group routes, map, timeline/year, and authenticated admin upload/settings/db flows.
+A keyboard or screen-reader user opens several tabs from search results or pasted links and cannot distinguish a dead-end 404 tab from a valid gallery tab by the browser title. Search engines and monitoring get the correct 404/noindex signals, but the human-facing error state misses WCAG 2.4.2 page-title specificity.
 
-Severity/confidence: Medium validation risk, High confidence.
+Suggested fix:
 
-### DES-C6-M2 — Core Web Vitals/perceived performance still need representative measurement
+Add a tiny client component inside the not-found shell that sets the document title to localized copy such as `Page not found | {siteTitle}` after hydration, or adopt a supported route-level/global not-found metadata mechanism if the app moves to that structure. Add an e2e assertion beside `not-found-status.spec.ts` that verifies both the visible H1 and title on `/en/nonexistent-page-xyz-abc` and `/ko/...`.
 
-Evidence:
+## Coverage Sweep
 
-- Source shows performance-conscious patterns for masonry sizing, image preload selection, blur placeholders, reduced motion, and SW caching, but this lane did not capture LCP/CLS/INP traces.
-- The missing local DB prevented representative photo-heavy route measurement.
+Information architecture:
 
-Concrete validation:
+- Public IA is clear on live data: nav topics, search, language/theme controls, photo cards, footer, privacy, and admin entry are discoverable. Source confirms home structure and empty states in `apps/web/src/components/home-client.tsx:287-360`.
+- Photo detail has a hidden H1, explicit shortcut instructions, viewer controls, metadata sections, and similar-photo disclosure in `apps/web/src/components/photo-viewer.tsx`.
 
-Capture browser performance traces or Lighthouse/Web Vitals on seeded home/topic/photo/share pages and mobile admin. Tie any regression to concrete DOM/code regions such as `home-client.tsx`, `masonry-card.tsx`, `photo-viewer.tsx`, `lightbox.tsx`, or service-worker image caching.
+Affordances:
 
-Severity/confidence: Medium manual-validation risk, Medium confidence.
+- Buttons and links use labels, `aria-current`, visible hover/focus styling, and 44 px hit targets in nav/footer/tag/filter/photo-viewer code paths. Live DOM spot checks agreed.
+- Search semantic mode is not a dead-looking toggle on production: enabling semantic search and searching `concert` returned live results and a live result count.
 
-### DES-C6-M3 — Future RTL locale remains unvalidated
+Keyboard and focus navigation:
 
-Evidence:
+- Search opens from the nav, focuses the input, closes on Escape, and restores focus to the trigger. Source backs this in `apps/web/src/components/search.tsx:319-336` and dialog markup around `search.tsx:417-482`.
+- Photo viewer and lightbox include keyboard handling and focus restoration in `photo-viewer.tsx` and `lightbox.tsx`; targeted focus/error tests passed.
 
-- Root layout sets `lang` and `dir`: `apps/web/src/app/[locale]/layout.tsx:103-109`.
-- Current locales are English and Korean; both are LTR. Existing parity tests cover key sets, not RTL layout behavior.
+WCAG 2.2 accessibility:
 
-Concrete validation:
+- Confirmed strengths: landmarks, skip link, page H1s, focus-visible rings, role alerts on login validation, touch target contracts, `lang` and `dir` attributes.
+- Confirmed issue: 404 title specificity, listed above.
 
-Before adding an RTL locale, run a full RTL pass over nav, search, photo viewer, lightbox, info sheet, upload/admin forms, map, and timeline. Add representative RTL visual/accessibility tests.
+Responsive breakpoints:
 
-Severity/confidence: Low future-locale risk, Medium confidence.
+- Desktop 1440 and mobile 390 browser passes were usable. Mobile menu expansion exposed topic links and controls without hiding primary search/theme/language affordances.
 
-## Final Sweep
+Loading, empty, and error states:
 
-Covered IA, affordances, keyboard/focus restore, WCAG 2.2 target/focus basics, responsive breakpoints, loading/empty/error states, forms, dark/light mode, English/Korean i18n, future RTL, and perceived-performance boundaries. The previous Cycle 5 search-shortcut issue is fixed in current source (`search.tsx:511-517` renders `Ctrl/⌘ K`). No new confirmed designer finding is reported beyond the already-deferred smart-collection authoring gap and the runtime validation limits above.
+- Search has unavailable/error status copy and a live status region.
+- Map route has an explicit empty geotagged-photo state.
+- Home and filtered-empty states are coded in `home-client.tsx:344-360`.
+- 404 shell has usable wayfinding, but title needs the fix above.
+
+Form validation UX:
+
+- Admin login prevents empty submit with localized inline alerts, `aria-invalid`, and required fields. Evidence came from live DOM and `apps/web/src/app/[locale]/admin/login-form.tsx:31-45`, `65-128`.
+
+Dark/light mode:
+
+- Source declares `viewport.colorScheme` and light/dark theme colors in `layout.tsx:70-79`; nav exposes a theme toggle. Browser dark-mode pass remained navigable and accessible-tree equivalent.
+
+i18n and RTL:
+
+- English and Korean routes were both exercised. `layout.tsx:103-108` sets `lang` and `dir`, and `locale-path.ts` currently ships only LTR locales (`en`, `ko`). No current RTL bug is claimed; an RTL locale would need a separate visual/a11y pass before launch.
+
+Perceived performance:
+
+- Code uses responsive image sizing, above-fold priority selection, blur/placeholder paths, masonry column sizing, and explicit empty/error states. This lane did not run Lighthouse/Web Vitals, so no performance defect is claimed.
+
+## Files And Categories Examined
+
+Examined categories: public routes, admin login/protected routes, layouts/metadata, nav/search/footer, home grid/cards, photo viewer/lightbox, info sheet, map, upload/admin controls, theme/i18n helpers, site config, data privacy selects, message catalogs, a11y/unit tests, and Playwright specs.
+
+No source files or plans were modified.

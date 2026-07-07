@@ -1133,6 +1133,39 @@ describe('checkActionSource — public analytics actions', () => {
         expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
     });
 
+    it('allows an exempt public mutation inside trackAnalyticsDbWrite when the callback rate-limits before insert', () => {
+        const src = `
+            import { trackAnalyticsDbWrite } from '@/lib/background-db-writes';
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                trackAnalyticsDbWrite(async () => {
+                    const params = await buildViewParams(await headers());
+                    if ((await checkViewRecordRateLimit(params.ip, Date.now())).status === 'rateLimited') return;
+                    await db.insert(imageViews).values({ imageId: id });
+                }).catch(console.warn);
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toContain('OK (public rate-limited action): src/app/actions/public.ts::recordView');
+    });
+
+    it('fails an exempt trackAnalyticsDbWrite public mutation when the callback lacks a limiter', () => {
+        const src = `
+            import { trackAnalyticsDbWrite } from '@/lib/background-db-writes';
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                trackAnalyticsDbWrite(async () => {
+                    await db.insert(imageViews).values({ imageId: id });
+                }).catch(console.warn);
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
     it('allows an exempt public mutation when a captured boolean limiter result gates the insert', () => {
         const src = `
             /** @action-origin-exempt: public analytics endpoint */

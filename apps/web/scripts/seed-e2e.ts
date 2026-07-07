@@ -37,9 +37,21 @@ const seedTopic = {
   slug: 'e2e-smoke',
   label: 'E2E Smoke',
   order: 999,
+  map_visible: true,
 };
 
 const seedTopicAliases = ['spotlight-smoke'];
+const seedCollection = {
+  slug: 'e2e-smoke',
+  name: 'E2E Smoke Collection',
+  query_json: JSON.stringify({
+    type: 'predicate',
+    column: 'topic',
+    operator: 'eq',
+    value: seedTopic.slug,
+  }),
+  is_public: true,
+};
 const E2E_SHARE_KEY = 'Abc234Def6';
 const DISPOSABLE_DB_NAME_PATTERN = /(?:^|[_-])(e2e|test|ci)(?:$|[_-])|^gallery_(e2e|test|ci)$/i;
 
@@ -173,13 +185,20 @@ async function main() {
   await initializeUploadDirs();
   await ensureDirs();
 
-  const { connection, db, images, imageTags, sharedGroupImages, sharedGroups, tags, topicAliases, topics } = await import('../src/db');
+  const { connection, db, images, imageTags, sharedGroupImages, sharedGroups, smartCollections, tags, topicAliases, topics } = await import('../src/db');
 
   const dirs = getUploadDirs();
 
   try {
     await db.insert(topics).values(seedTopic).onDuplicateKeyUpdate({
-      set: { label: seedTopic.label, order: seedTopic.order },
+      set: { label: seedTopic.label, order: seedTopic.order, map_visible: seedTopic.map_visible },
+    });
+    await db.insert(smartCollections).values(seedCollection).onDuplicateKeyUpdate({
+      set: {
+        name: seedCollection.name,
+        query_json: seedCollection.query_json,
+        is_public: seedCollection.is_public,
+      },
     });
     await db.delete(topicAliases).where(eq(topicAliases.topicSlug, seedTopic.slug));
     if (seedTopicAliases.length > 0) {
@@ -242,6 +261,8 @@ async function main() {
 	        share_key: index === 0 ? E2E_SHARE_KEY : generateBase56(10),
         topic: seedTopic.slug,
         capture_date: image.captureDate,
+        latitude: index === 0 ? 37.5665 : null,
+        longitude: index === 0 ? 126.9780 : null,
         blur_data_url: null,
         processed: true,
         created_at: new Date(`${image.createdAt.replace(' ', 'T')}Z`) as never,

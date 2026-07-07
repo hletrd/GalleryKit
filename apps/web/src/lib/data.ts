@@ -1738,7 +1738,7 @@ export async function getImageIdsForSitemap(limit: number = 24000) {
 // need viewport-bbox filtering / clustering (a feature, not a fix — out of
 // scope). A deterministic ORDER BY makes WHICH markers survive the cap stable
 // (most-recent first) rather than relying on undefined storage-engine order.
-const MAP_MAX_MARKERS = 10000;
+export const MAP_MAX_MARKERS = 10000;
 
 // PRIVACY: getMapImages is the ONLY public-facing function that exposes
 // latitude/longitude. It enforces two layers of GPS-leak prevention:
@@ -1765,7 +1765,7 @@ export async function getMapImages() {
             )
         )
         .orderBy(desc(images.capture_date), desc(images.created_at), desc(images.id))
-        .limit(MAP_MAX_MARKERS);
+        .limit(MAP_MAX_MARKERS + 1);
 
     // Runtime defense-in-depth: assert every row has map_visible=true.
     for (const row of rows) {
@@ -1776,7 +1776,10 @@ export async function getMapImages() {
         }
     }
 
-    return rows;
+    return {
+        images: rows.slice(0, MAP_MAX_MARKERS),
+        truncated: rows.length > MAP_MAX_MARKERS,
+    };
 }
 
 export const getImageCached = cache(getImage);

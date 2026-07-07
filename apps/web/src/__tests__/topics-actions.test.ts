@@ -553,6 +553,7 @@ describe('topic actions', () => {
         const txSelectMock = vi
             .fn()
             .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([]))
             .mockReturnValueOnce(makeSelectChain([{ image_filename: null }]));
         const txDeleteMock = vi.fn().mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
         transactionMock.mockImplementationOnce(async (callback: (tx: {
@@ -569,6 +570,58 @@ describe('topic actions', () => {
         expect(releaseLockQueryMock).toHaveBeenCalled();
         expect(lockQueryMock.mock.invocationCallOrder[0]).toBeLessThan(txDeleteMock.mock.invocationCallOrder[0]);
         expect(txDeleteMock.mock.invocationCallOrder[0]).toBeLessThan(releaseLockQueryMock.mock.invocationCallOrder[0]);
+    });
+
+    it('blocks topic deletion when a smart collection references the slug', async () => {
+        const txSelectMock = vi
+            .fn()
+            .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([{
+                id: 7,
+                query_json: JSON.stringify({
+                    type: 'predicate',
+                    column: 'topic',
+                    operator: 'eq',
+                    value: 'travel',
+                }),
+            }]));
+        const txDeleteMock = vi.fn().mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
+        transactionMock.mockImplementationOnce(async (callback: (tx: {
+            select: typeof txSelectMock;
+            delete: typeof txDeleteMock;
+        }) => Promise<void>) => callback({
+            select: txSelectMock,
+            delete: txDeleteMock,
+        }));
+
+        await expect(deleteTopic('travel')).resolves.toEqual({ error: 'cannotDeleteCategoryReferencedByCollection' });
+        expect(txDeleteMock).not.toHaveBeenCalled();
+    });
+
+    it('blocks topic deletion when a smart collection topic-in predicate includes the slug', async () => {
+        const txSelectMock = vi
+            .fn()
+            .mockReturnValueOnce(makeSelectChain([]))
+            .mockReturnValueOnce(makeSelectChain([{
+                id: 8,
+                query_json: JSON.stringify({
+                    type: 'predicate',
+                    column: 'topic',
+                    operator: 'in',
+                    values: ['travel', 'street'],
+                }),
+            }]));
+        const txDeleteMock = vi.fn().mockReturnValueOnce(makeWriteChain([{ affectedRows: 1 }]));
+        transactionMock.mockImplementationOnce(async (callback: (tx: {
+            select: typeof txSelectMock;
+            delete: typeof txDeleteMock;
+        }) => Promise<void>) => callback({
+            select: txSelectMock,
+            delete: txDeleteMock,
+        }));
+
+        await expect(deleteTopic('travel')).resolves.toEqual({ error: 'cannotDeleteCategoryReferencedByCollection' });
+        expect(txDeleteMock).not.toHaveBeenCalled();
     });
 
     it('creates a topic when the route segment is free (COR-R4C19-01)', async () => {

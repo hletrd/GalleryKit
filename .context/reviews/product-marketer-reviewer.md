@@ -1,149 +1,118 @@
-# GalleryKit Product Marketer Reviewer - Cycle 6 Prompt 1
+# GalleryKit Product Marketer Reviewer - Cycle 7 Lane F
 
 Date: 2026-07-07
-Reviewer: project-specific product-marketer reviewer-style lane
-Methodology: `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` was used only for code-verified claim review discipline. Its BurstPick market assumptions were not treated as GalleryKit guidance.
+Reviewed workspace: `/Users/hletrd/flash-shared/gallery`
+Lane: product-marketer-reviewer
+Mode: reviewer-style product/positioning pass, adapted to GalleryKit. The local BurstPick-oriented prompt was used only for claim discipline and market-readiness framing; BurstPick assumptions were not applied.
 
-## Executive Summary
+## Inventory
 
-GalleryKit's core public position is credible: a self-hosted finished-photo gallery, not an editor, culler, scoring tool, proofing system, payment product, or hosted SaaS. The implementation backs the major trust claims around private originals, processed public derivatives, color/HDR honesty, PAT upload API scope, and operator-gated semantic search. The remaining product-marketing risk is operational expectation drift: several surfaces make GalleryKit sound more turn-key and self-service than the code currently is. Go-to-market readiness for the stated niche: 7/10 if sold as a technical self-hosted publishing kit; 5/10 if sold to non-technical photographer teams.
+I built the review inventory first, then checked product claims against source/docs:
 
-## Findings
-
-### PM-C6-01 - Static site config is marketed like runtime configuration
-
-Severity: Medium
-Confidence: High
-
-Citations:
-
-- `README.md:52-68` says file-backed site configuration lives in `apps/web/src/site-config.json` for static links and analytics, and separately says DB-backed SEO/branding fields override defaults at runtime.
-- `README.md:191` tells Docker operators to provide `apps/web/src/site-config.json` on the host before starting the compose stack.
-- `apps/web/README.md:48` says file-backed `src/site-config.json` owns static links/analytics defaults; `apps/web/README.md:55` says the compose setup assumes a host-side `src/site-config.json` bind mount.
-- `CLAUDE.md:148` states the actual implementation: every consumer imports `siteConfig` statically, Next inlines JSON imports at build time, and the compose bind mount has no runtime effect until the image is rebuilt.
-- `apps/web/docker-compose.yml:28-32` carries the same implementation warning in a comment.
-- Source confirms static imports for runtime-visible fields: `apps/web/src/components/footer.tsx:3-36` renders `siteConfig.footer_text`; `apps/web/src/components/nav-client.tsx:14-74` uses `siteConfig.home_link`; `apps/web/src/app/[locale]/layout.tsx:156-164` loads Google Analytics from `siteConfig.google_analytics_id`.
-
-Failure scenario:
-
-An operator changes the mounted `src/site-config.json` to remove a Google Analytics ID, change the footer, or point the home link at a portfolio landing page, then restarts the container. The visible site does not change because those values were baked into the image. For a privacy-positioned product, a stale analytics ID or stale branding is a trust failure even though the code is behaving as designed.
-
-Suggested fix:
-
-In both README files, explicitly split configuration into:
-
-- Runtime DB settings: SEO/branding fields editable in Admin.
-- Build-time JSON settings: `home_link`, `footer_text`, fallback URL/locale, and `google_analytics_id`; changing them requires `next build` / Docker rebuild / `npm run deploy`.
-
-Also reword Docker step 3 to say "provide before building" rather than "before starting," and mention that the compose bind mount exists for rebuild context, not live runtime edits.
-
-### PM-C6-02 - The shipped nginx template still hardcodes the demo domain
-
-Severity: Medium
-Confidence: High
-
-Citations:
-
-- `README.md:48` markets Docker support as a documented Linux host-network + reverse-proxy deployment.
-- `README.md:198-205` tells operators to publish the app through a reverse proxy and references the checked-in nginx config.
-- `apps/web/nginx/default.conf:46-55` is the checked-in server block, but `server_name` is hardcoded to `gallery.atik.kr`.
-- The repo-level deploy docs otherwise emphasize config-driven deployment and avoiding hardcoded deploy details in `AGENTS.md` and `README.md:120-131`.
-
-Failure scenario:
-
-A self-hosting operator copies the shipped nginx file as the "documented reverse-proxy deployment" and misses the demo `server_name`. Depending on their nginx layout, requests for their actual domain can fall through to another server block or fail certificate/host routing tests. The product promise is "self-hosted gallery"; the first production proxy file should not carry the maintainer's demo domain as an active value.
-
-Suggested fix:
-
-Change `server_name gallery.atik.kr;` to a placeholder or catch-all such as `server_name _;` with a nearby comment requiring operators to set their domain. If a demo-domain example is useful, move it to documentation prose, not the active template.
-
-### PM-C6-03 - Semantic search is true, but the product surface is runbook-first, not self-service
-
-Severity: Low-Medium
-Confidence: High
-
-Citations:
-
-- `README.md:42` lists semantic search as a feature and correctly caveats that it is disabled by default, requires model weights, backfill, and env opt-in, and uses bounded newest-first scans.
-- `apps/web/README.md:62-84` gives the full operator activation story, including disabled/stub/production modes and the DB row flip.
-- `apps/web/src/lib/gallery-config-shared.ts:119-128` defaults semantic search to disabled; `apps/web/src/lib/gallery-config-shared.ts:223-228` heals stored `production` to `disabled` unless production is explicitly allowed.
-- `apps/web/src/app/api/search/semantic/route.ts:186-201` returns `503 semantic_not_configured` unless the resolved mode is `stub` or `production`.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:824-842` intentionally exposes only Disabled and Stub as writable Settings values; Production appears only as a disabled read-only state.
-- `apps/web/messages/en.json:763-773` explains the operator gate in admin copy.
-
-Failure scenario:
-
-A small-team photographer reads the feature list, downloads the model weights, and expects Settings to offer a "Production" toggle after setup. Instead, production requires an env flag, sidecar backfill, deploy/recreate, and a direct DB setting. The implementation is defensible, but the activation flow belongs to an operator runbook, not a normal admin workflow.
-
-Suggested fix:
-
-Keep the root README feature, but rename the claim to "Operator-runbook semantic search" or add "not enabled from Settings UI" in the same bullet. Add a short product-status table: `Keyword search: available by default`, `Semantic stub: admin-testable`, `Semantic production: operator runbook only`.
-
-### PM-C6-04 - "Small teams" positioning underspecifies the all-root-admin account model
-
-Severity: Low-Medium
-Confidence: High
-
-Citations:
-
-- `README.md:29` positions GalleryKit for "photographers and small teams."
-- `README.md:44` says the admin dashboard supports multiple root-admin accounts and no role separation yet.
-- `CLAUDE.md:5` repeats multiple root-admin accounts with authentication only and no role/capability separation.
-- `CLAUDE.md:239` states any admin can upload, edit, export/restore DB backups, change settings, and manage other admins.
-- `apps/web/src/components/admin-nav.tsx:15-25` shows every admin navigation surface, including users, database, settings, tokens, analytics, and dashboard, with no role-specific nav branching.
-
-Failure scenario:
-
-A photographer interprets "small teams" as "I can add an assistant or client-facing studio manager." In practice, every account is a trusted owner account. That assistant can reach DB backup/restore, user management, API tokens, settings, and analytics. The README does disclose "no role separation," but the audience-level phrase "small teams" needs a stronger trust qualifier.
-
-Suggested fix:
-
-Change the audience line to "photographers and trusted co-admin teams" or "small owner/operator teams." In setup/admin docs, add: "Do not create accounts for assistants, clients, or contractors unless they should have full owner access."
+- Product/docs: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`, `apps/web/src/site-config*.json`, package metadata.
+- Public surfaces: localized public home/topic/photo/share/group/map/timeline/year/smart collection/privacy/not-found routes.
+- Admin/product surfaces: admin login, settings, users, DB, tokens, SEO, analytics, upload, bulk edit, color metadata, and protected admin nav.
+- Claim-sensitive code: storage backend, upload/private paths, semantic-search settings/API, search UI, privacy-sensitive data selects, map coordinate reads, upload API/token scopes, analytics config, color/HDR processing/render gates, PWA/service-worker behavior, and admin navigation.
+- Tests and browser evidence: public/admin/e2e specs, privacy/a11y/focus/error contracts, and live production browser pass on `https://gallery.atik.kr`.
 
 ## Verified Claim Inventory
 
-- Finished-photo positioning is aligned. `README.md:31-46` explicitly says the product is for finished-photo publishing and not for editing, culling, scoring, proofing, payment, or hosted SaaS workflows. `CLAUDE.md:278-280` reinforces the same product premise.
-- Private-original claim is backed. Originals default to `data/uploads/original`, not public uploads, and the private directory is created with mode `0700` in `apps/web/src/lib/upload-paths.ts:27-50`. Public derivatives live under `public/uploads` per `README.md:82-84` and `apps/web/src/lib/upload-paths.ts:42-47`.
-- GPS/privacy copy is stronger than before. Public selects omit GPS and sensitive original fields (`apps/web/src/lib/data.ts:368-407`), map coordinates are a separate opt-in select path (`apps/web/src/lib/data.ts:409-444`), and the privacy page discloses analytics, map metadata, and OpenStreetMap tile requests (`apps/web/src/app/[locale]/(public)/privacy/page.tsx:13-33`; `apps/web/messages/en.json:820-830`).
-- Color/HDR claims are broadly code-backed. The README describes libheif-gated 10-bit AVIF and explicit fallback (`README.md:37-38`); the encoder probes 10-bit AVIF support (`apps/web/src/lib/process-image.ts:59-173`) and tracks per-image fallback (`apps/web/src/lib/process-image.ts:1302-1348`). Public HDR honesty is enforced by admin-only fields and render gates (`apps/web/src/components/color-details-section.tsx:532-568`).
-- PAT upload API is accurately positioned as an API, not a bundled Lightroom plugin. `README.md:207-218` and `apps/web/README.md:90-99` match the route comment and token scope implementation (`apps/web/src/app/api/admin/lr/upload/route.ts:1-18`; `apps/web/src/app/actions/lr-tokens.ts:29-55`).
-- PWA/offline copy now includes the important same-origin caveat. `README.md:43` says visited-image caching is same-origin and not full offline sync; `README.md:163` warns CDN-origin derivatives are not covered unless proxied through the app origin.
-- Smart collections are not overmarketed in the README. CLAUDE correctly warns that public read-side code exists but admin authoring is not operable in UI (`CLAUDE.md:162`), and admin nav has no Collections item (`apps/web/src/components/admin-nav.tsx:15-25`).
+No materially false product claim was found in the checked docs or UI. Current positioning is mostly claim-honest:
 
-## Positioning Recommendation
+- Finished-photo positioning is explicit. `README.md:29-46` says GalleryKit is for edited work and not editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
+- Semantic search is accurately caveated. `README.md:42`, `apps/web/README.md:62-84`, `apps/web/src/lib/gallery-config-shared.ts:119-120`, and `gallery-config-shared.ts:223-228` align on disabled-by-default, operator-gated production mode. The live production demo does have semantic search enabled, which is consistent with the runbook caveat.
+- Upload API is not overclaimed as a Lightroom plugin. `README.md:207-218` says it is a PAT-authenticated upload route and not a bundled Lightroom Classic plugin.
+- Local-only storage is not marketed as S3/MinIO support. The storage abstraction is still local-only in implementation.
+- Trusted-admin team positioning is clearer than prior cycles. `README.md:29` says "trusted owner/operator teams", and `README.md:44` discloses multiple root-admin accounts with no role separation.
+- Configuration docs now correctly distinguish build-time JSON from runtime DB SEO/branding fields. `README.md:52-68` and `README.md:187-205` match the static import behavior.
 
-Current best one-sentence position:
+## Findings
 
-GalleryKit is a self-hosted publishing gallery for photographers who already finished their edits and want private originals, color-conscious public derivatives, first-party analytics, and optional operator-runbook semantic search without moving the archive into a hosted SaaS.
+### PMKT-C7F-01 - The live demo sells Atik's gallery, not GalleryKit's product promise
 
-Avoid:
+Severity: Low-Medium
+Confidence: High
+Status: confirmed
 
-- "AI gallery" unless every instance of the copy repeats disabled-by-default/operator-runbook semantics.
-- "Team gallery" unless the copy says trusted full-admin team.
-- "Runtime configurable" for JSON-owned fields unless the implementation changes away from static JSON imports.
-- "Lightroom plugin" or "Lightroom integration" beyond the current PAT upload API contract.
+Evidence:
 
-## Prioritized Fixes
+- `README.md:22-24` sends prospects to `https://gallery.atik.kr` as the live demo.
+- Live browser evidence on `/en`: the first viewport is a real gallery headed `Latest`, with tag filters, photo cards, search, and the `Atik Gallery` brand. The footer exposes `Privacy`, `GitHub`, and `Admin`, but no "About GalleryKit", install, product promise, or "for/not for" context.
+- Source: `apps/web/src/app/[locale]/(public)/page.tsx:212-235` renders JSON-LD plus `HomeClient` and `OnThisDayWidget`; there is no product/demo explainer surface.
+- Source: `apps/web/src/components/footer.tsx:32-59` renders only instance footer text, Privacy, GitHub, and Admin.
+- Source config: `apps/web/src/site-config.json:2-10` brands the instance as `Atik Gallery` with description `A self-hosted finished-photo gallery by Atik`.
 
-Tier 0 - Blocking before broader non-technical launch:
+Failure scenario:
 
-- Fix the site-config runtime/rebuild messaging gap. This is the only finding likely to cause privacy or branding surprises immediately after deploy.
+A photographer or technical buyer clicks "Live Demo" from the README, sees a polished personal gallery, and leaves without understanding the product wedge: self-hosted finished-photo publishing, private originals, color-conscious derivatives, first-party analytics, and operator-runbook semantic search. The demo proves UI quality, but it does not convert curiosity into a product understanding unless the visitor returns to GitHub and reads the README.
 
-Tier 1 - High leverage trust fixes:
+Suggested fix:
 
-- Replace the nginx demo `server_name` with a placeholder/catch-all template value.
-- Add "trusted full-admin team" wording wherever "small teams" appears.
+Keep the demo gallery-first, but add one low-friction product path: a footer link or unobtrusive `/about-gallerykit` page that states what GalleryKit is, who it is for/not for, what is enabled on the demo, and where to install it. Avoid a marketing hero on the actual gallery home; the product link should not degrade the photographer-facing demo.
 
-Tier 2 - Growth/positioning improvements:
+### PMKT-C7F-02 - The strongest positioning sentence is too dense for first-contact readers
 
-- Add a README capability table separating default user features, admin features, and operator-runbook features.
-- Create one short "what changes require rebuild vs admin save vs backfill" deployment section.
+Severity: Low
+Confidence: High
+Status: confirmed
 
-Tier 3 - Long-term moat:
+Evidence:
 
-- Productize production semantic search activation in admin only after the model-weight, env, DB mode, and backfill state can be verified safely from the UI.
-- Add non-root roles before marketing GalleryKit to assistant-heavy studio workflows.
+- `README.md:29` is one long paragraph containing audience, private originals, SaaS avoidance, public derivatives, color limits, operator semantic search, first-party analytics, and optional Google Analytics.
+- `README.md:36-44` immediately follows with feature bullets that include highly technical proof points such as NCLX `colr`, Bradford adaptation, 4:4:4 chroma JPEG, libheif 10-bit AVIF, Base56 keys, bounded newest-first embedding scans, and Argon2 root-admin accounts.
+- These claims are implementation-backed, but the first-reader hierarchy is "dense proof matrix before plain promise."
+
+Failure scenario:
+
+A non-specialist photographer or small studio operator who is a viable self-hosting buyer understands "private originals" and "finished-photo publishing", but bounces before reaching the crisp "For/Not for" line because the first product paragraph and feature block read like an engineering decision record. The repo is credible but less skimmable than it could be.
+
+Suggested fix:
+
+Keep all technical proof, but restructure the top README into:
+
+1. One short promise sentence.
+2. Three plain-language value bullets: private originals, color-honest public delivery, self-hosted admin/sharing.
+3. A compact status table: default features, admin features, operator-runbook features.
+4. Move the codec/color/search internals into a "Technical proof" subsection.
+
+### PMKT-C7F-03 - 404 tab titles weaken product trust and share-link recovery
+
+Severity: Low
+Confidence: High
+Status: confirmed
+
+Evidence:
+
+- Browser route: `https://gallery.atik.kr/en/nonexistent-topic-cycle7-lane-f`
+- DOM/browser result: visible 404 shell was correct, but `document.title` stayed `ATIK.KR Gallery`.
+- Source: `apps/web/src/app/[locale]/not-found.tsx:12-49` renders the not-found shell without title handling.
+- Source/test gap: `apps/web/e2e/not-found-status.spec.ts:14-89` verifies status and robots but not the human-facing tab title.
+
+Failure scenario:
+
+GalleryKit's public sharing promise depends on clean photo/topic/group links. When a stale or mistyped share link opens, the visible page says "Page not found" but the browser tab still looks like a valid gallery. That makes support screenshots, browser history, and multi-tab recovery less trustworthy.
+
+Suggested fix:
+
+Share the designer fix: set a localized 404 title such as `Page not found | Atik Gallery` and add a regression test. This is a product trust issue, not only an accessibility issue.
 
 ## Final Sweep
 
-Swept README, app README, CLAUDE, site config, admin navigation, Settings semantic-search UI, search route, upload API, token actions, privacy page, map tile behavior, upload accept list, upload/original paths, color/HDR rendering, Docker compose, nginx config, and package metadata. No source files were edited. No tests were run because this was a read-only product/docs review artifact. The main implementation is stronger than the remaining marketing surface; the review findings are about expectation-setting and operator trust, not missing core gallery functionality.
+Checked claim categories:
+
+- Audience and positioning
+- Live demo conversion path
+- Finished-photo vs editing/culling/scoring/proofing/payment claims
+- Private originals and public derivatives
+- Color/HDR honesty and codec caveats
+- Semantic search activation and production gating
+- Admin team/root-account limitations
+- Upload API/PAT scope claims
+- Local-only storage support
+- PWA/offline wording
+- Privacy, analytics, GPS/map metadata, and OpenStreetMap tile disclosure
+- Docker/deploy/configuration expectation setting
+- Public smart collections and admin operability
+- SEO/not-found/share-link trust
+
+No source files or plans were modified. The remaining product-marketing issues are expectation-setting and conversion-path issues; the core product claims are substantially backed by code and docs.
