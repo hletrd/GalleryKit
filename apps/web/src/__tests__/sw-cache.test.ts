@@ -311,7 +311,7 @@ describe('sw-cache: recordAndEvict quota-evicted entries (R4C6 TEST-R4C6-11)', (
     }
   }
 
-  it('does not count bytes for entries the browser already evicted', async () => {
+  it('pays down the tracked total for phantom entries so real entries are NOT over-evicted (C4-02/DBG4-02)', async () => {
     const phantomUrl = 'http://localhost/uploads/avif/phantom.avif';
     const realUrl = 'http://localhost/uploads/avif/real.avif';
     const cache = new PhantomCacheStore(new Set([phantomUrl]));
@@ -323,17 +323,68 @@ describe('sw-cache: recordAndEvict quota-evicted entries (R4C6 TEST-R4C6-11)', (
       ]),
     );
 
-    // Cap 1000; adding 300 pushes the tracked total to 1500 → evict from
-    // the oldest. The phantom (already quota-evicted by the browser)
-    // contributes 0 evicted bytes; the real entry contributes 600.
+    // Cap 1000; adding 300 pushes the TRACKED total to 1500. Dropping the
+    // phantom's 600 tracked-but-not-occupied bytes brings it to 900 — under
+    // cap — so the walk must STOP there: the real entry survives and zero
+    // Cache Storage bytes are reported evicted. (The pre-C4-02 code kept the
+    // phantom's bytes in `total` and sacrificed the real entry for them.)
     const evicted = await recordAndEvict('http://localhost/uploads/avif/new.avif', 300, cache, meta, 1000);
 
+    expect(evicted).toBe(0);
+    const snapshot = meta.snapshot();
+    expect(snapshot.has(phantomUrl)).toBe(false);
+    expect(snapshot.has(realUrl)).toBe(true);
+    expect(snapshot.has('http://localhost/uploads/avif/new.avif')).toBe(true);
+  });
+
+  it('reports only actually-freed bytes when real evictions are still needed past a phantom', async () => {
+    const phantomUrl = 'http://localhost/uploads/avif/phantom.avif';
+    const realUrl = 'http://localhost/uploads/avif/real.avif';
+    const cache = new PhantomCacheStore(new Set([phantomUrl]));
+    const meta = new MockMetaStore();
+    await meta.setAll(
+      new Map([
+        [phantomUrl, { url: phantomUrl, size: 600, timestamp: 1 }],
+        [realUrl, { url: realUrl, size: 600, timestamp: 2 }],
+      ]),
+    );
+
+    // Cap 1000; adding 600 → tracked total 1800. Phantom drops it to 1200
+    // (still over, contributes 0 evicted); the real entry's genuine eviction
+    // frees 600 (total 600, under cap). The just-written entry survives.
+    const evicted = await recordAndEvict('http://localhost/uploads/avif/new.avif', 600, cache, meta, 1000);
+
     expect(evicted).toBe(600);
-    // Both stale metadata entries are dropped regardless.
     const snapshot = meta.snapshot();
     expect(snapshot.has(phantomUrl)).toBe(false);
     expect(snapshot.has(realUrl)).toBe(false);
     expect(snapshot.has('http://localhost/uploads/avif/new.avif')).toBe(true);
+  });
+
+  it('DBG4-02 repro: accumulated phantoms must not evict a fresh write that fits the cap', async () => {
+    // Two 20 MB phantoms (quota-evicted by the browser) + one genuinely
+    // fresh 20 MB write against a 50 MB cap: real occupancy is 20 MB. The
+    // pre-C4-02 walk could never pay the phantoms' 40 MB down, so it evicted
+    // the entry it had JUST written and emptied the whole meta map.
+    const mb = 1024 * 1024;
+    const p1 = 'http://localhost/uploads/avif/p1.avif';
+    const p2 = 'http://localhost/uploads/avif/p2.avif';
+    const fresh = 'http://localhost/uploads/avif/fresh.avif';
+    const cache = new PhantomCacheStore(new Set([p1, p2]));
+    const meta = new MockMetaStore();
+    await meta.setAll(
+      new Map([
+        [p1, { url: p1, size: 20 * mb, timestamp: 1 }],
+        [p2, { url: p2, size: 20 * mb, timestamp: 2 }],
+      ]),
+    );
+
+    const evicted = await recordAndEvict(fresh, 20 * mb, cache, meta, 50 * mb);
+
+    expect(evicted).toBe(0);
+    const snapshot = meta.snapshot();
+    expect(snapshot.has(fresh)).toBe(true);
+    expect(snapshot.has(p1)).toBe(false);
   });
 });
 

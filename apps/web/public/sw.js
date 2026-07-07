@@ -23,7 +23,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '26516421-p7';
+const SW_VERSION = 'ff098f0f-p7';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;
@@ -125,13 +125,15 @@ async function recordAndEvict(url, newSize) {
       // Head-walk in insertion (= recency) order: oldest first, no sort.
       for (const entry of entries.values()) {
         if (total <= MAX_IMAGE_BYTES) break;
-        const deleted = await imageCache.delete(entry.url);
-        // Only adjust the running total if the entry was actually present
-        // in the cache. Browser quota evictions may have removed it
-        // independently of our metadata Map.
-        if (deleted) {
-          total -= entry.size;
-        }
+        await imageCache.delete(entry.url);
+        // C4-02 / DBG4-02 (run-10 c4): decrement `total` UNCONDITIONALLY —
+        // the entry leaves the tracked set either way, so its tracked bytes
+        // must leave the running total too. Gating on delete-success let
+        // PHANTOM entries (browser quota-evicted independently of our
+        // metadata) pin un-payable bytes in `total`, forcing eviction of
+        // REAL fresh entries — including the one this call just wrote.
+        // Keep in lockstep with lib/sw-cache.ts.
+        total -= entry.size;
         entries.delete(entry.url);
       }
     }

@@ -137,15 +137,19 @@ export async function recordAndEvict(
         // Never evict the entry we just added if we can avoid it — but if we
         // absolutely must (e.g. single entry > cap) we do so anyway.
         const deleted = await cache.delete(entry.url);
-        // R4C6 TEST-R4C6-11: only adjust the running total / evicted count
-        // when the entry was actually present in the cache. Browser quota
-        // evictions may have removed it independently of our metadata Map —
-        // the shipped template gained this guard and the reference module
-        // had drifted behind it (and overcounted `evicted`).
+        // C4-02 / DBG4-02 (run-10 c4): decrement `total` UNCONDITIONALLY —
+        // the entry leaves the tracked set either way (entries.delete below),
+        // so its tracked bytes must leave the running total too. Gating the
+        // decrement on `deleted` (the prior R4C6 shape) let PHANTOM entries
+        // (browser quota-evicted independently of our metadata) pin
+        // un-payable bytes in `total`, forcing the walk to evict REAL,
+        // freshly-cached entries — reproducibly including the very entry this
+        // call just wrote. `evicted` stays gated on `deleted` because it
+        // reports actually-freed Cache Storage bytes.
         if (deleted) {
           evicted += entry.size;
-          total -= entry.size;
         }
+        total -= entry.size;
         entries.delete(entry.url);
       }
     }

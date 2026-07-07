@@ -167,13 +167,18 @@ describe('sw.template.js HTML offline fallback (COR-R4C6-05)', () => {
     });
 });
 
-describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-11)', () => {
-    it('recordAndEvict only adjusts totals for entries actually deleted', () => {
+describe('sw.template.js LRU accounting parity with lib/sw-cache.ts (TEST-R4C6-11 / C4-02)', () => {
+    it('recordAndEvict pays the tracked total down UNCONDITIONALLY (phantom entries must not evict real ones)', () => {
+        // C4-02 / DBG4-02 (run-10 c4): the prior `if (deleted) { total -= }`
+        // shape let browser-quota-evicted phantom entries pin un-payable
+        // bytes in the walk's total, forcing eviction of genuinely-cached
+        // fresh entries. The decrement must be unconditional.
         const fnIdx = TEMPLATE.indexOf('async function recordAndEvict');
         const fnEnd = TEMPLATE.indexOf('async function', fnIdx + 1);
         const fn = TEMPLATE.slice(fnIdx, fnEnd);
-        expect(fn).toMatch(/const deleted = await imageCache\.delete\(entry\.url\);/);
-        expect(fn).toMatch(/if \(deleted\) \{/);
+        expect(fn).toMatch(/await imageCache\.delete\(entry\.url\);/);
+        expect(fn).toMatch(/total -= entry\.size;\s*\n\s*entries\.delete\(entry\.url\);/);
+        expect(fn).not.toMatch(/if \(deleted\) \{\s*\n\s*total -= entry\.size;/);
     });
 
     // AGG-H3 (run-6 cycle-2): lock the head-walk-no-sort eviction + the
