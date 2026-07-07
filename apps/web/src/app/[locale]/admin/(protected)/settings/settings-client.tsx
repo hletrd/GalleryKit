@@ -74,7 +74,19 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
     const [baseline, setBaseline] = useState<Record<string, string>>(initialSettings);
     const initialRef = useRef<Record<string, string>>(initialSettings);
     const saveButtonRef = useRef<HTMLButtonElement>(null);
-    useRestoreFocusAfterPending(saveButtonRef, isPending);
+    // C7-11 (run-10 cycle 7b): the long form has TWO Save buttons (header +
+    // bottom, b4f57c6f). Restore focus to the one the user actually
+    // activated — a fixed ref would yank a keyboard user who pressed the
+    // bottom button back to the top of the page. Defaults to the header
+    // button until either is clicked.
+    const bottomSaveButtonRef = useRef<HTMLButtonElement>(null);
+    const lastActivatedSaveRef = useRef<HTMLButtonElement | null>(null);
+    useRestoreFocusAfterPending(lastActivatedSaveRef, isPending);
+    useEffect(() => {
+        if (!lastActivatedSaveRef.current) {
+            lastActivatedSaveRef.current = saveButtonRef.current;
+        }
+    }, []);
 
     // AGG-R5C3-04: surface the last backfill run's outcome to the admin. The
     // runner already computed encode/detection-failure counters but nothing
@@ -324,7 +336,15 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     </Button>
                     <h1 className="min-w-0 text-3xl font-bold tracking-tight">{t('settings.title')}</h1>
                 </div>
-                <Button ref={saveButtonRef} onClick={handleSave} disabled={isPending} className="min-h-11 gap-2 self-start sm:self-auto">
+                <Button
+                    ref={saveButtonRef}
+                    onClick={() => {
+                        lastActivatedSaveRef.current = saveButtonRef.current;
+                        handleSave();
+                    }}
+                    disabled={isPending}
+                    className="min-h-11 gap-2 self-start sm:self-auto"
+                >
                     {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     {isPending ? t('settings.saving') : t('settings.save')}
                 </Button>
@@ -856,7 +876,16 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
             </Card>
 
             <div className="flex justify-end border-t pt-4">
-                <Button type="button" onClick={handleSave} disabled={isPending} className="min-h-11 gap-2">
+                <Button
+                    type="button"
+                    ref={bottomSaveButtonRef}
+                    onClick={() => {
+                        lastActivatedSaveRef.current = bottomSaveButtonRef.current;
+                        handleSave();
+                    }}
+                    disabled={isPending}
+                    className="min-h-11 gap-2"
+                >
                     {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     {isPending ? t('settings.saving') : t('settings.save')}
                 </Button>

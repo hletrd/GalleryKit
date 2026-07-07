@@ -223,17 +223,22 @@ interface SimilarThumbProps {
 function SimilarThumb({ imageId, label, sizedSrc, baseSrc, locale }: SimilarThumbProps) {
     const [imgSrc, setImgSrc] = useState(sizedSrc);
     const fallbackTriedRef = useRef(false);
+    // C7-10 (run-10 cycle 7b): append the #id disambiguator exactly as
+    // SearchResultItem does (4d37daa4 directive: keep visible and accessible
+    // search-result labels aligned) — same-titled photos in the grid are
+    // otherwise indistinguishable to AT/keyboard users.
+    const resultLabel = `${label} #${imageId}`;
 
     return (
         <Link
             href={localizePath(locale, `/p/${imageId}`)}
             className="block rounded-md overflow-hidden bg-muted aspect-square min-h-11 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            title={label}
-            aria-label={label}
+            title={resultLabel}
+            aria-label={resultLabel}
         >
             <Image
                 src={imgSrc}
-                alt={label}
+                alt={resultLabel}
                 width={96}
                 height={96}
                 className="w-full h-full object-cover"
