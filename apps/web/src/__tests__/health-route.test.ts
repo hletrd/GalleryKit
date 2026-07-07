@@ -71,4 +71,23 @@ describe('/api/health', () => {
         await expect(response.json()).resolves.toEqual({ status: 'ok' });
         expect(executeMock).not.toHaveBeenCalled();
     });
+
+    it('coalesces concurrent probes onto a single in-flight query (C4-20)', async () => {
+        process.env.HEALTH_CHECK_DB = 'true';
+        let resolveExec: (value: unknown) => void = () => {};
+        executeMock.mockImplementationOnce(
+            () => new Promise((resolve) => { resolveExec = resolve; }),
+        );
+
+        // Two overlapping readiness checks arrive before the probe resolves.
+        const p1 = GET();
+        const p2 = GET();
+        resolveExec([{ ok: 1 }]);
+        const [r1, r2] = await Promise.all([p1, p2]);
+
+        expect(r1.status).toBe(200);
+        expect(r2.status).toBe(200);
+        // Both requests shared ONE SELECT rather than piling two pool slots.
+        expect(executeMock).toHaveBeenCalledTimes(1);
+    });
 });
