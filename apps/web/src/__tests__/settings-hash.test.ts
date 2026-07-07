@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { _buildHashForTesting, getColorSettingsHash, COLOR_IMPACTING_KEYS } from '@/lib/settings-hash';
+import type { GalleryConfig } from '@/lib/gallery-config';
 
 describe('COLOR_IMPACTING_KEYS exhaustiveness (R16C16 TE-16-04)', () => {
     it('contains exactly the 9 documented byte-impacting keys', () => {
@@ -204,5 +205,51 @@ describe('color settings hash (P4-E2)', () => {
             image_sizes: '640,1536,2048,4096',
         });
         expect(configHash).toBe(rawValidHash);
+    });
+
+    it('C6-02: flipping each byte-impacting config field changes the config-path hash', async () => {
+        // Closes the architect F1 gap: buildHashFromConfig used to hand-maintain a
+        // 9-key object literal decoupled from COLOR_IMPACTING_KEYS. If a future
+        // byte-impacting setting is added to COLOR_IMPACTING_KEYS but its config
+        // mapper is forgotten, the serve-upload (config-arg) ETag would go
+        // INVARIANT to that setting — a silent stale-derivative bug. This test
+        // asserts every key's config field actually moves the hash; the mapper is
+        // now also `Record<ColorImpactingKey, …>` so a missing mapper is a tsc
+        // error, and the `flips` map below is likewise keyed exhaustively.
+        const base: GalleryConfig = {
+            wideGamutJpegChroma: '4:4:4',
+            sdrJpegChroma: '4:2:0',
+            avifEffort: 6,
+            forceSrgbDerivatives: false,
+            wideGamutMaxSourcePixels: 50_000_000,
+            imageQualityWebp: 90,
+            imageQualityAvif: 85,
+            imageQualityJpeg: 90,
+            imageSizes: [640, 1536, 2048, 4096],
+            stripGpsOnUpload: false,
+            slideshowIntervalSeconds: 5,
+            autoAltTextEnabled: false,
+            semanticSearchMode: 'disabled',
+            allowHdrIngest: false,
+            forceShowColorChips: false,
+        };
+        const baseHash = await getColorSettingsHash(base);
+
+        const flips: Record<(typeof COLOR_IMPACTING_KEYS)[number], GalleryConfig> = {
+            wide_gamut_jpeg_chroma: { ...base, wideGamutJpegChroma: '4:2:0' },
+            sdr_jpeg_chroma: { ...base, sdrJpegChroma: '4:4:4' },
+            avif_effort: { ...base, avifEffort: 3 },
+            force_srgb_derivatives: { ...base, forceSrgbDerivatives: true },
+            wide_gamut_max_source_pixels: { ...base, wideGamutMaxSourcePixels: 25_000_000 },
+            image_quality_webp: { ...base, imageQualityWebp: 80 },
+            image_quality_avif: { ...base, imageQualityAvif: 70 },
+            image_quality_jpeg: { ...base, imageQualityJpeg: 95 },
+            image_sizes: { ...base, imageSizes: [640, 1024] },
+        };
+
+        for (const key of COLOR_IMPACTING_KEYS) {
+            const flippedHash = await getColorSettingsHash(flips[key]);
+            expect(flippedHash, `flipping ${key} must change the config-path hash`).not.toBe(baseHash);
+        }
     });
 });

@@ -76,21 +76,34 @@ function buildHash(values: Record<string, string | undefined>): string {
 
 const FALLBACK_HASH = buildHash({});
 
+// C6-02 (run-10 cycle-6): single authoritative mapping from every
+// COLOR_IMPACTING_KEY to its resolved-config value. Typing this as a
+// `Record<(typeof COLOR_IMPACTING_KEYS)[number], …>` makes `tsc` REQUIRE a
+// mapper for every key — so a future byte-impacting setting added to
+// COLOR_IMPACTING_KEYS but forgotten here is a compile error instead of a
+// silently config-path-invariant ETag (the failure the whole hash exists to
+// prevent). The no-arg DB path already iterates COLOR_IMPACTING_KEYS; this makes
+// the config-arg path do the same, closing the hand-maintained-copy drift.
+const CONFIG_HASH_VALUE_MAPPERS: Record<(typeof COLOR_IMPACTING_KEYS)[number], (config: GalleryConfig) => string> = {
+    wide_gamut_jpeg_chroma: (config) => config.wideGamutJpegChroma,
+    sdr_jpeg_chroma: (config) => config.sdrJpegChroma,
+    avif_effort: (config) => String(config.avifEffort),
+    force_srgb_derivatives: (config) => String(config.forceSrgbDerivatives),
+    wide_gamut_max_source_pixels: (config) => String(config.wideGamutMaxSourcePixels),
+    image_quality_webp: (config) => String(config.imageQualityWebp),
+    image_quality_avif: (config) => String(config.imageQualityAvif),
+    image_quality_jpeg: (config) => String(config.imageQualityJpeg),
+    image_sizes: (config) => [...config.imageSizes].sort((a, b) => a - b).join(','),
+};
+
 // R8-H1: build hash from resolved GalleryConfig values instead of raw DB strings.
 // This prevents ETag misalignment when invalid DB values are stored (e.g.
 // image_quality_avif=150) but the encoder falls back to defaults.
 function buildHashFromConfig(config: GalleryConfig): string {
-    const values: Record<string, string> = {
-        wide_gamut_jpeg_chroma: config.wideGamutJpegChroma,
-        sdr_jpeg_chroma: config.sdrJpegChroma,
-        avif_effort: String(config.avifEffort),
-        force_srgb_derivatives: String(config.forceSrgbDerivatives),
-        wide_gamut_max_source_pixels: String(config.wideGamutMaxSourcePixels),
-        image_quality_webp: String(config.imageQualityWebp),
-        image_quality_avif: String(config.imageQualityAvif),
-        image_quality_jpeg: String(config.imageQualityJpeg),
-        image_sizes: [...config.imageSizes].sort((a, b) => a - b).join(','),
-    };
+    const values: Record<string, string> = {};
+    for (const key of COLOR_IMPACTING_KEYS) {
+        values[key] = CONFIG_HASH_VALUE_MAPPERS[key](config);
+    }
     return buildHash(values);
 }
 
