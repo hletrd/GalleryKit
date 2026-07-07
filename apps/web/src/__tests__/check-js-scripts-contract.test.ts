@@ -14,6 +14,11 @@ describe('check-js-scripts discovery contract', () => {
         expect(checkerSource).toContain('process.exit(1)');
     });
 
+    it('checks both app scripts and root operator scripts', () => {
+        expect(checkerSource).toContain("path.join(appDir, 'scripts')");
+        expect(checkerSource).toContain("path.join(repoRoot, 'scripts')");
+    });
+
     it('remains valid JavaScript', () => {
         expect(() => execFileSync(process.execPath, ['--check', checkerPath], { stdio: 'pipe' })).not.toThrow();
     });

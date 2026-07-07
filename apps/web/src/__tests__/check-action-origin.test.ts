@@ -742,6 +742,23 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
     });
 
+    it('fails disposable admin-mutation slots that check acquired after mutating', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                using mutationSlot = acquireAdminMutationSlot();
+                await db.update(settings).set(input);
+                if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+    });
+
     it('passes reasoned mutation-barrier exemptions for equivalent restore fences', () => {
         const src = withApprovedActionGuard(`
             /** @mutation-barrier-exempt: restore owns the exclusive barrier side and drains shared slots */

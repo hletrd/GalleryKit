@@ -4,8 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const appDir = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const repoRoot = path.resolve(appDir, '..', '..');
 const scanRoots = [
   path.join(appDir, 'scripts'),
+  path.join(repoRoot, 'scripts'),
 ];
 
 function collectJavaScriptFiles(root) {

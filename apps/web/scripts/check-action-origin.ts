@@ -625,7 +625,7 @@ function statementReturnsEarly(statement: ts.Statement): boolean {
     return false;
 }
 
-function statementChecksMutationSlotAcquired(statement: ts.Statement, slotName: string): boolean {
+function statementIsMutationSlotEarlyReturnGate(statement: ts.Statement, slotName: string): boolean {
     if (!ts.isIfStatement(statement)) return false;
     const condition = unwrapExpression(statement.expression);
     if (
@@ -635,7 +635,20 @@ function statementChecksMutationSlotAcquired(statement: ts.Statement, slotName: 
     ) {
         return statementReturnsEarly(statement.thenStatement);
     }
+    return false;
+}
+
+function statementIsMutationSlotPositiveGuard(statement: ts.Statement, slotName: string): boolean {
+    if (!ts.isIfStatement(statement)) return false;
+    const condition = unwrapExpression(statement.expression);
     return expressionReadsMutationSlotAcquired(condition, slotName);
+}
+
+function statementChecksMutationSlotAcquired(statement: ts.Statement, slotName: string): boolean {
+    return (
+        statementIsMutationSlotEarlyReturnGate(statement, slotName)
+        || statementIsMutationSlotPositiveGuard(statement, slotName)
+    );
 }
 
 function isApprovedMutationSlotCall(expression: ts.Expression | undefined, approvedImports: Set<string>): boolean {
@@ -672,7 +685,8 @@ function bodyAcquiresAdminMutationSlot(
                     continue;
                 }
                 const slotName = declaration.name.text;
-                if (block.statements.slice(i + 1).some((next) => statementChecksMutationSlotAcquired(next, slotName))) {
+                const nextStatement = block.statements[i + 1];
+                if (nextStatement && statementChecksMutationSlotAcquired(nextStatement, slotName)) {
                     return true;
                 }
             }

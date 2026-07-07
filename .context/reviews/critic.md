@@ -1,180 +1,114 @@
-# Cycle 20 Critic Review
+# Cycle 21 Critic Review
 
 Date: 2026-07-08 KST
-Role lane: critic
-Repository: `/Users/hletrd/flash-shared/gallery`
-Mode: review-only. No source fixes, commits, pushes, deploys, or unrelated file edits performed.
+Repo: `/Users/hletrd/flash-shared/gallery`
+Review HEAD: `45b32d1db373e03d82a29511f53832051c770880`
+Role: cycle-21 critic lane
 
-## Inventory
+Required docs read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`. Review protocol loaded from the `code-review` skill.
 
-Authority and context read first: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`, the cycle-20 plan/deferred files, current peer review files, and the `code-review` skill instructions.
+## Review-Relevant Inventory
 
-Tracked inventory was built from `git ls-files`, `rg --files`, package/config inspection, and targeted line-number reads. The tracked repository currently contains 3,511 files, including 543 `.ts`, 111 `.tsx`, 30 SQL migrations, 9 `.mjs`, 6 `.js`, 22 `.json`, 4 workflow YAML files, Docker/Compose/nginx/deploy assets, 363 unit-test files under `apps/web/src/__tests__`, and Playwright specs under `apps/web/e2e`.
+- Current HEAD/worktree: `git rev-parse HEAD` matched `45b32d1db373e03d82a29511f53832051c770880`; worktree was clean before writing this file.
+- Source inventory sampled: `apps/web/src` (626 files), `apps/web/src/__tests__` (362 files), `apps/web/e2e` (12 files), `apps/web/scripts` (29 files), `apps/web/drizzle` + meta (33 files), `apps/web/messages` (2 files), root/app docs, deploy helpers, and nginx template.
+- Review/plan lineage inspected: top-level `.context/reviews/_aggregate.md`, top-level per-lane reports, `.context/plans/cycle-20-2026-07-08-{plan,deferred}.md`, `.context/plans/deferred-carry-forward.md`, Cycle 19 dated pair, loop-B Cycle 9 pair, and `.context/plans/README.md`.
+- Code paths sampled in detail: browser upload, Lightroom/PAT upload, restore/backup, image queue, admin backfill, shared-group data/cache, public search, semantic/similar search, map, smart collections, migration reconcile, source-contract tests, Playwright/CI, deploy scripts, and nginx edge limits.
 
-Review-relevant surfaces examined:
+## Findings
 
-- Product/public routes: home, topic, photo, share/group, smart collection, map, timeline/year, search, uploads, OG, feed, sitemap, manifest, service worker.
-- Admin routes/actions: dashboard, image manager, topics/tags/settings/SEO/users/tokens/password, backup/restore, browser upload, PAT upload.
-- Core architecture: schema/migrations/reconcile, auth/session/origin/rate-limit gates, restore maintenance, advisory locks, upload tracker, image queue/backfills, CLIP embeddings/search, privacy selects, CSP/proxy behavior.
-- Operations/release: `Dockerfile`, `docker-compose.yml`, `deploy.sh`, remote deploy wrapper, nginx template, CI workflows, Playwright config, migration and one-off scripts.
-- Tests/docs: lint gates, type/build/unit/e2e scripts, source-contract tests, touch-target audit, docs and historical plan/review records where they could overstate current behavior.
+### C21-CRIT-01 - Carry-forward age accounting is stale enough to disable the age-budget policy
 
-Skipped as non-review source: `node_modules`, generated build outputs, runtime media/data directories, ignored local secrets, binary fixture/media content except where referenced by tests.
+- Severity: Medium
+- Confidence: High
+- Region: `.context/plans/README.md:16-32`; `.context/plans/deferred-carry-forward.md:19-27`; `.context/plans/deferred-carry-forward.md:56-84`; `.context/plans/deferred-carry-forward.md:140-198`; `.context/plans/deferred-carry-forward.md:200-220`
+- Problem: The README says deferred High rows crossing 8 cycles must be scheduled/reclassified and Medium rows crossing 16 cycles need explicit re-justification. The carry-forward register claims to make that mechanical, but at r10c20 it still lists run-10 cycle-1 rows as age `3`, run-10 cycle-2 as `2`, cycle-3 as `1`, cycle-4/6/7b/8b as `0`, while newer cycle-18/19/20 rows are also partially aged from a different frame. The prose says Cycle 19 is one cycle old, but older rows are not advanced from their actual first-deferred cycles.
+- Failure scenario: An old Medium/High or High row can be repeatedly re-listed without hitting the README checkpoint because the mechanical table says it is below threshold. That undermines the main policy intended to prevent indefinite deferral.
+- Suggested fix: Recompute ages from `First deferred` to the current active cycle, either with a small script/test that parses the table or by replacing the hand-maintained age column with derived cycle groups. Then re-run the 8-cycle/16-cycle checkpoint against the corrected ages and either re-justify or schedule rows that cross the line.
 
-The worktree already had concurrent modified review artifacts, including `.context/reviews/critic.md`; I treated this file as my assigned write scope and did not touch other modified files.
+### C21-CRIT-02 - Cycle 20 release ledger still has the HEAD docs deploy/push step unchecked
 
-## Confirmed Issues
+- Severity: Medium
+- Confidence: High
+- Region: `.context/plans/cycle-20-2026-07-08-plan.md:3`; `.context/plans/cycle-20-2026-07-08-plan.md:135-163`; commit `45b32d1d` message `Not-tested: ... post-docs deploy runs after this commit`
+- Problem: The active plan says source commit `d8e604ef` was pushed/deployed, but the final docs-ledger commit/deploy is still unchecked. Current HEAD is exactly that docs-ledger commit (`45b32d1d`), and the commit trailer says post-docs deploy runs after the commit, but the plan has no evidence that it happened.
+- Failure scenario: Future review-plan-fix cycles treat Cycle 20 as fully deployed because the plan index says “gates, push, and per-cycle deploy,” while the authoritative plan still records the terminal HEAD deploy as pending. This repeats the older ledger pattern where missing deploy evidence had to be superseded by later cycles.
+- Suggested fix: Update the Cycle 20 plan with explicit `45b32d1d` push/deploy/smoke evidence, or explicitly state the docs commit was not deployed and what later deploy superseded it. Add a release-ledger check that the current HEAD appears in terminal deploy evidence before a cycle is marked complete.
 
-### CRIT20-01 - Browser and PAT upload paths still duplicate the same ingest contract
+### C21-CRIT-03 - Browser and PAT upload paths still duplicate the same ingest transaction contract
 
 - Severity: High
 - Confidence: High
-- File/region: `apps/web/src/app/actions/images.ts:129-653`; `apps/web/src/app/api/admin/lr/upload/route.ts:84-633`
-- Failure scenario: A future upload-time invariant, privacy rule, queue field, metadata column, or cleanup step is added to one path and missed in the other. Browser uploads pass while external publish-client uploads bypass the new behavior or write incomplete metadata.
-- Concrete fix: Extract a shared ingest service that owns config snapshot, quota claim/settlement, topic validation, original save, GPS/HDR/color normalization, DB insert, queue payload, audit, revalidation, and cleanup. Keep only auth/request parsing in the Server Action and PAT route adapters. Add parity tests against the shared service.
+- Region: `apps/web/src/app/actions/images.ts:129-269`; `apps/web/src/app/actions/images.ts:540-578`; `apps/web/src/app/api/admin/lr/upload/route.ts:84-188`; `apps/web/src/app/api/admin/lr/upload/route.ts:560-630`
+- Problem: Browser uploads and Lightroom/PAT uploads independently implement config snapshotting, quota settlement, file parsing, topic/tag validation, original save, EXIF/color forwarding, queue job payloads, audit/revalidation, and cleanup. The LR route comments explicitly document prior parity misses in forwarded processing settings and EXIF caption inputs.
+- Failure scenario: The next upload-time invariant, such as a new privacy scrub, color/HDR field, alt-text field, queue setting, or cleanup rule, lands in one adapter and silently misses the other. The product then has two upload entry points with different bytes/metadata/audit behavior.
+- Suggested fix: Extract a shared authenticated ingest service that owns validation, quota claim settlement, original persistence, DB insert, queue payload creation, cleanup, and audit hooks. Leave only transport/auth/response shaping in the server action and LR route. Add parity tests that assert both adapters call the same service contract.
 
-### CRIT20-02 - Upload quota settlement depends on comments and local discipline after a synchronous preclaim
+### C21-CRIT-04 - Large binary ingress still materializes framework `FormData` before streaming handoff
 
-- Severity: Medium
-- Confidence: Medium-High
-- File/region: `apps/web/src/app/actions/images.ts:259-269`, `apps/web/src/app/actions/images.ts:563-578`; `apps/web/src/app/api/admin/lr/upload/route.ts:160-188`; `apps/web/src/lib/upload-tracker.ts:19-33`; `apps/web/src/lib/upload-tracker-state.ts:70-78`
-- Failure scenario: A cleanup helper starts throwing, or a new awaited branch is inserted after the preclaim without calling the settlement closure. The process-local tracker leaks count/bytes until the window resets, causing false upload lockouts.
-- Concrete fix: Replace ad hoc closures with a `withUploadQuotaClaim(...)` helper or claim object whose `finally` reconciles exactly once from final success counters. Make tests cover thrown cleanup and mid-claim validation failures for both upload entry points.
-
-### CRIT20-03 - Normal public photo pages remain eligible for offline HTML caching after delete/unpublish
-
-- Severity: Medium
+- Severity: High
 - Confidence: High
-- File/region: `apps/web/public/sw.template.js:31-34`, `apps/web/public/sw.template.js:59-63`, `apps/web/public/sw.template.js:445-480`, `apps/web/public/sw.template.js:554-558`; `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:185-302`
-- Failure scenario: A photo is deleted, hidden, or removed for privacy/client reasons. A visitor who viewed it earlier can go offline and still load the cached photo page for up to 24 hours, including serialized metadata and derivative URLs.
-- Concrete fix: Exclude `/p/:id` from the offline HTML fallback, or implement a deletion/version tombstone that invalidates cached photo pages. Add a service-worker regression proving deleted photo pages are not served offline.
+- Region: `apps/web/src/app/actions/images.ts:148`; `apps/web/src/app/api/admin/lr/upload/route.ts:174-188`; `apps/web/src/app/[locale]/admin/db-actions.ts:407-420`; `apps/web/src/app/[locale]/admin/db-actions.ts:717-720`; `apps/web/next.config.ts:111-119`; `apps/web/src/lib/upload-limits.ts:1-35`
+- Problem: Browser uploads, PAT uploads, and DB restore all accept large multipart bodies after framework parsing into `FormData`/`File`. App-level caps exist, but near-limit requests still transiently allocate large request bodies before the domain code can stream to disk.
+- Failure scenario: A valid 200 MiB photo upload, 250 MiB restore, or concurrent upload batch spikes RSS/temp usage in the single web process that is also serving public dynamic pages and running Sharp/CLIP/background work.
+- Suggested fix: Move large ingress to streaming Route Handlers with pre-parse `Content-Length` checks, per-part caps, a shared large-body semaphore, temp-file handoff, and the shared ingest/restore services. Keep Server Actions for small form mutations.
 
-### CRIT20-04 - Public map hydrates a large exact-coordinate snapshot
+### C21-CRIT-05 - Queue and admin backfill each reserve the same DB/CPU headroom
 
-- Severity: Medium
+- Severity: High
 - Confidence: High
-- File/region: `apps/web/src/lib/data.ts:1766-1816`; `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`; `apps/web/src/db/schema.ts:123-131`
-- Failure scenario: A location-rich gallery opts many topics into the map. `/map` fetches and serializes up to 10,000 exact coordinates plus a full fallback list, then mounts all markers client-side. Mobile browsers can stall, and every visitor receives the full opted-in coordinate set.
-- Concrete fix: Replace all-at-once hydration with viewport/bbox fetching, clustering, pagination, and a lower initial payload budget. Add a suitable spatial/geohash/index strategy and a mobile performance test around high marker counts.
+- Region: `apps/web/src/db/index.ts:21-45`; `apps/web/src/lib/image-queue.ts:121-153`; `apps/web/src/lib/admin-backfill-runner.ts:106-143`; `apps/web/src/lib/admin-backfill-runner.ts:716-727`
+- Problem: The image queue and in-app admin backfill each calculate safe concurrency from the same 10-connection pool and each reserves roughly half for live traffic. They do not subtract the other background consumer. The documented per-lane math is locally true but globally optimistic.
+- Failure scenario: Fresh uploads plus an admin re-encode can run together and pin most of the pool while Sharp/libvips also consumes CPU. Public page/search requests then queue behind encode-duration connection holds despite each lane individually “leaving room.”
+- Suggested fix: Introduce a process-wide background-work budget shared by queue, color backfill, semantic/bootstrap work, and other heavyweight side effects. Acquire DB and CPU tokens before advisory locks and Sharp work; expose current token usage in admin status/logs.
 
-### CRIT20-05 - Semantic and similar search still do request-local O(n) embedding scans
-
-- Severity: Medium when production semantic search is enabled
-- Confidence: High
-- File/region: `apps/web/src/app/api/search/semantic/route.ts:263-311`; `apps/web/src/app/api/search/similar/[id]/route.ts:177-214`; `apps/web/src/lib/clip-embeddings.ts:36-48`; `apps/web/src/db/schema.ts:292-304`
-- Failure scenario: With a large corpus or raised `SEMANTIC_SCAN_LIMIT`, admitted public requests pull thousands of 2 KB blobs from MySQL, decode and score them in the Next request process, and compete with page rendering/image work.
-- Concrete fix: Move search to a vector index, sidecar service, or generation-owned cached matrix with explicit memory budget and invalidation. At minimum add a shared semantic-search concurrency budget so route-level rate limits are not the only cost control.
-
-### CRIT20-06 - Public keyword search remains a leading-wildcard multi-query scan
+### C21-CRIT-06 - Claim-exhausted image jobs bypass the permanent-failure cap helper
 
 - Severity: Medium
 - Confidence: High
-- File/region: `apps/web/src/app/actions/public.ts:247-329`; `apps/web/src/lib/data.ts:1574-1745`
-- Failure scenario: A crawler or curious visitor sends varied two-character-plus queries within the allowed budget. Each accepted query can force non-sargable `%term%` scans across image/topic fields and extra tag/alias grouped queries, slowing normal browsing.
-- Concrete fix: Add a maintained search-document table or MySQL full-text indexes. If fuzzy/caption search is desired, route that work through the semantic-search infrastructure rather than stacking wildcard SQL scans.
+- Region: `apps/web/src/lib/image-queue.ts:112-113`; `apps/web/src/lib/image-queue.ts:320-326`; `apps/web/src/lib/image-queue.ts:756-768`; `apps/web/src/lib/image-queue.ts:1025-1042`; `apps/web/src/lib/image-queue.ts:1155-1157`
+- Problem: Normal permanent failures add to `permanentlyFailedIds` and enforce FIFO eviction plus retry-map cleanup. The claim-exhaustion branch directly calls `state.permanentlyFailedIds.add(job.id)` without the cap/cleanup logic.
+- Failure scenario: A lock anomaly or stuck competing worker causes many jobs to exhaust claim retries. The process-local set grows beyond the documented `MAX_PERMANENTLY_FAILED_IDS`, and bootstrap builds an ever-growing `NOT IN (...)` predicate from it.
+- Suggested fix: Route every permanent-failure add through one helper, e.g. `markPermanentlyFailed(state, id)`, that enforces the cap and cleans `claimRetryCounts`, `retryCounts`, and `lastErrors`. Add a behavior test that drives the claim-exhaustion path past the cap.
 
-### CRIT20-07 - Topic slug remains a mutable natural key with manual fan-out
+### C21-CRIT-07 - Safety-critical tests still overfit source text instead of behavior
+
+- Severity: High
+- Confidence: High
+- Region: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`; `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-103`; `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:175-180`; `apps/web/src/__tests__/cycle-20-source-contracts.test.ts:31-63`; `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-77`; `apps/web/scripts/migrate.js:348-493`
+- Problem: Several high-risk contracts are pinned by source scans: migration reconcile coverage checks that column/index names appear in code, semantic/similar scan tests check import and `.limit(...)` substrings, and other cycle contracts assert text shapes. These tests are useful tripwires, but they do not prove runtime behavior, SQL shape, type/default equivalence, or failure ordering.
+- Failure scenario: A refactor preserves a string or import while changing the actual behavior, or a migration mirror names a column but gives it the wrong type/default. The source contract stays green while fresh installs or production migrations fail later.
+- Suggested fix: Keep source tripwires as cheap lint-like guards, but add DB-backed structural tests for `reconcileLegacySchema` against disposable MySQL/information_schema, behavioral route tests for semantic/similar caps, and executable tests for backup/restore child-process failure paths.
+
+### C21-CRIT-08 - Public dynamic surfaces still concentrate request-local DB/CPU/client work
 
 - Severity: Medium
 - Confidence: High
-- File/region: `apps/web/src/db/schema.ts:10-23`, `apps/web/src/db/schema.ts:25-40`; `apps/web/src/app/actions/topics.ts:287-372`
-- Failure scenario: A future table or JSON setting stores a topic slug and is not added to the rename transaction. Renaming a topic leaves that feature pointing at the deleted slug, causing empty views or lost associations while current tests pass.
-- Concrete fix: Move topic identity to an immutable surrogate ID with slug as mutable route/display state, or centralize slug-bearing stores in a registry that tests rename fan-out coverage whenever a new slug persistence site is added.
+- Region: `apps/web/src/app/actions/public.ts:247-329`; `apps/web/src/lib/data.ts:1574-1749`; `apps/web/src/app/api/search/semantic/route.ts:263-311`; `apps/web/src/app/api/search/similar/[id]/route.ts:177-214`; `apps/web/src/app/[locale]/(public)/map/page.tsx:13-14`; `apps/web/src/app/[locale]/(public)/map/page.tsx:42-111`; `apps/web/src/lib/data.ts:1766-1816`; `apps/web/src/lib/smart-collections.ts:221-267`; `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:96-112`; `apps/web/src/lib/data.ts:1488-1551`
+- Problem: Keyword search uses leading-wildcard `containsLike` scans across multiple fields and follow-up tag/alias queries. Semantic/similar routes load and score embedding blobs inside the request process. `/map` serializes up to 10,000 exact GPS markers and hydrates marker plus fallback-list UI. Public smart collections compile and execute dynamic predicates, including `contains`, on every uncached request.
+- Failure scenario: A corpus growth or small public traffic burst stays within rate limits but burns MySQL CPU, Node heap/CPU, and mobile client resources, degrading the same single process serving normal pages and background work.
+- Suggested fix: Move keyword search to full-text/ngram or a maintained search-document table, isolate vector search behind an ANN/index/cache or sidecar, make `/map` viewport/bbox-clustered with a smaller first payload, and classify/materialize expensive public smart collections.
 
-### CRIT20-08 - Single-instance topology is warn-only even though correctness state is process-local
-
-- Severity: Medium
-- Confidence: High
-- File/region: `apps/web/src/lib/restore-maintenance.ts:1-60`; `apps/web/src/lib/upload-tracker-state.ts:7-78`; `apps/web/src/instrumentation.ts:22-31`; `apps/web/src/lib/single-writer-guard.ts:6-16`, `apps/web/src/lib/single-writer-guard.ts:277-310`; `apps/web/deploy.sh:51-55`
-- Failure scenario: An operator accidentally starts a second web process during manual recovery, scaling, or deploy overlap. Restore flags, upload quotas, fast-path rate limits, queue state, and buffered counters split per process. The singleton guard warns but traffic still flows through both.
-- Concrete fix: Fail the supported deploy path on multiple live app containers or persistent singleton-lock contention, or move the process-local coordination state to shared storage before permitting scale-out.
-
-### CRIT20-09 - Nginx protections are committed templates, not deploy-verified runtime state
+### C21-CRIT-09 - Committed nginx edge protections are not applied or verified by deploy
 
 - Severity: Medium
-- Confidence: High
-- File/region: `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:274-306`; `apps/web/deploy.sh:51-107`; `scripts/deploy-remote.sh:31-93`
-- Failure scenario: The repo tightens public SSR/image/body limits and `npm run deploy` succeeds, but the host keeps an older nginx config because deploy only rebuilds the app container. Operators believe edge protection is live when it is not.
-- Concrete fix: Add a deploy preflight that checks a live nginx config version/hash marker and fails or loudly warns on drift. Alternatively split nginx apply into an explicit release command that runs `nginx -t`, reloads, and records verification evidence.
+- Confidence: High for repo/deploy mismatch; Medium for live exposure
+- Region: `apps/web/nginx/default.conf:1-29`; `apps/web/nginx/default.conf:274-306`; `apps/web/deploy.sh:51-107`; `scripts/deploy-remote.sh:31-93`
+- Problem: The nginx template defines public and image-optimizer rate-limit zones, but the file itself says the operator must apply and reload it manually. The deploy helper SSHes to the host and runs `apps/web/deploy.sh`, which rebuilds/health-checks/prunes Docker but does not validate host nginx config hash or limiter status.
+- Failure scenario: A release notes “edge rate limit shipped,” but production host nginx is still running an older config. Dynamic public SSR pages then hit Next/MySQL without the expected page limiter.
+- Suggested fix: Add a deploy-time read-only nginx config/version probe, or a required operator verification artifact, that records the live limiter config hash and burst test result. Consider a cheap app-layer fallback limiter for public page data loaders where edge state cannot be proven.
 
-### CRIT20-10 - E2E and visual coverage can pass without browser-matrix or screenshot-regression proof
-
-- Severity: Medium
-- Confidence: High
-- File/region: `apps/web/playwright.config.ts:72-77`; `.github/workflows/quality.yml:75-80`; `apps/web/e2e/nav-visual-check.spec.ts:40-86`
-- Failure scenario: Mobile WebKit, Firefox, true touch dispatch, or visual nav regressions ship because the configured matrix is desktop Chromium only and nav screenshots are saved as artifacts rather than compared against baselines.
-- Concrete fix: Add at least mobile WebKit plus one Firefox/Chromium-mobile smoke project for critical public flows. Convert visual smoke screenshots that matter into `expect(page).toHaveScreenshot(...)` baselines, or rename them as non-blocking artifact captures.
-
-### CRIT20-11 - Source-string tests overstate behavioral protection for critical paths
+### C21-CRIT-10 - Cached shared-group reads still own view-count side effects
 
 - Severity: Medium
-- Confidence: High
-- File/region: `apps/web/src/__tests__/cycle-20-source-contracts.test.ts:8-82`; `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-77`; representative source-contract pattern in `apps/web/src/__tests__/load-more-source-contracts.test.ts:7-29`
-- Failure scenario: A refactor leaves the expected string in a dead branch/comment/helper while active behavior regresses. The suite stays green even though watchdog cleanup, photo-view recording, scan limits, import boundaries, or UI state handling no longer execute as intended.
-- Concrete fix: Keep source contracts only for mechanical import/boundary checks. Promote safety-critical assertions to behavior tests with mocks/fakes that execute the branch order, cleanup, rate-limit charging, and query limits.
-
-### CRIT20-12 - Admin image management is still a wide table on narrow screens
-
-- Severity: Medium
-- Confidence: High
-- File/region: `apps/web/src/components/image-manager.tsx:427-452`, `apps/web/src/components/image-manager.tsx:474-609`, `apps/web/src/components/image-manager.tsx:613-621`
-- Failure scenario: An admin on a phone/tablet at an event needs to retag or delete a mistaken upload. Horizontal scrolling separates preview, identity, tags, and destructive actions, increasing the chance of editing the wrong row.
-- Concrete fix: Add a responsive card/list management surface below a breakpoint with row identity, tag editing, selection, and destructive confirmations. Keep the dense table for desktop.
-
-## Likely Issues
-
-### CRIT20-13 - Desktop photo information still flashes hidden and can stay hidden by prior session state
-
-- Severity: Low-Medium
 - Confidence: Medium
-- File/region: `apps/web/src/components/photo-viewer.tsx:111-135`, `apps/web/src/components/photo-viewer.tsx:757-811`, `apps/web/src/components/photo-viewer.tsx:975-1020`
-- Failure scenario: The first render intentionally hides the info sidebar for hydration safety, then restores desktop default or prior session state after mount. A visitor with a stored false pin, or a slow hydration path, may miss color disclosure, similar photos, and download controls.
-- Concrete fix: Surface at least download and compact color/metadata signals outside the collapsible sidebar, or persist a visible affordance that is not dependent on post-mount sidebar state. Validate with desktop/mobile screenshots.
+- Region: `apps/web/src/lib/data.ts:49-63`; `apps/web/src/lib/data.ts:1392-1407`; `apps/web/src/lib/data.ts:1830-1834`; `apps/web/src/app/actions/public.ts:517-558`
+- Problem: `getSharedGroupCached = cache(getSharedGroup)` wraps a function that can buffer a shared-group view-count increment unless callers pass `incrementViewCount:false` or a selected-photo state suppresses counting. The comment warns not to call the cached wrapper with different count semantics, which is a sign the API boundary is already carrying hidden behavior.
+- Failure scenario: A layout, metadata path, preload, or future component calls the cached reader before the page call with different options. React cache deduplication can then decide whether the denormalized buffer increments, while the durable analytics action follows a separate path.
+- Suggested fix: Split pure shared-group reads from explicit view-recording orchestration. Make cached data access side-effect-free and let the page/action layer call a named view recorder exactly once.
 
-### CRIT20-14 - Fresh-install/product identity is still coupled to a tracked production `site-config.json`
+## Final Sweep / Gaps
 
-- Severity: Low-Medium
-- Confidence: Medium
-- File/region: `apps/web/src/site-config.json:1-12`; `apps/web/src/site-config.example.json:1-12`; `apps/web/scripts/ensure-site-config.mjs:12-40`; `README.md:60-72`
-- Failure scenario: A copied worktree or fork builds with the tracked production config and publishes `gallery.atik.kr` metadata/canonical URLs until the operator notices. Docs warn about this, and the production deploy needs the tracked config, so this is a packaging/distribution risk rather than a current production bug.
-- Concrete fix: Before distributing as a template, require an untracked local `site-config.json` or make build fail unless `BASE_URL` is explicitly set outside the known deployment.
-
-## Manual-Validation Risks
-
-### CRIT20-MV-01 - Backfill/search capacity boundaries need production measurements
-
-- Severity: Medium
-- Confidence: High that code is bounded; Low on live headroom without runtime data
-- File/region: `apps/web/src/lib/clip-embeddings.ts:36-48`; `apps/web/src/app/api/search/semantic/route.ts:263-311`; `apps/web/src/lib/admin-backfill-runner.ts:106-143`; `CLAUDE.md:375-381`
-- Failure scenario: The documented caps may be acceptable for the current corpus but fail under real traffic, larger galleries, or simultaneous backfill/upload/search windows.
-- Concrete fix: Capture production `EXPLAIN`, CPU/RSS, request latency, and DB pool metrics under representative semantic search, map, upload, and backfill load before raising limits or calling the architecture scalable.
-
-### CRIT20-MV-02 - Host nginx state cannot be proven from the repository
-
-- Severity: Medium
-- Confidence: High as a validation gap
-- File/region: `apps/web/nginx/default.conf:290-293`; `CLAUDE.md:505-523`
-- Failure scenario: The repo contains correct rate-limit/body-cap templates, but the host may not have applied them.
-- Concrete fix: Run the documented host-side `nginx -t`, reload, and burst verification, then record date/config hash/result in the release ledger.
-
-### CRIT20-MV-03 - CI gates do not prove deploy completion or live behavior
-
-- Severity: Low-Medium
-- Confidence: High
-- File/region: `.github/workflows/quality.yml:54-83`; `package.json:17-30`; `.context/plans/cycle-20-plan.md:69-76`
-- Failure scenario: Lint/type/unit/e2e/build pass, but cycle plan commit/push/deploy evidence remains incomplete or production still runs an older image/config.
-- Concrete fix: Keep CI as code-quality evidence, but require an explicit deploy record with commit SHA, image/container status, health response, nginx status when relevant, and post-deploy smoke results.
-
-## Refuted Or Stale Suspicions
-
-- The Cycle 19 Lightroom multipart parse-slot leak is fixed in the current route: the parse slot is released in `finally` at `apps/web/src/app/api/admin/lr/upload/route.ts:174-188`, and `markAdminAuthTokenUsed` moved post-commit at `apps/web/src/app/api/admin/lr/upload/route.ts:539-548`.
-- Mobile nav utility clipping from earlier cycle material is fixed in current `NavClient`: controls remain in the collapsed mobile bar and topics move to the expanded panel at `apps/web/src/components/nav-client.tsx:145-191`.
-- Desktop photo info is not simply "always hidden by default" anymore; it restores open on desktop when no stored state exists at `apps/web/src/components/photo-viewer.tsx:122-133`. The remaining concern is discoverability/flash/session-state, not a hard default-hidden bug.
-- The public map GPS exposure is topic opt-in with SQL and runtime guards at `apps/web/src/lib/data.ts:1777-1816`; the finding is payload/precision/performance, not accidental non-opt-in leakage.
-- Admin API auth, same-origin action origin, mutation-barrier, and public-route rate-limit lint gates are wired in CI at `.github/workflows/quality.yml:60-64`.
-
-## Final Sweep
-
-Final sweep rechecked source routes, privacy selects, upload/restore/search paths, service-worker caching, schema/migrations, deploy/nginx, CI/e2e, source-contract tests, and current cycle plans. I dropped stale cycle-20 concerns already fixed in the worktree and kept risks still evidenced by current code.
-
-No tests were run; this was a static critic lane with a single requested deliverable. The only file intentionally modified by this review is `.context/reviews/critic.md`.
+- I did not inspect every one of the 626 source files or 2,267 committed review artifacts line-by-line; I sampled high-risk source, tests, migrations, deploy scripts, docs, and active lineage ledgers.
+- I did not run the full gate suite; this is a review-only artifact. Cycle 20 recorded gate evidence at `d8e604ef`, not at the current docs HEAD `45b32d1d`.
+- I could not verify live host state: nginx config actually loaded, deploy status for `45b32d1d`, CLIP weights, production DB row counts, or real traffic/RSS behavior.
+- I did not inspect binary/image fixture contents beyond repository inventory.

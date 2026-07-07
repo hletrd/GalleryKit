@@ -121,6 +121,8 @@ export function MapClient({ markers, locale, openPhotoLabel, imageSizes }: MapCl
                 <Marker
                     key={marker.id}
                     position={[marker.latitude, marker.longitude]}
+                    title={marker.displayTitle}
+                    alt={`${openPhotoLabel}: ${marker.displayTitle}`}
                 >
                     <Popup>
                         <button

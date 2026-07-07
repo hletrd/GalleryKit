@@ -701,6 +701,8 @@
     "loading": "로딩 중…",
     "imageUnavailable": "이미지를 불러올 수 없습니다",
     "skipToContent": "본문으로 건너뛰기",
+    "cancel": "취소",
+    "tryAgain": "다시 시도",
     "close": "닫기",
     "opensInNewWindow": "새 창에서 열림"
   },

@@ -1,125 +1,88 @@
-# Verifier Review - Cycle 20
+# Cycle 21 Verifier Review
 
-Role: verifier
-Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD reviewed: `bd0cc170412b0f70ae231cec27ca54ee50e638fd` (`master`)
-Scope note: source/tests/scripts/config/docs review plus local verification. I edited only this report file.
+Reviewed HEAD: `45b32d1db373e03d82a29511f53832051c770880`
+Mode: evidence-based correctness review against `AGENTS.md`, `CLAUDE.md`, and `.context/plans/README.md`.
 
-## Inventory
+## Findings
 
-Inventory command: `git ls-files | sort`
-Tracked files inventoried: 3,511.
-
-Review-relevant tracked inventory:
-
-- Product source: 81 app route/action files, 61 component files, 114 lib files, 3 db files.
-- Verification surface: 362 unit-test files, 12 e2e files, 29 scripts, 33 migration/journal files.
-- Runtime/config/assets: 26 web config files, 9 public committed assets, 2 locale message files.
-- Written contracts/history: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, 2 docs files, 188 `plan/` files, 2,566 `.context/` files.
-
-Files and interactions examined without source sampling:
-
-- Required contracts: `AGENTS.md`, `CLAUDE.md`, root/app package scripts.
-- Custom gates: `check-action-origin.ts`, `check-api-auth.ts`, `check-public-route-rate-limit.ts`, their unit fixtures, and current action/API route outputs.
-- Restore/drain/barrier flow: `db-actions.ts`, `admin-mutation-barrier.ts`, `restore-drain-checklist.ts`, `background-db-writes.ts`, `maintenance-scheduler.ts`, `data.ts`, and related tests.
-- Service worker/generation: `sw.template.js`, committed `sw.js`, `build-sw.ts`, SW contract tests, delete-image path.
-- Migrations/deploy: drizzle SQL/journal, `migrate.js`, migration tests, `deploy.sh`, `deploy-remote.sh`, Docker Compose, nginx template.
-- Public route and privacy surfaces: API routes, share/group/photo/map/feed route interactions, public data projections, rate-limit gates.
-
-## Verification Evidence
-
-Fresh gates run:
-
-- `npm run lint:api-auth --workspace=apps/web` - passed.
-- `npm run lint:action-origin --workspace=apps/web` - passed; current action files all use the real `using mutationSlot = acquireAdminMutationSlot()` shape or reasoned restore/read exemptions.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
-- `npm run lint --workspace=apps/web` - passed.
-- `npm run typecheck --workspace=apps/web` - passed.
-- `npm test --workspace=apps/web` - 357 files: 355 passed, 2 skipped; 3,326 tests passed, 4 skipped.
-- `npm run build --workspace=apps/web` - passed; Next.js 16.2.10 production build completed.
-- Focused contract run: 9 files / 377 tests passed for action/public-route/API-auth/deploy/SW/migration gates.
-- Manual generated-artifact probe: `public/sw.js` equals `public/sw.template.js` with `__SW_VERSION__` replaced by `2bd9e8ba-p7`; PWA icon regeneration produced no git diff.
-
-Not run:
-
-- `npm run test:e2e --workspace=apps/web` and `npm run test:e2e:admin --workspace=apps/web`: browser/server and admin credentials are required.
-- `CLIP_MODELS_ROOT=<abs> npm run test:clip:preflight --workspace=apps/web`: model weights path not provided.
-- `npm run deploy`: production/external side effect.
-- `npm run check:proxy-topology`: requires `--url` or `PROXY_TOPOLOGY_URL`; no deployed URL was supplied.
-
-## Confirmed Issues
-
-### VER-C20-01 - Restore can hang before the bounded drain checklist runs
+### VER-C21-01 — Mutation-barrier lint accepts an acquired check after the mutation
 
 - Severity: High
 - Confidence: High
-- Exact location: `apps/web/src/app/[locale]/admin/db-actions.ts:560-574`, `apps/web/src/lib/data.ts:222-249`, `apps/web/src/lib/restore-drain-checklist.ts:20-50`, `apps/web/src/__tests__/restore-drain-checklist.test.ts:74-115`, `apps/web/src/__tests__/data-view-count-flush.test.ts:221-232`
-- Evidence: `restoreDatabase()` sets durable restore maintenance, then directly awaits `flushBufferedSharedGroupViewCounts()` before calling `runRestoreDrainChecklist([...])`. The checklist stages are explicitly bounded by their own drain functions, but the pre-checklist shared-group flush has no timeout. `flushBufferedSharedGroupViewCounts()` can await `currentFlushPromise` and then `flushGroupViewCounts()`, whose DB update promises have no bounded restore timeout. The restore-drain test verifies `flushBufferedSharedGroupViewCounts()` appears before the checklist, so the test locks the risky ordering instead of proving every process-local DB writer is bounded.
-- Failure scenario: A shared-group view-count flush is in progress or starts while MySQL is slow, partitioned, or blocked. An operator starts DB restore. Restore maintenance becomes active and future uploads/admin mutations are refused, but the action waits indefinitely in the unbounded flush before the timeout-aware checklist can abort. The site remains in restore maintenance until manual recovery.
-- Concrete fix: Move shared-group view-count flushing into `runRestoreDrainChecklist()` as a named bounded stage, e.g. `shared-group-view-counts`, implemented with a timeout wrapper returning `false` on expiry. Add a behavior test where that stage never resolves and assert restore aborts and later stages/import do not run. Avoid source-only assertions that bless pre-checklist awaits.
+- Files/regions:
+  - `apps/web/scripts/check-action-origin.ts:628-678`
+  - `apps/web/src/__tests__/check-action-origin.test.ts:624-738`
+  - `.context/plans/cycle-20-2026-07-08-plan.md:49-54`
+- Contract: Cycle 20 WP2 explicitly required the scanner to "Require an acquired-state early-return gate before mutation" (`.context/plans/cycle-20-2026-07-08-plan.md:51-53`). `CLAUDE.md`/lint-gate contract says every mutating admin action must hold the restore-window mutation slot for the whole body and refuse work when the slot is not acquired.
+- Evidence: `bodyAcquiresAdminMutationSlot()` accepts any later statement that checks `mutationSlot.acquired` after the `using` declaration (`block.statements.slice(i + 1).some(...)` at `check-action-origin.ts:674-676`). It does not prove the check occurs before the first DB/server mutation. Existing negative fixtures cover spoofing, wrong imports, bare calls, non-`using`, and no acquired check, but not "mutation before acquired check".
+- Reproduction:
 
-### VER-C20-02 - Mutation-barrier scanner accepts a spoofed or non-disposable barrier call
+```bash
+cd apps/web
+node --import tsx -e "import { checkActionSource } from './scripts/check-action-origin.ts'; const src = \`import { requireSameOriginAdmin } from '@/lib/action-guards'; import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier'; export async function updateSettings(input) { const originError = await requireSameOriginAdmin(); if (originError) return { error: originError }; using mutationSlot = acquireAdminMutationSlot(); await db.update(settings).set(input); if (!mutationSlot.acquired) return { error: 'restore in progress' }; return { success: true }; }\`; console.log(JSON.stringify(checkActionSource(src, 'src/app/actions/settings.ts'), null, 2));"
+```
 
-- Severity: High
+Output:
+
+```json
+{"passed":["OK: src/app/actions/settings.ts::updateSettings"],"failed":[],"skipped":[]}
+```
+
+- Concrete failure scenario: a future mutating admin action can run `await db.update(...)` while restore maintenance is active, then check `!mutationSlot.acquired` afterward. `npm run lint:action-origin` still passes, so the exact restore-race class the scanner is meant to prevent can be reintroduced without CI catching it.
+- Suggested fix: make the scanner reason about statement order. For the common early-return pattern, require `if (!slot.acquired) return/throw` immediately after the `using` declaration before any mutation marker/protected call; for the positive `if (slot.acquired) { ... }` pattern, require every mutation in the function to be lexically contained in that guarded branch. Add a negative fixture with mutation before the acquired check.
+
+### VER-C21-02 — Current Cycle 20 ledger still records the docs/deploy step as pending at HEAD
+
+- Severity: Low-Medium
 - Confidence: High
-- Exact location: `apps/web/scripts/check-action-origin.ts:148-164`, `apps/web/scripts/check-action-origin.ts:1371-1397`, `apps/web/src/__tests__/check-action-origin.test.ts:618-630`, `apps/web/src/lib/admin-mutation-barrier.ts:67-80`
-- Evidence: `bodyAcquiresAdminMutationSlot()` returns true for any call expression whose identifier text is `acquireAdminMutationSlot`. It ignores import provenance, shadowed bindings, `using`, and the required `if (!mutationSlot.acquired) return ...` branch documented by the helper. The positive fixture passes with a call shape but no approved import and no acquired-failure check.
-- Failure scenario: A future mutating admin action defines or imports a no-op function named `acquireAdminMutationSlot`, or calls the real function without `using`. `lint:action-origin` passes, but the action does not hold a real disposable shared slot for its body. During restore, `drainAdminMutationsForRestore()` can observe no in-flight holder and import while that action later writes into the restored database.
-- Concrete fix: Mirror the scanner’s `requireSameOriginAdmin` provenance checks: collect approved `acquireAdminMutationSlot` imports from `@/lib/admin-mutation-barrier`, reject shadowing, require a top-level `using <slot> = acquireAdminMutationSlot()` before protected work, and require an early return on `!<slot>.acquired`. Add negative fixtures for local spoofing, unapproved import, bare call, non-`using` assignment, and missing acquired check.
+- Files/regions:
+  - `.context/plans/cycle-20-2026-07-08-plan.md:3`
+  - `.context/plans/cycle-20-2026-07-08-plan.md:131-142`
+  - `.context/plans/cycle-20-2026-07-08-plan.md:157-163`
+  - `.context/plans/README.md:36-37`
+- Contract: `AGENTS.md` requires `npm run deploy` after every commit pushed to `master`; Cycle 20 WP5 repeats "Run `npm run deploy` after each pushed commit" and smoke the production URL (`cycle-20-2026-07-08-plan.md:131-133`).
+- Evidence: at HEAD, the active Cycle 20 plan says "final docs ledger commit/deploy is handled by the orchestrator after this file lands" (`:3`) and leaves the docs-ledger commit/deploy checkbox open (`:142`). The only committed deploy/smoke evidence is for source-fix commit `d8e604ef` (`:157-163`), not for current HEAD `45b32d1d`, which changed `.env.local.example` and review/plan ledgers. The HEAD commit trailer also says `Not-tested: ... post-docs deploy runs after this commit`, but no committed follow-up evidence was found.
+- Concrete failure scenario: the next cycle reads `.context/plans/README.md:36-37` and treats Cycle 20 as active and per-cycle deployed, while the authoritative plan still records an unfinished WP5 item. This can hide a missed deploy/smoke step for the final docs/env-example commit and weakens the repo's release-ledger reliability.
+- Suggested fix: after the docs/env-example commit is actually deployed and smoked, update `cycle-20-2026-07-08-plan.md` with current HEAD `45b32d1d`, mark WP5 complete, and record the deploy/smoke commands. If deployment is intentionally skipped for docs-only commits, document that as an explicit exception to the per-iteration policy rather than leaving the active ledger half-open.
 
-### VER-C20-03 - Offline HTML cache can serve deleted photo pages for up to 24 hours
+## No Finding From Focused Checks
 
-- Severity: Medium
-- Confidence: High
-- Exact location: `apps/web/public/sw.template.js:445-499`, `apps/web/public/sw.template.js:554-562`, `apps/web/src/__tests__/sw-template-contract.test.ts:102-120`, `apps/web/src/app/actions/images.ts:655-752`
-- Evidence: `networkFirstHtml()` caches any successful non-admin HTML response and only serves it when fetch throws. The fetch handler explicitly bypasses revocable object pages (`/c`, `/s`, `/g`, `/map`) but says normal `/p/:id` photo pages remain eligible. There is no cached-HTML deletion path for a later online 404/410, unlike derivative image handling. The test suite asserts normal photo pages stay eligible for offline fallback.
-- Failure scenario: A visitor opens `/en/p/123`; the SW caches the 200 HTML. An admin deletes photo `123`. Later, while offline or on a failing network and within `HTML_MAX_AGE_MS`, the same browser navigates to `/en/p/123` and receives the stale cached photo page instead of an unavailable/offline response. This can expose metadata for content the operator deleted or expected to be inaccessible.
-- Concrete fix: Treat `/p/:id` as revocable HTML and bypass offline caching, or add explicit invalidation: on online non-OK responses delete the matching HTML cache entry, and on admin delete broadcast a SW message or versioned tombstone for affected photo URLs. Add an executable SW test or Playwright offline test for visit -> delete/404 -> offline revisit.
+- Restore drain ordering: `apps/web/src/app/[locale]/admin/db-actions.ts:47-64` adds a bounded shared-group flush and `:593-635` wires it as the first `runRestoreDrainChecklist` stage. `apps/web/src/__tests__/restore-drain-checklist.test.ts` rejects the old direct pre-checklist flush.
+- Service worker photo-page revocability: `apps/web/public/sw.template.js:59-64` and generated `apps/web/public/sw.js` classify `/p/:id` routes as revocable, and `apps/web/src/__tests__/sw-template-contract.test.ts:125-139` covers localized and unlocalized examples. The actual route tree contains `apps/web/src/app/[locale]/(public)/p/[id]/`.
+- `DB_SSL_CA` example wording: `apps/web/.env.local.example:9` now matches runtime, Drizzle Kit, and backup/restore CLI TLS behavior confirmed in `apps/web/src/db/index.ts`, `apps/web/drizzle.config.ts`, and `apps/web/scripts/mysql-connection-options.js`.
 
-## Likely Issues
+## Inventory Built
 
-### VER-C20-L01 - Cached shared-group read still owns a view-count side effect
+- Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
+- Current-cycle ledgers: `.context/plans/cycle-20-2026-07-08-plan.md`, `.context/plans/cycle-20-2026-07-08-deferred.md`, `.context/plans/deferred-carry-forward.md`, `.context/reviews/_aggregate.md`, and top-level `.context/reviews/*.md` inventory.
+- Explicitly documented/tested behavior categories mapped:
+  - Security/lint contracts: `apps/web/scripts/check-action-origin.ts`, `check-api-auth`, public route rate limit scanner, corresponding unit tests.
+  - Restore/DB contracts: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-drain-checklist.ts`, migration docs/tests/scripts.
+  - Service worker/PWA contracts: `apps/web/public/sw.template.js`, generated `sw.js`, `sw-template-contract.test.ts`.
+  - Deploy/ops contracts: `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `.env.local.example`, nginx template/docs.
+  - Privacy/schema contracts: `apps/web/src/lib/data.ts`, `apps/web/src/db/schema.ts`, privacy-field tests, migration journal/reconcile rules.
+  - Current source-fix scope: files changed from `bd0cc170..45b32d1d`, with behavior-bearing review concentrated on `d8e604ef`.
 
-- Severity: Medium
-- Confidence: Medium
-- Exact location: `apps/web/src/lib/data.ts:1402-1407`, `apps/web/src/lib/data.ts:1830-1834`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:111-142`
-- Evidence: `getSharedGroup()` buffers the denormalized `shared_groups.view_count` increment as part of the read helper. `getSharedGroupCached = cache(getSharedGroup)` then caches a function with side effects. The page also fires durable analytics separately after resolving `selectedImage`.
-- Failure scenario: A future metadata/component/helper call reuses `getSharedGroupCached()` in the same render with a different option object or count intent. React cache deduplication becomes tied to call order and argument identity, so the denormalized counter can run zero, one, or multiple times independently of the durable `shared_group_views` insert.
-- Concrete fix: Split the pure shared-group read from counting. Keep the cached function side-effect-free, and invoke both denormalized and durable count paths explicitly in the page after `selectedImage` is resolved.
+## Evidence Commands
 
-## Test And Documentation Gaps
+```bash
+git rev-parse HEAD
+git log --oneline --decorate -n 12
+git diff --name-only bd0cc170..45b32d1d
+npm run lint:action-origin --workspace=apps/web
+npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/restore-drain-checklist.test.ts src/__tests__/sw-template-contract.test.ts
+git diff --check
+```
 
-### VER-C20-T01 - Service-worker generated-artifact parity is manually true but not directly tested
+Results:
 
-- Severity: Low
-- Confidence: High
-- Exact location: `apps/web/src/__tests__/sw-template-contract.test.ts:60-66`, `apps/web/src/__tests__/sw-template-contract.test.ts:266-278`, `apps/web/src/__tests__/sw-template-contract.test.ts:412-450`, `apps/web/scripts/build-sw.ts:27-43`
-- Evidence: `build-sw.ts` deterministically writes `public/sw.js` from `public/sw.template.js`, but the test suite only checks selected fragments and generator shape. It does not assert full `sw.js === template.replaceAll('__SW_VERSION__', computedVersion)`. A manual probe found current parity is true.
-- Failure scenario: A template edit outside the fragment assertions is committed without regenerated `sw.js`. Unit tests remain green while the committed generated worker is stale.
-- Concrete fix: Add one full parity test that imports `IMAGE_PIPELINE_VERSION`, computes the same SHA-256 stamp as `build-sw.ts`, replaces all placeholders, and compares the entire generated string to committed `public/sw.js`.
+- HEAD matched requested `45b32d1db373e03d82a29511f53832051c770880`.
+- `npm run lint:action-origin --workspace=apps/web` passed for current files.
+- Targeted Vitest run passed: 3 files, 152 tests.
+- `git diff --check` produced no whitespace errors.
 
-## Manual-Validation Risks
+## Final Sweep / Not Fully Inspected
 
-- Public edge/nginx state: repo deploy does not apply host nginx. `apps/web/nginx/default.conf` and docs are consistent, but live `zone=public` / `zone=nextimage` enforcement requires operator verification.
-- Proxy topology: the script exists and is explicit about limits, but it needs a deployed URL and cannot prove effective client-IP bucket selection without edge logs or a diagnostic.
-- Production semantic search: code gates and runbooks are covered; real CLIP model offline load/ranking requires seeded weights and the preflight command.
-- E2E/browser coverage: local unit/build gates passed, but browser-flow proof was not run in this review. Admin e2e remains credential-gated.
-
-## Clean / Refuted Areas
-
-- Current action files are not missing the restore barrier; every current mutating admin action found by the scanner uses the real import and `using` shape, or carries a reasoned restore/read exemption.
-- Admin API route scanner output covers the two current admin API routes and both wrap `withAdminAuth(...)`.
-- Public route rate-limit scanner covers current public route files and passed.
-- Migration journal has known historical non-monotonic `when` values, but committed migration tests for pending/drift/DML guards passed; SQL files and journal entries match by tag.
-- Deploy script preserves the documented prune order: `docker compose up -d --build`, bounded health check, then `container/image/builder/volume prune` with no `volume prune -a`.
-- Generated `sw.js` is currently synchronized with the template and pipeline stamp.
-
-## Final Sweep
-
-Common verifier misses checked:
-
-- Generated artifacts: SW parity checked; PWA icon regeneration produced no diff.
-- Guardrail false-greens: confirmed one in mutation-barrier scanner; API auth and public route scanners did not show the same provenance gap in inspected paths.
-- Source-string tests: restore drain and SW generated-worker coverage still include source/fragment tests that do not prove the full behavior claimed.
-- Stale docs: no current conflict found for deploy pruning, migration drift, semantic activation, no-payment policy, local-only storage, or privacy projection contracts.
-- Skipped/non-product files: historical `.context` archives, screenshots, and plan history were inventoried as repository state but not treated as live behavior sources unless referenced by current contracts or current review candidates.
+- I did not run the full blocking gate suite (`lint`, `api-auth`, `public-route-rate-limit`, `typecheck`, `build`, full `npm test`, full Playwright e2e`) because this was a review lane and the current source-fix plan already records a full sweep at `d8e604ef`; I ran the targeted gates for the changed contracts instead.
+- I did not inspect every historical file under `.context/plans/archive/` or `.context/reviews/archive/`; I used the active current-cycle README, current Cycle 20 plan/deferred pair, carry-forward register, and top-level review aggregate.
+- I did not verify live production deployment state or host nginx state; that would require external side-effecting deploy/operator checks outside this review request.

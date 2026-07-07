@@ -15,6 +15,7 @@ import type { Metadata } from 'next';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
+import { parseMySqlDateTimeParts } from '@/lib/mysql-datetime';
 
 export const revalidate = 0;
 
@@ -99,9 +100,9 @@ export default async function TimelinePage({
     // Group photos by month for display
     const byMonth = new Map<number, typeof photos>();
     for (const photo of photos) {
-        if (!photo.capture_date) continue;
-        const m = new Date(photo.capture_date).getMonth() + 1;
-        if (!Number.isFinite(m) || m < 1 || m > 12) continue;
+        const parts = parseMySqlDateTimeParts(photo.capture_date);
+        if (!parts) continue;
+        const m = parts.month;
         const bucket = byMonth.get(m) ?? [];
         bucket.push(photo);
         byMonth.set(m, bucket);

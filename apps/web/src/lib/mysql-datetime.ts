@@ -21,3 +21,49 @@ export function toMySqlDateTime(date: Date): string {
     return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
         + ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
 }
+
+export type MySqlDateParts = {
+    year: number;
+    month: number;
+    day: number;
+};
+
+const MYSQL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/;
+
+export function parseMySqlDateTimeParts(value: string | null | undefined): MySqlDateParts | null {
+    if (!value) return null;
+    const match = MYSQL_DATETIME_RE.exec(value);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const second = Number(match[6]);
+
+    if (
+        !Number.isInteger(year)
+        || !Number.isInteger(month)
+        || !Number.isInteger(day)
+        || !Number.isInteger(hour)
+        || !Number.isInteger(minute)
+        || !Number.isInteger(second)
+        || month < 1
+        || month > 12
+        || day < 1
+        || hour < 0
+        || hour > 23
+        || minute < 0
+        || minute > 59
+        || second < 0
+        || second > 59
+    ) {
+        return null;
+    }
+
+    const maxDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day > maxDay) return null;
+
+    return { year, month, day };
+}

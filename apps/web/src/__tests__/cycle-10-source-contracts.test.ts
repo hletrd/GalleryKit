@@ -53,8 +53,8 @@ describe('cycle 10 source contracts', () => {
         const uploadPaths = src('lib/upload-paths.ts');
         const processImage = src('lib/process-image.ts');
 
-        expect(actions).toContain('deleteOriginalUploadFileStrict(image.filename_original)');
-        expect(actions).toContain('deleteImageVariantsStrict(UPLOAD_DIR_WEBP, image.filename_webp, [])');
+        expect(actions).toContain('cleanupPendingFileDeletion(pendingDeletionRef.current)');
+        expect(actions).toContain('cleanupPendingFileDeletion(pendingDeletion)');
         expect(uploadPaths).toContain('export async function deleteOriginalUploadFileStrict');
         expect(processImage).toContain('export async function deleteImageVariantsStrict');
     });

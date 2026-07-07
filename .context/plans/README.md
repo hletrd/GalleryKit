@@ -33,8 +33,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 20/100 Implementation Plan - active recovered ledger from Cycle 20 aggregate at review HEAD `bd0cc170` and source-fix HEAD `d8e604ef`: bounded restore shared-group drains, hardened admin mutation-barrier scanner proof, revocable photo-page SW HTML bypass, current aggregate/plan ledger repair, `DB_SSL_CA` env-example correction, gates, push, and per-cycle deploy (`cycle-20-2026-07-08-plan.md`)
-- Run-10 Cycle 20/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for broad upload-ingest extraction, streaming multipart ingress, background DB/CPU budgeting, public discovery/search/map scale, topology/operator validation, schema/test-infra gaps, browser/admin/PWA matrix expansion, and UI/product follow-ups (`cycle-20-2026-07-08-deferred.md`)
+- Run-10 Cycle 21/100 Implementation Plan - active ledger from Cycle 21 aggregate at review HEAD `45b32d1d`: mutation-barrier order proof, durable image file deletion ledger, image-queue permanent-failure cap helper, backfill candidate index, deterministic MySQL datetime parsing, operator script syntax coverage, docs/i18n/a11y fixes, current plan/carry-forward ledger repair, gates, push, and per-cycle deploy (`cycle-21-2026-07-08-plan.md`)
+- Run-10 Cycle 21/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for broad upload-ingest extraction, streaming multipart ingress, background DB/CPU budgeting, public discovery/search/map/vector scale, topology/operator validation, test-infra gaps, browser/admin/PWA matrix expansion, and UI/product follow-ups (`cycle-21-2026-07-08-deferred.md`)
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
@@ -44,6 +44,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 20/100 Implementation Plan - completed through source deploy; terminal docs-ledger deploy evidence is superseded by the Cycle 21 per-cycle deploy once this cycle finishes (`cycle-20-2026-07-08-plan.md`)
+- Run-10 Cycle 20/100 Deferred Findings - superseded by the Cycle 21 deferred register where findings remain open (`cycle-20-2026-07-08-deferred.md`)
 - Run-10 Cycle 19/100 Implementation Plan - completed, pushed, and deployed before Cycle 20 recovery; fixed LR parse-slot cleanup, CLIP backfill pagination, narrow UI/test/comment hardening, cycle ledger reconciliation, gates, push, and per-cycle deploy (`cycle-19-2026-07-08-plan.md`)
 - Run-10 Cycle 19/100 Deferred Findings - superseded by the Cycle 20 deferred register where findings remain open (`cycle-19-2026-07-08-deferred.md`)
 - Run-10 Cycle 9 (loop-B) Implementation Plan - concurrent loop ledger whose fix commits were preserved/deployed before Cycle 20 recovery; keep for provenance, but do not treat it as the current run-10 active cycle (`cycle-9b-2026-07-08-plan.md`; "9b" per the 7b/8b precedent)

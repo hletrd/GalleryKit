@@ -701,6 +701,8 @@
     "loading": "Loading…",
     "imageUnavailable": "Image unavailable",
     "skipToContent": "Skip to content",
+    "cancel": "Cancel",
+    "tryAgain": "Try again",
     "close": "Close",
     "opensInNewWindow": "opens in a new window"
   },

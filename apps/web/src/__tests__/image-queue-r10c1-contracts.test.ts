@@ -27,7 +27,7 @@ describe('C1-04: claim exhaustion surfaces to the admin', () => {
 
     it('persists processing_error and failed_at on claim exhaustion', () => {
         expect(giveUpIdx).toBeGreaterThan(-1);
-        expect(giveUpRegion).toMatch(/permanentlyFailedIds\.add\s*\(\s*job\.id\s*\)/);
+        expect(giveUpRegion).toMatch(/markPermanentlyFailed\s*\(\s*state\s*,\s*job\.id\s*\)/);
         expect(giveUpRegion).toMatch(/processing_error:/);
         expect(giveUpRegion).toMatch(/failed_at:\s*toMySqlDateTime\s*\(/);
         // Conditional UPDATE — never stomp a row another worker just processed.

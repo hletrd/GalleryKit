@@ -14,8 +14,8 @@ import * as path from 'path';
  *   The queue state is module-level, the bootstrap query hits the real DB,
  *   and the failure path requires a full queue worker lifecycle. Mocking
  *   all of that is fragile. The regression risk is a refactor that removes
- *   the `notInArray` condition or the `permanentlyFailedIds.add` call —
- *   exactly what fixture inspection catches.
+ *   the `notInArray` condition or bypasses the centralized permanent-failure
+ *   helper — exactly what fixture inspection catches.
  */
 
 const queuePath = path.join(__dirname, '..', 'lib', 'image-queue.ts');
@@ -46,20 +46,30 @@ describe('image queue permanent failure — A2-HIGH-01 invariants', () => {
         expect(queueSource).toMatch(/notInArray\s*\(\s*images\.id\s*,\s*\[\.\.\.state\.permanentlyFailedIds\]\s*\)/);
     });
 
-    it('enqueueImageProcessing adds job.id to permanentlyFailedIds after MAX_RETRIES failures', () => {
+    it('enqueueImageProcessing marks job.id permanently failed after MAX_RETRIES failures', () => {
         // The permanently-failed tracking lives inside enqueueImageProcessing
         // (an arrow-function callback inside the queue worker). We search the
         // full source because the callback is nested deep inside the arrow.
-        expect(queueSource).toMatch(/state\.permanentlyFailedIds\.add\s*\(\s*job\.id\s*\)/);
+        expect(queueSource).toMatch(/markPermanentlyFailed\s*\(\s*state\s*,\s*job\.id\s*\)/);
+    });
+
+    it('routes every production permanent-failure add through markPermanentlyFailed', () => {
+        const directAdds = [...queueSource.matchAll(/permanentlyFailedIds\.add/g)];
+        // The helper owns the only direct Set add site so every caller gets the
+        // same FIFO eviction and retry-map cleanup behavior.
+        expect(directAdds).toHaveLength(1);
+        const helperBody = extractFnBody(queueSource, 'function markPermanentlyFailed');
+        expect(helperBody, 'markPermanentlyFailed body must be findable').toBeTruthy();
+        expect(helperBody!).toContain('state.permanentlyFailedIds.add(id)');
     });
 
     it('permanentlyFailedIds has FIFO eviction when size exceeds MAX_PERMANENTLY_FAILED_IDS', () => {
-        // The eviction is inside the same enqueueImageProcessing callback.
-        // Check the full source for the required patterns.
-        expect(queueSource).toMatch(/state\.permanentlyFailedIds\.size\s*>\s*MAX_PERMANENTLY_FAILED_IDS/);
+        const helperBody = extractFnBody(queueSource, 'function markPermanentlyFailed');
+        expect(helperBody, 'markPermanentlyFailed body must be findable').toBeTruthy();
+        expect(helperBody!).toMatch(/state\.permanentlyFailedIds\.size\s*<=\s*MAX_PERMANENTLY_FAILED_IDS/);
         // FIFO eviction: use .values().next().value to get the oldest.
-        expect(queueSource).toMatch(/const\s+oldest\s*=\s*state\.permanentlyFailedIds\.values\(\)\.next\(\)\.value/);
-        expect(queueSource).toMatch(/state\.permanentlyFailedIds\.delete\s*\(\s*oldest\s*\)/);
+        expect(helperBody!).toMatch(/const\s+oldest\s*=\s*state\.permanentlyFailedIds\.values\(\)\.next\(\)\.value/);
+        expect(helperBody!).toMatch(/state\.permanentlyFailedIds\.delete\s*\(\s*oldest\s*\)/);
     });
 
     it('quiesceImageProcessingQueueForRestore clears permanentlyFailedIds', () => {

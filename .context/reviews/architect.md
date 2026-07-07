@@ -1,268 +1,173 @@
-# Cycle 20 Architecture Review
+# Cycle 21 Architect Review
 
-Role: architect lane. Scope: repository-wide architecture/design review of module boundaries, layering, state ownership, Next.js App Router structure, data access, background jobs, migrations, deploy/runtime topology, PWA/service worker, UI component architecture, storage abstraction, and documented product boundaries.
+Target HEAD: `45b32d1db373e03d82a29511f53832051c770880`
 
-Validation basis: static source review after reading `AGENTS.md`, `CLAUDE.md`, and product docs. I did not modify source code and did not run the full quality gates because this lane is review-only. The worktree already had concurrent `.context/reviews/*.md` edits; this report only replaces `.context/reviews/architect.md`.
+Scope: repository-wide architectural/design risk review for coupling, layering, boundaries, invariants, operational topology, data lifecycle, and evolution hazards. I read `AGENTS.md`, `CLAUDE.md`, and `.context/plans/README.md` before reviewing source.
 
 ## Architecture Inventory
 
-Tracked repository size: 3,511 tracked files.
+### App Routes, Actions, Components
 
-Architecture-relevant inventory examined:
+- Public app routes under `apps/web/src/app/[locale]/(public)/`: home, topic, photo detail, share key, shared group, smart collection, map, timeline, year, localized layout/loading/privacy/about, topic feed, and upload entry. The public page surface is intentionally dynamic (`revalidate = 0`) across home/topic/photo/map/timeline/year/share/group/collection.
+- Admin routes under `apps/web/src/app/[locale]/admin/`: login, protected dashboard/categories/tags/users/tokens/settings/seo/password/db/analytics pages and page clients.
+- Server actions under `apps/web/src/app/actions/`: `admin-backfill.ts`, `admin-users.ts`, `auth.ts`, `collections.ts`, `embeddings.ts`, `images.ts`, `lr-tokens.ts`, `public.ts`, `seo.ts`, `settings.ts`, `sharing.ts`, `tags.ts`, `topics.ts`; root `actions.ts` is a barrel.
+- Admin DB action boundary: `apps/web/src/app/[locale]/admin/db-actions.ts`.
+- API routes: admin DB download, Lightroom upload, live/health, OG images, semantic/similar search, upload, robots/sitemap/feed/manifest/icons.
+- Components under `apps/web/src/components/`: admin UI clients, gallery/photo rendering, upload controls, public maintenance, color/HDR details, map/timeline/share widgets, SW/PWA surfaces, and UI primitives.
 
-- Guidance/product/deploy docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `docs/superpowers/**`, `plan/**`, `.context/plans/**`, prior `.context/reviews/**` for known boundary history.
-- Package/config/runtime: root `package.json`, `package-lock.json`, `apps/web/package.json`, `next.config.ts`, `tsconfig*.json`, `eslint.config.mjs`, `vitest.config.ts`, `playwright.config.ts`, `tailwind.config.ts`, `components.json`.
-- App Router surface: all 80 `apps/web/src/app/**/*.{ts,tsx}` files, including localized public pages, admin layouts/pages, API routes, metadata routes, upload route handlers, and server actions.
-- Shared app code: all 114 `apps/web/src/lib/*.ts` files plus `apps/web/src/lib/storage/*`, all `apps/web/src/db/*.ts`, all `apps/web/src/i18n/*.ts`, and all 61 `apps/web/src/components/**/*.{ts,tsx}` files.
-- Persistence and migrations: `apps/web/src/db/schema.ts`, all 30 SQL migrations, 3 Drizzle meta files, `drizzle.config.ts`, and `apps/web/scripts/migrate.js`.
-- Operational scripts/topology: all 31 files under `apps/web/scripts/` and root `scripts/`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`.
-- PWA/static runtime: `apps/web/public/sw.template.js`, generated `sw.js`, `histogram-worker.js`, PWA icon/manifest routes, and `src/lib/sw-cache.ts`.
-- Test contracts reviewed for architecture coverage: all 357 `apps/web/src/__tests__/*.test.ts` names and architecture/security/source-contract tests where relevant, plus all 10 Playwright specs in `apps/web/e2e/`.
+### Lib Subsystems
 
-## Files Examined
+- Data/query boundary: `apps/web/src/lib/data.ts`, `data-gallery.ts`, `data-timeline.ts`, `data-years.ts`, `map-data.ts`, `smart-collections.ts`.
+- Auth/session/admin boundary: `auth.ts`, `session.ts`, `admin-tokens.ts`, `action-guards.ts`, `admin-mutation-barrier.ts`, `pending-session-revocations.ts`.
+- Upload/image lifecycle: `upload-paths.ts`, `process-image.ts`, `image-queue.ts`, `upload-limits.ts`, `image-quality.ts`, `storage/*`, `serve-upload.ts`.
+- Color/HDR/semantic: `color-detection.ts`, `color-settings.ts`, `admin-backfill-runner.ts`, `clip-model.ts`, `embeddings.ts`, `image-embeddings.ts`, `semantic-search.ts`.
+- Restore/operations: `restore-maintenance.ts`, `restore-maintenance-durable.ts`, `restore-drain-checklist.ts`, `single-writer-guard.ts`, `advisory-locks.ts`, `background-db-writes.ts`, `maintenance-scheduler.ts`, `rate-limit.ts`.
+- Public/security/i18n: `content-security-policy.ts`, `csrf.ts`, `public-origin.ts`, `viewer-mode.ts`, `sw-cache.ts`, `metadata.ts`, `navigation.ts`.
 
-Primary detailed reads included these architecture centers:
+### DB Schema, Migrations, Scripts, Deploy, Tests, Docs
 
-- Upload and restore: `app/actions/images.ts`, `app/api/admin/lr/upload/route.ts`, `app/[locale]/admin/db-actions.ts`, `lib/upload-limits.ts`, `lib/upload-tracker-state.ts`, `lib/upload-processing-contract-lock.ts`, `lib/process-image.ts`, `lib/image-queue.ts`, `lib/admin-backfill-runner.ts`.
-- Data access and public discovery: `lib/data.ts`, `app/actions/public.ts`, `lib/smart-collections.ts`, `app/[locale]/(public)/c/[slug]/page.tsx`, `app/api/search/semantic/route.ts`, `app/api/search/similar/[id]/route.ts`, `lib/clip-embeddings.ts`.
-- Routing/security/layering: `src/proxy.ts`, `lib/api-auth.ts`, `lib/action-guards.ts`, `scripts/check-api-auth.ts`, `scripts/check-action-origin.ts`, `scripts/check-public-route-rate-limit.ts`.
-- Schema and migrations: `db/schema.ts`, `scripts/migrate.js`, `drizzle/meta/_journal.json`, all migration SQL files, migration/source-contract tests.
-- Runtime/deploy: `instrumentation.ts`, `lib/single-writer-guard.ts`, `lib/maintenance-scheduler.ts`, `lib/restore-maintenance*`, `docker-compose.yml`, `deploy.sh`, `nginx/default.conf`.
-- UI/PWA/storage boundaries: public/admin page trees, `components/home-client.tsx`, `components/map/*`, `components/search.tsx`, `components/register-service-worker.tsx`, `public/sw.template.js`, `lib/sw-cache.ts`, `lib/storage/*`, `__tests__/storage-quarantine.test.ts`.
+- DB schema: `apps/web/src/db/schema.ts`, `index.ts`, `seed.ts`.
+- Drizzle migrations: `apps/web/drizzle/0000_*.sql` through `0029_*.sql`, `meta/_journal.json`, and generated snapshots.
+- Operational scripts: migration/reconcile (`scripts/migrate.js`), MySQL option helpers, backfills for color/CLIP/alt text, SW build, route/action/rate-limit lint scanners, restore-maintenance recovery, E2E seed/cleanup helpers.
+- Deploy/topology: `apps/web/Dockerfile`, `docker-compose.yml`, `deploy.sh`, `nginx/default.conf`.
+- Tests: Vitest tests under `apps/web/src/__tests__/` covering privacy fields, restore drains, advisory locks, action origin/auth, image queue, backfill contracts, rate limits, upload/delete behavior, UI audits; Playwright specs under `apps/web/e2e/`.
+- Docs/plans: `CLAUDE.md`, `README.md`, `.context/plans/README.md`, active `.context/plans/run-10-cycle-20.md`, historical plan/review carry-forward directories, and operator notes in `docs/`.
 
-## Confirmed Issues
+## Confirmed Architectural Defects
 
-### ARCH20-01 - Browser and PAT uploads duplicate one ingest transaction contract
-
-Severity: High
-Confidence: High
-Classification: confirmed issue
-
-Exact region:
-
-- Browser upload admission, topic/config lookup, quota claim, original save, metadata insert, queue payload, audit, and revalidation: `apps/web/src/app/actions/images.ts:129-653`.
-- PAT/Lightroom upload admission, multipart parsing, quota claim, topic/config lookup, original save, metadata insert, queue payload, audit, and revalidation: `apps/web/src/app/api/admin/lr/upload/route.ts:84-634`.
-
-Failure scenario:
-
-A future upload-time invariant is added to one path and missed in the other: a new privacy setting, processing snapshot property, color/HDR field, alt-text field, restore fence, queue payload field, audit field, or cleanup branch. The comments show this has already been a recurring maintenance class: the PAT route mirrors browser GPS stripping, HDR gating, color metadata, EXIF caption inputs, and queue settings through hand-copied blocks.
-
-Concrete fix:
-
-Extract a single ingest service for already-authenticated upload requests. Keep Server Action and PAT Route Handler adapters thin: auth, request parsing, response shape. The shared service should own config snapshot creation, quota claim/settlement, topic verification, original save, GPS/HDR/color normalization, DB insert, tag handling where applicable, queue payload construction, audit inputs, cleanup, and revalidation. Add parity tests at the service boundary so a new upload field cannot land in only one adapter.
-
-### ARCH20-02 - Large binary ingress still depends on framework multipart materialization
+### A1. Image deletion can leave public files orphaned after returning success
 
 Severity: High
 Confidence: High
-Classification: confirmed issue
+Files/regions:
 
-Exact region:
+- `apps/web/src/app/actions/images.ts:719-756`
+- `apps/web/src/lib/upload-paths.ts:101-117`
+- `apps/web/src/lib/process-image.ts:621-640`
+- `apps/web/next.config.ts:60-77`
+- `apps/web/nginx/default.conf:210-226`
 
-- Browser upload receives `FormData` and extracts `File` objects before app-level quota checks: `apps/web/src/app/actions/images.ts:129-148`, then checks file count/size at `apps/web/src/app/actions/images.ts:184-263`.
-- PAT upload performs header checks and a one-slot parser semaphore, but still materializes the body via `await request.formData()`: `apps/web/src/app/api/admin/lr/upload/route.ts:101-181`.
-- DB restore is a Server Action accepting `FormData`; only after that does it stream the `File` to disk: `apps/web/src/app/[locale]/admin/db-actions.ts:400-407`, `apps/web/src/app/[locale]/admin/db-actions.ts:693-714`.
-- Next raises framework request body caps for these large bodies: `apps/web/next.config.ts:111-119`; cap constants allow 200 MiB uploads and 250 MiB restore files plus overhead: `apps/web/src/lib/upload-limits.ts:1-33`.
+The delete action removes DB rows first, then attempts file cleanup afterward. Cleanup failures are logged, but the action still returns `{ success: true, cleanupFailureCount }` (`images.ts:747-756`). Strict cleanup helpers correctly throw on non-ENOENT failures (`upload-paths.ts:101-117`, `process-image.ts:628-640`), but there is no durable cleanup ledger or retry path once the DB row is gone.
 
-Failure scenario:
+Concrete failure scenario: an admin deletes a private photo while the filesystem is transiently read-only or a derivative file has permission drift. The DB row is gone, shared paths are revalidated, and the UI reports success. The original or public derivative remains on disk. Existing derivatives under `/public/uploads` are intentionally served as static/public assets with cache headers (`next.config.ts:60-77`) and proxied by nginx (`nginx/default.conf:210-226`), so a known URL can continue to fetch stale content even though the application has lost the row needed to clean it later.
 
-A large browser upload, PAT upload, or restore request is accepted by Next and materialized into `FormData`/`File` before the app can stream to disk or enforce most domain checks. On the documented single-host deployment, concurrent large requests plus Sharp/image work can spike memory or temp-storage pressure and degrade public/admin traffic even when later app checks reject the request correctly.
+Suggested fix: introduce a durable deletion outbox/tombstone. Mark the image as `deleting` or write `pending_file_deletions` before removing the row, retry cleanup until every file is gone, and make admin success depend on the durable deletion state rather than best-effort unlink completion. For public derivatives, either move served files out of `public/` behind an app-controlled handler that can honor tombstones, or ensure deletion/tombstone checks happen before any static serving path can return bytes.
 
-Concrete fix:
-
-Move large binary ingress to streaming Route Handlers. Enforce `Content-Length`, per-part limits, total limits, and a process-wide large-body semaphore before parsing; stream directly to temp files; then pass validated temp-file handles into the shared upload/restore service. Keep Server Actions for small metadata commands only.
-
-### ARCH20-03 - Single-instance topology is detected but not enforced
-
-Severity: Medium
-Confidence: High
-Classification: confirmed issue
-
-Exact region:
-
-- Upload quota state is process-local: `apps/web/src/lib/upload-tracker-state.ts:7-20`, `apps/web/src/lib/upload-tracker-state.ts:70-78`.
-- OG/share/feed/semantic public fast-path limiters are process-local Maps: `apps/web/src/lib/rate-limit.ts:78-109`, `apps/web/src/lib/rate-limit.ts:404-427`.
-- Shared-group view-count buffer is process-local: `apps/web/src/lib/data.ts:13-63`.
-- The singleton guard explicitly says it is warn-only and startup continues: `apps/web/src/lib/single-writer-guard.ts:6-16`, `apps/web/src/lib/single-writer-guard.ts:218-235`.
-- Startup initializes the guard fire-and-forget: `apps/web/src/instrumentation.ts:22-31`.
-- Compose/deploy run a single named container but do not assert singleton DB ownership: `apps/web/docker-compose.yml:12-17`, `apps/web/deploy.sh:51-77`.
-
-Failure scenario:
-
-An operator accidentally runs two web processes against the same database during manual recovery, blue/green experimentation, or a compose scale/custom deployment. The guard logs, but both processes keep serving. Upload quotas, restore process state, view buffers, queue process state, and several public limiter budgets split by process, multiplying allowed traffic and weakening coordination.
-
-Concrete fix:
-
-For the supported topology, fail closed in production when another holder owns the singleton lock unless an explicit unsafe override is set. Add a deploy post-start assertion that exactly one `gallerykit-web` instance is serving the DB. If scale-out becomes a product goal, first move upload quota, public fast-path limiters, queue ownership, shared view buffers, and restore coordination into shared durable state.
-
-### ARCH20-04 - Upload queue and admin backfill budget independently against the same DB/CPU pool
+### A2. Background image queue and admin backfill budgets can overcommit the DB pool together
 
 Severity: High
 Confidence: High
-Classification: confirmed issue
+Files/regions:
 
-Exact region:
+- `apps/web/src/lib/image-queue.ts:121-153`
+- `apps/web/src/lib/admin-backfill-runner.ts:106-142`
+- `apps/web/src/lib/admin-backfill-runner.ts:393-431`
+- `apps/web/src/lib/advisory-locks.ts:38-49`
 
-- Image queue computes its own DB-pool-derived concurrency: `apps/web/src/lib/image-queue.ts:121-153`.
-- Admin backfill computes a separate DB-pool-derived concurrency: `apps/web/src/lib/admin-backfill-runner.ts:97-143`.
-- Admin backfill documentation says it is invisible to the upload processing queue: `apps/web/src/lib/admin-backfill-runner.ts:41-44`.
-- Each image conversion fans out WebP, AVIF, and JPEG encoders in parallel: `apps/web/src/lib/process-image.ts:1205-1418`.
+The image queue and in-app admin backfill each compute their own safe concurrency against the same process DB pool. The image queue reserves half the pool and caps workers (`image-queue.ts:121-153`); the backfill runner independently reserves half the pool plus one whole-run advisory lock (`admin-backfill-runner.ts:106-142`). Those formulas are safe in isolation, but there is no shared semaphore or exclusive background-processing budget. Backfills serialize only other backfills (`LOCK_COLOR_PIPELINE_BACKFILL`, `LOCK_SEMANTIC_EMBEDDING_BACKFILL`), while queue workers use per-image processing claims (`advisory-locks.ts:38-49`).
 
-Failure scenario:
+Concrete failure scenario: uploads are actively processing at effective queue concurrency 2 on the default 10-connection pool while an admin starts the in-app color re-encode, also clamped to 2. The two systems can pin advisory-lock connections plus transient update/query connections at the same time. Live dynamic pages, which already issue multi-query fan-outs, can queue behind encode-duration work and fail or time out during an operator maintenance window.
 
-Fresh uploads are processing while an admin starts in-app color/format backfill. At the default 10-connection pool, each lane can independently choose concurrency 2. Backfill also holds a run-level advisory lock, and each image job can hold claim/update connections while Sharp runs. Four active image jobs can fan out into three encoder branches each, oversubscribing CPU/libvips and leaving too little DB headroom for dynamic public pages, auth, search, and health checks.
+Suggested fix: create one shared background DB/CPU budget used by `image-queue.ts`, `admin-backfill-runner.ts`, and sidecar backfill entry points. Either use a process-local weighted semaphore plus advisory operation locks, or make in-app backfill acquire an exclusive "background image processing" lock that pauses the upload queue. Add a contract test asserting the combined maximum background connection claim cannot exceed the live-reserved budget.
 
-Concrete fix:
-
-Introduce a process-wide background-work budget shared by upload processing, admin color backfill, semantic embedding backfill/bootstrap, and other heavy side effects. Acquire DB and CPU tokens before advisory locks and Sharp work. A smaller first step is to pause/refuse admin backfill while foreground upload queue work is active, with a source-contract test proving combined queue plus backfill concurrency cannot exceed the shared budget.
-
-### ARCH20-05 - Public discovery surfaces run expensive scans inside the request path
-
-Severity: Medium
-Confidence: High for current code shape; Medium for production impact without MySQL `EXPLAIN`
-Classification: confirmed issue
-
-Exact region:
-
-- Public keyword action accepts two-code-point queries and calls search after rate limiting: `apps/web/src/app/actions/public.ts:247-317`.
-- Keyword search uses leading-wildcard `containsLike` across images/topics/tags/aliases: `apps/web/src/lib/data.ts:1574-1749`.
-- Smart collections parse/compile/run dynamic predicates on every public request: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:96-111`.
-- Smart-collection compiler allows `contains` and tag `contains` predicates: `apps/web/src/lib/smart-collections.ts:221-223`, `apps/web/src/lib/smart-collections.ts:250-267`.
-- Semantic and similar routes scan embedding blobs and score in Node per request: `apps/web/src/app/api/search/semantic/route.ts:263-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:177-214`.
-- Semantic scan limit can be configured up to 25,000 rows: `apps/web/src/lib/clip-embeddings.ts:36-48`.
-
-Failure scenario:
-
-Several public users or crawlers hit keyword search, broad public smart collections, and semantic/similar routes while normal SSR and image work are active. Rate limits bound request count, but each admitted request can still do non-sargable SQL scans, grouped tag/alias queries, dynamic predicate compilation, or thousands of vector decodes and dot products inside the same Next process and MySQL pool.
-
-Concrete fix:
-
-Create a dedicated discovery/search ownership boundary. Keyword search should use MySQL FULLTEXT/ngram or a maintained `image_search_terms` table. Expensive smart collections should be cost-classified at save time and materialized when public. Semantic/similar search should move to an ANN/vector index, worker service, or process-owned preloaded matrix with generation invalidation and explicit concurrency backpressure.
-
-### ARCH20-06 - Public map ships one large exact-coordinate SSR/client payload
+### A3. Pipeline backfill selection has no supporting index
 
 Severity: Medium
 Confidence: High
-Classification: confirmed issue
+Files/regions:
 
-Exact region:
+- `apps/web/src/db/schema.ts:82-131`
+- `apps/web/src/lib/admin-backfill-runner.ts:393-431`
+- `apps/web/scripts/backfill-color-pipeline.ts:373-379`
 
-- Public map is always dynamic: `apps/web/src/app/[locale]/(public)/map/page.tsx:13-14`.
-- Map query caps at 10,000 and comments defer bbox/clustering: `apps/web/src/lib/data.ts:1766-1775`.
-- Query returns all opted-in GPS rows up to the cap with exact coordinates: `apps/web/src/lib/data.ts:1784-1816`.
-- Page serializes all markers and renders a duplicate fallback list: `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`.
-- Client computes bounds across all markers and renders one Leaflet marker each: `apps/web/src/components/map/map-client.tsx:77-94`, `apps/web/src/components/map/map-client.tsx:120-139`.
-- Image indexes do not include a spatial/geohash access path: `apps/web/src/db/schema.ts:123-131`.
+`images.pipeline_version` is the central idempotency marker for pipeline migrations (`schema.ts:82-83`), but the `images` table indexes do not include `pipeline_version` or a composite matching the backfill predicates (`schema.ts:123-131`). Both in-app and sidecar backfills count and fetch candidates with `processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < CURRENT)` (`admin-backfill-runner.ts:393-431`, `backfill-color-pipeline.ts:373-379`).
 
-Failure scenario:
+Concrete failure scenario: a mature gallery with hundreds of thousands of processed rows upgrades the image pipeline. The backfill status/count and every keyset batch evaluate a low-selectivity predicate without a matching index. On MySQL this can degrade into repeated large scans during an already CPU-heavy maintenance operation, increasing lock wait and pool pressure for public page traffic.
 
-A location-rich gallery enables map visibility for thousands of photos. `/map` serializes thousands of exact coordinates and list entries into one response, then hydrates thousands of Leaflet markers and popups on mobile. The page can stall or crash even though the SQL result is capped, and every visitor receives the full opted-in coordinate set whether or not they inspect that region.
+Suggested fix: add a migration and journal entry for an index shaped for candidate discovery, for example `(processed, pipeline_version, id)` or a generated/stored candidate marker if MySQL optimizer behavior around `IS NULL OR <` is poor. Include an EXPLAIN-based script/test fixture or source contract that backfill predicates remain indexable.
 
-Concrete fix:
+## Risks Needing Product or Operator Decision
 
-Replace all-at-once marker hydration with viewport/bbox APIs, clustering, and a lower initial payload budget. Add a spatial/geohash/composite index matching the chosen query. Keep the accessible fallback list paginated or virtualized separately from marker rendering.
+### R1. In-app backup/restore is database-only while the data model references mutable filesystem state
 
-### ARCH20-07 - Cached shared-group data access still owns a view-count side effect
+Severity: High
+Confidence: High
+Files/regions:
 
-Severity: Medium
-Confidence: Medium
-Classification: confirmed issue
+- `apps/web/src/app/[locale]/admin/db-actions.ts:420-715`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:717-955`
+- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx:177-245`
+- `apps/web/messages/en.json:21-26`
+- `apps/web/docker-compose.yml:24-32`
+- `apps/web/src/app/actions/images.ts:377-527`
 
-Exact region:
+The restore path is careful about DB-level invariants: it takes restore/upload/backfill locks, starts durable maintenance, drains process-local writers, imports SQL through `mysql`, then runs post-restore migrations (`db-actions.ts:420-715`, `717-955`). The UI now warns that backup/restore covers database rows only and leaves files unchanged (`db/page.tsx:177-245`, `messages/en.json:21-26`). The operational topology stores originals, derivatives, and resources in separate bind mounts (`docker-compose.yml:24-32`), while uploads write original files before inserting DB rows and enqueueing derivative processing (`images.ts:377-527`).
 
-- `getSharedGroup()` buffers a denormalized view-count side effect while returning data: `apps/web/src/lib/data.ts:1392-1407`.
-- The cached wrapper warns about different count semantics: `apps/web/src/lib/data.ts:1830-1834`.
-- The public group page uses the cached read and then separately records the durable view: `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:111-142`.
+Concrete failure scenario: an operator restores a DB dump from Monday after deleting photos on Tuesday. Rows for those photos are reintroduced, but originals/derivatives may already be gone. The inverse also happens: files uploaded after the dump remain on disk after restore but have no rows. The app has maintenance fences for SQL consistency, but no filesystem snapshot, reconciliation, or rollback boundary.
 
-Failure scenario:
+Decision needed: either keep this explicitly DB-only and require paired host-level filesystem restore as an operator contract, or promote backup/restore to an application-level artifact that includes DB dump plus file manifest/snapshot. A middle ground is a post-restore filesystem verifier that marks missing originals/derivatives as failed, queues repair when originals exist, and reports orphan files for operator cleanup.
 
-A future metadata, OG, preload, or layout path calls `getSharedGroupCached()` with `incrementViewCount:false`, or with different selected-photo semantics, before the page's main render. React request cache deduplicates a function that is not pure data access, so denormalized counters can be skipped, duplicated, or diverge from durable view recording depending on call order and arguments.
-
-Concrete fix:
-
-Split shared-group access into a pure cached data read and explicit view-recording orchestration. The page should fetch the group once, resolve whether the request is a group view or selected-photo navigation, then call denormalized and durable counters from one non-cached owner.
-
-## Likely Issues / Design Debt
-
-### ARCH20-08 - Topic slug remains a mutable natural key with manual fan-out semantics
+### R2. Public flood protection depends on manually applied nginx config, not deploy
 
 Severity: Medium
-Confidence: Medium
-Classification: likely issue / design debt
+Confidence: High
+Files/regions:
 
-Exact region:
+- `apps/web/nginx/default.conf:1-29`
+- `apps/web/nginx/default.conf:246-295`
+- `apps/web/deploy.sh:51-108`
+- `apps/web/src/app/[locale]/(public)/page.tsx:19`
+- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:42`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:14`
 
-- `topics.slug` is the primary key: `apps/web/src/db/schema.ts:10-18`.
-- FK children reference the slug with no `ON UPDATE CASCADE`: `apps/web/src/db/schema.ts:20-39`, `apps/web/src/db/schema.ts:251-260`.
-- Rename recreates the topic and manually repoints images, aliases, topic views, and smart-collection JSON before deleting the old row: `apps/web/src/app/actions/topics.ts:287-371`.
-- A registry test now covers known FK children and smart-collection update order: `apps/web/src/__tests__/topic-slug-fk-registry.test.ts:1-79`.
+Public SSR and image-optimizer protection is placed at nginx: `zone=public` for dynamic public pages and `zone=nextimage` for `/_next/image` (`nginx/default.conf:1-29`, `246-295`). The nginx file itself states it is config-only and must be manually applied/reloaded (`nginx/default.conf:290-293`). The deploy script rebuilds and starts Docker, health-checks the app, and prunes artifacts, but does not validate or reload nginx (`deploy.sh:51-108`). Public pages are dynamic (`revalidate = 0`) on key surfaces such as home, photo, and map.
 
-Failure scenario:
+Concrete failure scenario: a new host or emergency redeploy uses the app container successfully but misses the nginx template update. The app passes health checks, but the public dynamic route surface and Next image optimizer run without the edge limiter that the architecture assumes. A per-IP crawl or uncached image tuple flood burns DB, Sharp CPU, and disk cache with no app-layer fallback on those page navigations.
 
-The current known fan-out is covered, but future non-FK persistence sites, JSON settings, cache keys, generated feeds, or external integration records can store topic slugs outside the registry's model. A rename can leave a new feature pointing at the deleted slug, producing empty galleries, broken analytics association, stale public links, or hard-to-debug smart-collection behavior.
+Decision needed: either make nginx config deployment/verification part of the release contract, or add an app-layer coarse limiter/failsafe for the dynamic public page surface when edge protection is not confirmed. A practical fix is a blocking deploy preflight that checks the live nginx config for the required zones and locations, plus documentation that `apps/web/nginx/default.conf` is not merely advisory.
 
-Concrete fix:
-
-Migrate topic identity to an immutable surrogate `topic_id`, with slug as mutable route/display state and aliases as route history. Until then, extend the registry guard beyond schema FKs to every slug-bearing persistence site and JSON field, and require every new slug persistence site to declare rename behavior.
-
-## Manual-Validation Risks
-
-### ARCH20-MV01 - Public-page flood protection depends on live host nginx state outside deploy
+### R3. Advisory lock names are server-scoped, which blocks multi-gallery co-location
 
 Severity: Medium
-Confidence: High for repo/deploy mismatch; Medium for live exploitability without host inspection
-Classification: manual-validation risk
+Confidence: High
+Files/regions:
 
-Exact region:
+- `apps/web/src/lib/advisory-locks.ts:10-49`
+- `apps/web/src/lib/advisory-locks.ts:51-72`
+- `apps/web/src/lib/image-queue.ts:752-780`
 
-- Public and image limiter zones are defined only in the nginx template: `apps/web/nginx/default.conf:1-29`.
-- Public SSR limiter is applied in the catch-all location: `apps/web/nginx/default.conf:274-295`.
-- The template states deploys do not touch live nginx: `apps/web/nginx/default.conf:290-293`.
-- Deploy builds/starts the app and health checks, but does not verify host nginx config: `apps/web/deploy.sh:51-77`.
-- Docs state public pages rely on edge limiting and no app-layer page limiter exists: `CLAUDE.md:247`.
+Most advisory lock names are global constants in MySQL's server-wide lock namespace (`advisory-locks.ts:10-49`). Only the single-writer liveness lock is database-scoped through a DB-name hash (`advisory-locks.ts:51-72`). The comments document the constraint, but the code still means separate GalleryKit databases on the same MySQL server serialize restores, upload-contract changes, topic changes, backfills, and per-image processing claims.
 
-Failure scenario:
+Concrete failure scenario: two independent galleries share one MySQL server with separate DBs. Gallery A runs a color backfill or restore and Gallery B's restore/backfill/upload-contract operations fail fast or wait unexpectedly. Worse, per-image processing claims such as `gallerykit:image-processing:123` collide by auto-increment ID across databases, so Gallery B can mark a row as claim-exhausted because Gallery A is processing a different image with the same ID (`image-queue.ts:752-780`).
 
-A repository change adds or relies on an nginx limiter/body cap, `npm run deploy` succeeds, but the host keeps an older nginx file or a different proxy. Operators believe dynamic public SSR pages are protected while `/`, `/p/:id`, `/map`, `/timeline`, topic pages, and smart collections reach Next/MySQL with no page-level app limiter.
+Decision needed: either enforce "one GalleryKit per MySQL server" as a hard startup/deploy guard, or prefix every non-liveness advisory lock with a stable per-instance identifier or DB hash. The latter is the better evolution path if hosted multi-gallery or shared MySQL operations are expected.
 
-Concrete fix:
-
-Make deploy verify the live edge config, for example by comparing a version/hash marker from `nginx -T` against the committed template and failing or marking deploy incomplete when missing. Longer term, add a cheap app-layer fallback limiter around public page data loaders so proxy drift cannot remove the last availability guard.
-
-### ARCH20-MV02 - Production semantic search correctness depends on host-only state
+### R4. The single-writer topology is warning-only while process-local state is correctness-critical
 
 Severity: Medium
-Confidence: High for host-state dependency; Low for current live status without host access
-Classification: manual-validation risk
+Confidence: High
+Files/regions:
 
-Exact region:
+- `apps/web/src/lib/single-writer-guard.ts:6-21`
+- `apps/web/src/lib/single-writer-guard.ts:218-235`
+- `apps/web/src/lib/restore-drain-checklist.ts:10-17`
+- `apps/web/src/app/[locale]/admin/db-actions.ts:580-635`
 
-- Product docs state semantic search is disabled by default and production mode requires operator setup/weights/backfill/env opt-in: `README.md:50`.
-- Runtime docs state production serving requires DB mode, `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, seeded weights, and real embeddings: `CLAUDE.md:169`.
-- Route gates on `semanticSearchMode` and active model version, then scans current rows: `apps/web/src/app/api/search/semantic/route.ts:186-204`, `apps/web/src/app/api/search/semantic/route.ts:263-311`.
-- Similar route is production-only and scans the same embedding store: `apps/web/src/app/api/search/similar/[id]/route.ts:115-131`, `apps/web/src/app/api/search/similar/[id]/route.ts:177-214`.
+The repository correctly documents a single-web-instance/single-writer topology. The guard detects another live process on the same DB, but explicitly continues startup as a warning only (`single-writer-guard.ts:6-21`, `218-235`). At the same time, restore safety depends on process-local drains of buffered writers and queues (`restore-drain-checklist.ts:10-17`, `db-actions.ts:580-635`), and the guard's own message names process-local restore fences, upload quota tracking, and rate-limit fast paths as unsafe across multiple app processes.
 
-Failure scenario:
+Concrete failure scenario: an operator scales the web service to two containers to handle traffic. One process enters restore maintenance and drains its own image queue/background writers; the second process continues to accept or flush work because the restore drain checklist cannot see its memory. The SQL import can be followed by stale writes from the other process, corrupting the restored state.
 
-The repo can prove the gates and route shape, but not that the deployed host has the intended CLIP weights, env, DB setting, and embedding coverage. A production operator may believe semantic/similar search is active and complete while the route returns disabled/no-embedding responses or only scans a partial newest-first embedding set.
+Decision needed: decide whether multi-process is out of scope or a roadmap goal. If out of scope, make this fail-closed in production by default with an explicit override for emergency boot. If in scope, move process-local barriers, queues, upload quota, rate-limit fast paths, and restore drains to DB/distributed coordination before allowing horizontal scale.
 
-Concrete fix:
+## Positive Invariants Observed
 
-Add a deploy or operator preflight that checks `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, model manifest/weights under `CLIP_MODELS_ROOT`, DB `semantic_search_mode`, embedding row count/model version, and a sample query. Record the result in deploy output or an admin diagnostics panel.
+- Mutating admin actions are consistently guarded by same-origin/admin checks and the admin mutation barrier, with restore using the exclusive side rather than a shared slot.
+- Restore is much stronger than a basic SQL import: it holds DB restore/upload/backfill locks, durable maintenance state, image queue quiescence, background writer drains, admin mutation drains, and post-restore migrations.
+- Public API routes with expensive or mutating behavior generally have app-layer rate-limit helpers; the remaining public page flood control is consciously delegated to nginx.
+- Privacy-sensitive image fields are centralized in `data.ts` select maps and backed by tests, reducing accidental public leakage when schema fields are added.
 
-## Non-Findings And Positive Boundaries
+## Final Sweep / Inspection Limits
 
-- Admin API routes are centrally wrapped with `withAdminAuth(...)`, and `scripts/check-api-auth.ts` recursively enforces that boundary for `/api/admin/**`.
-- Mutating server actions use `requireSameOriginAdmin()` plus the restore mutation barrier, with `scripts/check-action-origin.ts` enforcing both unless a reasoned exemption is present.
-- Public route/action rate limiting has a dedicated scanner for public API routes and explicit route-level patterns for search, sharing, OG, feed, and semantic surfaces.
-- Public data projections have privacy-sensitive compile guards; GPS and admin-only image metadata are not casually exposed by the normal public projections.
-- The storage abstraction is explicitly quarantined: comments in `lib/storage/*` say the live pipeline still uses direct filesystem helpers, and `__tests__/storage-quarantine.test.ts` fails if source outside `lib/storage` imports it.
-- Migrations have a hash postcondition and reconcile path in `scripts/migrate.js`; I did not find a new schema/journal drift issue in this pass.
-- The PWA service worker has a generated template, version stamping, and a unit-tested reference implementation for LRU semantics. I did not find a new PWA architecture issue beyond the documented same-origin/CDN cache limitation.
-- Product boundaries are documented clearly: finished-photo publishing, no editing/culling/scoring/payment, local-only storage support despite the internal storage abstraction, and operator-gated semantic search.
+No architecture-relevant tracked file category was intentionally skipped. I inspected the required docs first, built inventories across app routes/actions/components, lib subsystems, schema/migrations, scripts, deploy/nginx, tests, and docs/plans, then followed cross-file invariants for restore, upload/delete, image processing, backfill, rate limiting, and topology.
 
-## Final Missed-Issues Sweep
-
-Sweep categories checked: repository guidance, product docs, package/config, App Router pages/layouts/API routes/actions, auth/origin guard boundaries, data access and React `cache()` wrappers, public/admin projections, upload/restore ingress, image processing, queue/backfill interactions, restore/backup locking, schema/migration/reconcile, search/smart-collection/semantic paths, map/timeline/public SSR surfaces, analytics/retention/background jobs, deploy/Docker/nginx topology, PWA/service worker/cache, storage abstraction, UI component boundaries, and architecture/source-contract tests.
-
-No requested source category was intentionally skipped. Items requiring live/manual validation: host nginx config, production MySQL `EXPLAIN`, production CLIP model/embedding state, browser performance traces for large maps, and actual deployed process count.
+I did not line-review generated Drizzle snapshot JSON, binary/static assets, package manager lockfile internals, or unrelated dirty review files already present in `.context/reviews/`. I treated those as non-authoritative for current architecture except where schema/journal/deploy contracts reference them.

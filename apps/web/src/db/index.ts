@@ -144,4 +144,4 @@ poolConnection.execute = (async (...args: Parameters<typeof poolConnection.execu
 
 export const connection = poolConnection;
 export const db = drizzle(poolConnection, { mode: "default", schema });
-export { images, topics, topicAliases, tags, imageTags, adminSettings, sharedGroups, sharedGroupImages, adminUsers, sessions, rateLimitBuckets, auditLog, adminTokens, smartCollections, imageViews, topicViews, sharedGroupViews, imageEmbeddings } from './schema';
+export { images, pendingFileDeletions, topics, topicAliases, tags, imageTags, adminSettings, sharedGroups, sharedGroupImages, adminUsers, sessions, rateLimitBuckets, auditLog, adminTokens, smartCollections, imageViews, topicViews, sharedGroupViews, imageEmbeddings } from './schema';

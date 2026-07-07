@@ -371,6 +371,21 @@ export type ProcessingQueueState = {
     retryTimers: Set<ReturnType<typeof setTimeout>>;
 };
 
+export function markPermanentlyFailed(state: ProcessingQueueState, id: number): void {
+    state.permanentlyFailedIds.add(id);
+    if (state.permanentlyFailedIds.size <= MAX_PERMANENTLY_FAILED_IDS) return;
+
+    const oldest = state.permanentlyFailedIds.values().next().value;
+    if (oldest === undefined) return;
+
+    state.permanentlyFailedIds.delete(oldest);
+    // Keep every per-ID diagnostic map bounded by the same lifecycle as the
+    // permanent-failure set, including the claim-exhaustion path.
+    state.claimRetryCounts.delete(oldest);
+    state.retryCounts.delete(oldest);
+    state.lastErrors.delete(oldest);
+}
+
 export const getProcessingQueueState = (): ProcessingQueueState => {
     const globalWithQueue = globalThis as typeof globalThis & {
         [processingQueueKey]?: ProcessingQueueState;
@@ -764,7 +779,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                     // distinguishable failure (surfaces in the admin failed-images
                     // panel with Retry) and track it as permanently failed in this
                     // process — retryFailedImage clears both on manual retry.
-                    state.permanentlyFailedIds.add(job.id);
+                    markPermanentlyFailed(state, job.id);
                     try {
                         await db.update(images)
                             .set({
@@ -1026,20 +1041,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             // can exclude them, preventing infinite re-enqueue loops. The set
             // is capped (MAX_PERMANENTLY_FAILED_IDS) with FIFO eviction to
             // prevent unbounded memory growth.
-            state.permanentlyFailedIds.add(job.id);
-            if (state.permanentlyFailedIds.size > MAX_PERMANENTLY_FAILED_IDS) {
-                const oldest = state.permanentlyFailedIds.values().next().value;
-                if (oldest !== undefined) {
-                    state.permanentlyFailedIds.delete(oldest);
-                    // C7-MED-05: clean up associated retry maps when evicting from
-                    // permanentlyFailedIds, so stale entries don't accumulate in
-                    // claimRetryCounts and retryCounts for IDs that are no longer
-                    // tracked as permanently failed.
-                    state.claimRetryCounts.delete(oldest);
-                    state.retryCounts.delete(oldest);
-                    state.lastErrors.delete(oldest);
-                }
-            }
+            markPermanentlyFailed(state, job.id);
             // R10-H2: persist processing error and failure timestamp to DB
             // so the admin dashboard can surface failed images with retry.
             // R4C2 COR-R4C2-01: failed_at is a DATETIME(mode:'string') column;

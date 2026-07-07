@@ -18,6 +18,7 @@ export const APP_BACKUP_TABLES = [
     'image_tags',
     'image_views',
     'images',
+    'pending_file_deletions',
     'rate_limit_buckets',
     'sessions',
     'shared_group_images',

@@ -124,10 +124,32 @@ export const images = mysqlTable("images", {
     idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date, table.created_at),
     idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),
     idxImagesProcessedUpdatedAt: index('idx_images_processed_updated_at').on(table.processed, table.updated_at, table.created_at, table.id),
+    idxImagesProcessedPipelineVersion: index('idx_images_processed_pipeline_version').on(table.processed, table.pipeline_version, table.id),
     idxImagesTopic: index('idx_images_topic').on(table.topic, table.processed, table.capture_date, table.created_at),
     idxImagesTopicUpdatedAt: index('idx_images_topic_updated_at').on(table.topic, table.processed, table.updated_at, table.created_at, table.id),
     idxImagesUserFilename: index('idx_images_user_filename').on(table.user_filename),
     idxImagesUploadedBy: index('idx_images_uploaded_by').on(table.uploaded_by),
+}));
+
+export const pendingFileDeletions = mysqlTable("pending_file_deletions", {
+    id: int("id").primaryKey().autoincrement(),
+    image_id: int("image_id"),
+    filename_original: varchar("filename_original", { length: 255 }).notNull(),
+    filename_webp: varchar("filename_webp", { length: 255 }).notNull(),
+    filename_avif: varchar("filename_avif", { length: 255 }).notNull(),
+    filename_jpeg: varchar("filename_jpeg", { length: 255 }).notNull(),
+    attempts: int("attempts").notNull().default(0),
+    last_error: text("last_error"),
+    created_at: timestamp("created_at")
+        .default(sql`CURRENT_TIMESTAMP`)
+        .notNull(),
+    updated_at: timestamp("updated_at")
+        .default(sql`CURRENT_TIMESTAMP`)
+        .onUpdateNow()
+        .notNull(),
+}, (table) => ({
+    idxPendingFileDeletionsImageId: index('idx_pending_file_deletions_image_id').on(table.image_id),
+    idxPendingFileDeletionsUpdatedAt: index('idx_pending_file_deletions_updated_at').on(table.updated_at),
 }));
 
 export const tags = mysqlTable("tags", {

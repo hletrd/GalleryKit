@@ -6,6 +6,7 @@ import { localizePath } from '@/lib/locale-path';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { OptimisticImage } from '@/components/optimistic-image';
 import { getLocalMonthDay } from '@/lib/on-this-day-date';
+import { parseMySqlDateTimeParts } from '@/lib/mysql-datetime';
 
 /**
  * Server component — rendered as part of the home page SSR pass.
@@ -47,9 +48,7 @@ export async function OnThisDayWidget() {
                 {photos.map((photo) => {
                     const displayTitle = getPhotoDisplayTitleFromTagNames(photo, t('untitledPhoto'));
                     const altText = getConcisePhotoAltText(photo, t('photo'));
-                    const year = photo.capture_date
-                        ? new Date(photo.capture_date).getFullYear()
-                        : null;
+                    const year = parseMySqlDateTimeParts(photo.capture_date)?.year ?? null;
                     return (
                         <li key={photo.id}>
                             <Link

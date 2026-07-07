@@ -2,10 +2,10 @@
 
 import path from 'path';
 import { statfs } from 'fs/promises';
-import { db, images, imageTags, sharedGroups, sharedGroupImages, topics } from '@/db';
+import { db, images, imageTags, pendingFileDeletions, sharedGroups, sharedGroupImages, topics } from '@/db';
 import { eq, inArray, and, isNotNull, isNull, sql } from 'drizzle-orm';
-import { saveOriginalAndGetMetadata, extractExifForDb, deleteImageVariantsStrict, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
-import { UPLOAD_DIR_ORIGINAL, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG, deleteOriginalUploadFile, deleteOriginalUploadFileStrict, ensureUploadDirectories } from '@/lib/upload-paths';
+import { saveOriginalAndGetMetadata, extractExifForDb, stripGpsFromOriginal, IMAGE_PIPELINE_VERSION, RawFileError } from '@/lib/process-image';
+import { UPLOAD_DIR_ORIGINAL, deleteOriginalUploadFile, ensureUploadDirectories } from '@/lib/upload-paths';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -15,6 +15,7 @@ import {
     createProcessingSettingsSnapshot,
     enqueueImageProcessing,
     getProcessingQueueState,
+    markPermanentlyFailed,
     serializeProcessingSettingsSnapshot,
 } from '@/lib/image-queue';
 import { logAuditEvent } from '@/lib/audit';
@@ -38,26 +39,16 @@ import type { BulkUpdateImagesInput, TriState } from '@/lib/bulk-edit-types';
 import { stripStubPrefix } from '@/lib/caption-constants';
 import { parseBoundedPositiveInteger } from '@/lib/env';
 import { toMySqlDateTime } from '@/lib/mysql-datetime';
-
-type ImageCleanupFailure = {
-    target: 'original' | 'webp' | 'avif' | 'jpeg';
-    filename: string;
-    reason: string;
-};
+import {
+    cleanupPendingFileDeletion,
+    type ImageCleanupFailure,
+    type PendingFileDeletionRecord,
+} from '@/lib/pending-file-deletions';
 
 type NormalizedBulkTagName = {
     name: string;
     slug: string;
 };
-
-// R4C1 COR-R4C1-03: getSafeUserFilename (C2L2-03 / C2L2-05) moved to
-// @/lib/upload-filenames so the Lightroom PAT route shares the exact same
-// sanitizer instead of re-implementing (and drifting from) it.
-const CLEANUP_RETRY_DELAY_MS = 50;
-
-function wait(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function normalizeBulkTagName(name: string): NormalizedBulkTagName | null {
     const { value: cleanName, rejected } = requireCleanInput(name);
@@ -66,39 +57,6 @@ function normalizeBulkTagName(name: string): NormalizedBulkTagName | null {
     const slug = getTagSlug(cleanName);
     if (!isValidTagSlug(slug)) return null;
     return { name: cleanName, slug };
-}
-
-async function collectImageCleanupFailures(tasks: {
-    target: ImageCleanupFailure['target'];
-    filename: string;
-    operation: () => Promise<void>;
-}[]) {
-    const settled = await Promise.all(tasks.map(async (task) => {
-        let lastReason: unknown;
-        for (let attempt = 0; attempt < 2; attempt++) {
-            try {
-                await task.operation();
-                return null;
-            } catch (err) {
-                lastReason = err;
-                if (attempt === 0) {
-                    await wait(CLEANUP_RETRY_DELAY_MS);
-                }
-            }
-        }
-
-        const reason = lastReason instanceof Error
-            ? lastReason.message
-            : String(lastReason ?? 'unknown cleanup failure');
-
-        return {
-            target: task.target,
-            filename: task.filename,
-            reason,
-        } satisfies ImageCleanupFailure;
-    }));
-
-    return settled.filter((failure): failure is ImageCleanupFailure => failure !== null);
 }
 
 async function getSharedGroupKeysForImages(imageIds: number[]) {
@@ -716,15 +674,36 @@ export async function deleteImage(id: number) {
     queueState.retryCounts.delete(id);
     queueState.claimRetryCounts.delete(id);
 
-    // US-008: Delete DB records in a transaction for consistency
+    const pendingDeletionRef: { current: PendingFileDeletionRecord | null } = { current: null };
+    // US-008: Delete DB records in a transaction for consistency. The
+    // pending_file_deletions row is inserted before the image row is removed
+    // so a post-delete filesystem failure has durable retry state.
     let deletedRows = 0;
     await db.transaction(async (tx) => {
+        const [pendingResult] = await tx.insert(pendingFileDeletions).values({
+            image_id: id,
+            filename_original: image.filename_original,
+            filename_webp: image.filename_webp,
+            filename_avif: image.filename_avif,
+            filename_jpeg: image.filename_jpeg,
+        });
+        pendingDeletionRef.current = {
+            id: safeInsertId(pendingResult.insertId),
+            image_id: id,
+            filename_original: image.filename_original,
+            filename_webp: image.filename_webp,
+            filename_avif: image.filename_avif,
+            filename_jpeg: image.filename_jpeg,
+        };
         await tx.delete(imageTags).where(eq(imageTags.imageId, id));
         const [delResult] = await tx.delete(images).where(eq(images.id, id));
         deletedRows = delResult.affectedRows;
     });
 
     if (deletedRows === 0) {
+        if (pendingDeletionRef.current) {
+            await db.delete(pendingFileDeletions).where(eq(pendingFileDeletions.id, pendingDeletionRef.current.id));
+        }
         return { error: t('imageNotFound') };
     }
 
@@ -732,17 +711,9 @@ export async function deleteImage(id: number) {
     // entries when concurrent deletion causes the transaction to delete 0 rows.
     logAuditEvent(currentUser?.id ?? null, 'image_delete', 'image', String(id), undefined, {}).catch(console.debug);
 
-    // Delete files best-effort, all in parallel. Use prefix scanning for
-    // derivatives so variants generated under older image-size settings are
-    // removed too, not only variants from the current config.
-    const cleanupFailures = await collectImageCleanupFailures([
-        { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFileStrict(image.filename_original) },
-        // Pass empty sizes [] to trigger directory scan and remove ALL
-        // size variants, including those from prior image-size configs.
-        { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_WEBP, image.filename_webp, []) },
-        { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_AVIF, image.filename_avif, []) },
-        { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
-    ]);
+    const cleanupFailures = pendingDeletionRef.current
+        ? await cleanupPendingFileDeletion(pendingDeletionRef.current)
+        : [];
 
     if (cleanupFailures.length > 0) {
         console.error('Image file cleanup incomplete after deleteImage', {
@@ -834,10 +805,30 @@ export async function deleteImages(ids: number[]) {
         queueState.claimRetryCounts.delete(id);
     }
 
-    // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety)
+    const pendingDeletions: PendingFileDeletionRecord[] = [];
+    // Delete DB records in a transaction (imageTags cascade via FK, but explicit for safety).
+    // Insert pending cleanup rows first so any post-delete filesystem failure is
+    // durable and retryable even though the image rows are gone.
     let deletedRows = 0;
     if (foundIds.length > 0) {
         await db.transaction(async (tx) => {
+            for (const image of imageRecords) {
+                const [pendingResult] = await tx.insert(pendingFileDeletions).values({
+                    image_id: image.id,
+                    filename_original: image.filename_original,
+                    filename_webp: image.filename_webp,
+                    filename_avif: image.filename_avif,
+                    filename_jpeg: image.filename_jpeg,
+                });
+                pendingDeletions.push({
+                    id: safeInsertId(pendingResult.insertId),
+                    image_id: image.id,
+                    filename_original: image.filename_original,
+                    filename_webp: image.filename_webp,
+                    filename_avif: image.filename_avif,
+                    filename_jpeg: image.filename_jpeg,
+                });
+            }
             await tx.delete(imageTags).where(inArray(imageTags.imageId, foundIds));
             const [deleteResult] = await tx.delete(images).where(inArray(images.id, foundIds));
             deletedRows = deleteResult.affectedRows;
@@ -871,21 +862,15 @@ export async function deleteImages(ids: number[]) {
         { fallback: 5, max: 32 },
     );
     const cleanupFailures: ImageCleanupFailure[] = [];
-    for (let i = 0; i < imageRecords.length; i += CLEANUP_CONCURRENCY) {
-        const chunk = imageRecords.slice(i, i + CLEANUP_CONCURRENCY);
-        const chunkResults = await Promise.all(chunk.map(async (image) => {
-            // Pass empty sizes [] to scan directory and remove ALL size variants,
-            // including those from prior image-size configs.
-            const failures = await collectImageCleanupFailures([
-                { target: 'original', filename: image.filename_original, operation: () => deleteOriginalUploadFileStrict(image.filename_original) },
-                { target: 'webp', filename: image.filename_webp, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_WEBP, image.filename_webp, []) },
-                { target: 'avif', filename: image.filename_avif, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_AVIF, image.filename_avif, []) },
-                { target: 'jpeg', filename: image.filename_jpeg, operation: () => deleteImageVariantsStrict(UPLOAD_DIR_JPEG, image.filename_jpeg, []) },
-            ]);
+    for (let i = 0; i < pendingDeletions.length; i += CLEANUP_CONCURRENCY) {
+        const chunk = pendingDeletions.slice(i, i + CLEANUP_CONCURRENCY);
+        const chunkResults = await Promise.all(chunk.map(async (pendingDeletion) => {
+            const failures = await cleanupPendingFileDeletion(pendingDeletion);
 
             if (failures.length > 0) {
                 console.error('Image file cleanup incomplete after deleteImages', {
-                    imageId: image.id,
+                    imageId: pendingDeletion.image_id,
+                    pendingFileDeletionId: pendingDeletion.id,
                     cleanupFailures: failures,
                 });
             }
@@ -1368,7 +1353,7 @@ export async function retryFailedImage(id: number) {
         const restoreHeader = (Array.isArray(restoreResult) ? restoreResult[0] : restoreResult) as { affectedRows?: number | bigint | string };
         const restoredRows = Number(restoreHeader?.affectedRows ?? 0);
         if (Number.isFinite(restoredRows) && restoredRows > 0) {
-            state.permanentlyFailedIds.add(id);
+            markPermanentlyFailed(state, id);
             state.lastErrors.set(id, retryError);
         }
         return { error: t('failedToRetryImage') };

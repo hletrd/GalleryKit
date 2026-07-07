@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toMySqlDateTime } from '@/lib/mysql-datetime';
+import { parseMySqlDateTimeParts, toMySqlDateTime } from '@/lib/mysql-datetime';
 
 /**
  * R4C2 COR-R4C2-01 / TEST-R4C2-09: value-format contract for DATETIME
@@ -38,5 +38,36 @@ describe('toMySqlDateTime — MySQL DATETIME literal contract', () => {
         // same parts back regardless of the host TZ offset.
         const d = new Date(2026, 5, 15, 12, 34, 56);
         expect(toMySqlDateTime(d)).toBe('2026-06-15 12:34:56');
+    });
+});
+
+describe('parseMySqlDateTimeParts', () => {
+    it('extracts date parts from canonical MySQL DATETIME strings without Date.parse', () => {
+        expect(parseMySqlDateTimeParts('2026-07-08 09:10:11')).toEqual({
+            year: 2026,
+            month: 7,
+            day: 8,
+        });
+    });
+
+    it('accepts the T separator but still rejects timezones and fractional seconds', () => {
+        expect(parseMySqlDateTimeParts('2026-07-08T09:10:11')).toEqual({
+            year: 2026,
+            month: 7,
+            day: 8,
+        });
+        expect(parseMySqlDateTimeParts('2026-07-08T09:10:11Z')).toBeNull();
+        expect(parseMySqlDateTimeParts('2026-07-08 09:10:11.000')).toBeNull();
+    });
+
+    it('rejects impossible calendar dates and invalid time components', () => {
+        expect(parseMySqlDateTimeParts('2026-02-29 00:00:00')).toBeNull();
+        expect(parseMySqlDateTimeParts('2024-02-29 00:00:00')).toEqual({
+            year: 2024,
+            month: 2,
+            day: 29,
+        });
+        expect(parseMySqlDateTimeParts('2026-13-01 00:00:00')).toBeNull();
+        expect(parseMySqlDateTimeParts('2026-12-01 24:00:00')).toBeNull();
     });
 });

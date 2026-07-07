@@ -12,6 +12,7 @@ import { db, images, imageTags, tags } from '@/db';
 import { eq, and, desc, gte, isNotNull, lt } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import type { PrivacySensitiveKeys } from '@/lib/data';
+import { parseMySqlDateTimeParts } from '@/lib/mysql-datetime';
 
 // ---------------------------------------------------------------------------
 // Field sets (mirrors publicSelectFields from data.ts — privacy-safe subset)
@@ -246,10 +247,9 @@ export async function getYearInReviewImages(year: number): Promise<YearInReview>
 
     const byMonth = new Map<number, typeof all>();
     for (const img of all) {
-        if (!img.capture_date) continue;
-        // capture_date is stored as 'YYYY-MM-DD HH:mm:ss'
-        const monthNum = new Date(img.capture_date).getMonth() + 1;
-        if (!Number.isFinite(monthNum) || monthNum < 1 || monthNum > 12) continue;
+        const parts = parseMySqlDateTimeParts(img.capture_date);
+        if (!parts) continue;
+        const monthNum = parts.month;
         const bucket = byMonth.get(monthNum) ?? [];
         bucket.push(img);
         byMonth.set(monthNum, bucket);

@@ -66,7 +66,7 @@ describe('cycle 20 source contracts', () => {
         const src = readSrc('app/actions/images.ts');
         const fn = src.slice(src.indexOf('export async function deleteImage'), src.indexOf('export async function deleteImages'));
         expect(fn).toContain('if (deletedRows === 0)');
-        expect(fn.indexOf('if (deletedRows === 0)')).toBeLessThan(fn.indexOf('collectImageCleanupFailures'));
+        expect(fn.indexOf('if (deletedRows === 0)')).toBeLessThan(fn.indexOf('cleanupPendingFileDeletion'));
         expect(fn.indexOf('if (deletedRows === 0)')).toBeLessThan(fn.indexOf('revalidateLocalizedPaths'));
     });
 

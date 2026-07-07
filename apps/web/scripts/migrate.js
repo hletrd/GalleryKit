@@ -483,6 +483,24 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'avif_10bit', 'ALTER TABLE images ADD COLUMN avif_10bit boolean DEFAULT NULL');
     await ensureColumn(connection, dbName, 'topics', 'map_visible', 'ALTER TABLE topics ADD COLUMN map_visible boolean NOT NULL DEFAULT false');
 
+    await ensureTable(connection, `
+        CREATE TABLE IF NOT EXISTS pending_file_deletions (
+            id int NOT NULL AUTO_INCREMENT,
+            image_id int DEFAULT NULL,
+            filename_original varchar(255) NOT NULL,
+            filename_webp varchar(255) NOT NULL,
+            filename_avif varchar(255) NOT NULL,
+            filename_jpeg varchar(255) NOT NULL,
+            attempts int NOT NULL DEFAULT 0,
+            last_error text,
+            created_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            INDEX idx_pending_file_deletions_image_id (image_id),
+            INDEX idx_pending_file_deletions_updated_at (updated_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     await ensureColumnDefinition(
         connection,
         dbName,
@@ -703,6 +721,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_capture_date', 'CREATE INDEX idx_images_processed_capture_date ON images (processed, capture_date, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_created_at', 'CREATE INDEX idx_images_processed_created_at ON images (processed, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_updated_at', 'CREATE INDEX idx_images_processed_updated_at ON images (processed, updated_at, created_at, id)');
+    await ensureIndex(connection, dbName, 'images', 'idx_images_processed_pipeline_version', 'CREATE INDEX idx_images_processed_pipeline_version ON images (processed, pipeline_version, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_topic', 'CREATE INDEX idx_images_topic ON images (topic, processed, capture_date, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_topic_updated_at', 'CREATE INDEX idx_images_topic_updated_at ON images (topic, processed, updated_at, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_user_filename', 'CREATE INDEX idx_images_user_filename ON images (user_filename)');

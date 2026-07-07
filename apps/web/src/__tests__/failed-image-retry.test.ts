@@ -157,7 +157,7 @@ describe('R10-H2: failed image persistence and retry', () => {
             expect(retryFailedImageBody!).toMatch(/processing_settings_json:\s*null/);
             expect(retryFailedImageBody!).toMatch(/isNull\s*\(\s*images\.processing_error\s*\)/);
             expect(retryFailedImageBody!).toContain('const restoredRows = Number(restoreHeader?.affectedRows ?? 0)');
-            expect(retryFailedImageBody!).toContain('state.permanentlyFailedIds.add(id)');
+            expect(retryFailedImageBody!).toContain('markPermanentlyFailed(state, id)');
             expect(retryFailedImageBody!).toContain("return { error: t('failedToRetryImage') }");
         });
 

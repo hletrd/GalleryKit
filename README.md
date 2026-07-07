@@ -154,7 +154,7 @@ SESSION_SECRET=<openssl rand -hex 32>
 BASE_URL=http://localhost:3000
 # Optional: serve uploaded assets from a CDN or reverse proxy prefix
 # IMAGE_BASE_URL=https://cdn.example.com
-# DB_SSL_CA=/etc/mysql/ca.pem  # Required for verified MySQL CLI TLS to non-local DB hosts.
+# DB_SSL_CA=/etc/mysql/ca.pem  # Required for verified runtime, Drizzle Kit, and backup/restore CLI TLS to non-local DB hosts.
 # DB_SSL=false  # Disable TLS only behind a trusted private link.
 # QUEUE_CONCURRENCY=1
 # UPLOAD_MAX_TOTAL_BYTES=2147483648
