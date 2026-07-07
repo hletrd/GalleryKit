@@ -1,100 +1,94 @@
-# Cycle 21 Tracer Review
+# Cycle 22 Causal Trace Review — tracer
 
-Scope: repository-wide causal tracing review at HEAD `45b32d1db373e03d82a29511f53832051c770880` for `/Users/hletrd/flash-shared/gallery`.
+Date: 2026-07-08 KST
+Review HEAD: `856bbc86fded2f9deb99c3a17fb2175f3be31560`
+Role: `tracer`
+Scope: suspicious flow tracing across upload, restore, delete, retry, background jobs, and cross-request state. No fixes implemented.
 
-Required context read first: `AGENTS.md`, `CLAUDE.md`, and `.context/plans/README.md`.
+## Inventory First
 
-Validation evidence:
-
-- `git rev-parse HEAD` returned `45b32d1db373e03d82a29511f53832051c770880`.
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- Existing dirty files under `.context/reviews/` were treated as concurrent work and left untouched.
-
-## Trace Inventory
-
-### Upload -> Queue -> Process -> Serve
-
-- Browser upload enters `apps/web/src/app/actions/images.ts:129-653`: restore maintenance gate, same-origin guard, admin mutation barrier, admin identity, file/topic/tag validation, upload-processing contract lock, config snapshot, quota preclaim, disk free check, topic existence check, original save, HDR/GPS policy, late restore recheck, DB insert, tag insert, queue enqueue, quota settle, audit, and revalidation.
-- Lightroom upload enters `apps/web/src/app/api/admin/lr/upload/route.ts:84-634`: `withAdminAuth(..., { allowTokenScope: 'lr:upload' })`, restore and body-size gates, upload tracker preclaim before multipart parse, post-parse restore recheck, upload contract lock, topic/settings/disk checks, original save, HDR/GPS parity, DB insert, post-commit PAT touch, enqueue, audit, and revalidation.
-- Processing is owned by `apps/web/src/lib/image-queue.ts:668-993`: per-image advisory claim, pending-row check, original resolution, upload-time processing snapshot fallback to current config for legacy rows, atomic derivative generation, nonzero derivative verification, conditional `processed=true` update, deleted-mid-process derivative cleanup, tracked caption and embedding side effects.
-- Original and derivative file lifecycle is handled in `apps/web/src/lib/process-image.ts:864-1462` and `apps/web/src/lib/upload-paths.ts:68-171`: private original root, safe names/extensions, EXIF/color extraction, 0600 original writes, atomic derivative writes with rollback/backup cleanup, and original deletion containment.
-- Public derivative serving is routed through `apps/web/src/app/uploads/[...path]/route.ts:1-22`, `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:1-20`, and `apps/web/src/lib/serve-upload.ts:162-380`: directory/extension allowlist, segment validation, realpath containment, no-symlink serving, ETag with pipeline/settings hash, 304 and HEAD no-body fast paths, fd-stat GET streaming, abort cleanup.
-
-### Restore Maintenance
-
-- Restore action is in `apps/web/src/app/[locale]/admin/db-actions.ts:420-713`: same-origin/admin gate, dedicated advisory-lock connection, DB-restore lock, upload-processing contract lock, color and semantic backfill locks, durable maintenance marker, ordered drain checklist, restore import, post-restore migrate, marker clear/keep behavior, queue resume, pending session revocation flush, and lock release.
-- Restore SQL ingestion is in `apps/web/src/app/[locale]/admin/db-actions.ts:717-954`: file cap, temp stream, plausible SQL header, mysqldump completion trailer, chunked dangerous-SQL scan using actual bytes read, minimal mysql child env, watchdog, stderr redaction, and maintenance retention on import/migration failure.
-- Durable marker handling is in `apps/web/src/lib/restore-maintenance-durable.ts:24-120`: `/app/data` marker resolution, fail-closed read, process flag sync at boot, write rollback only when this call started maintenance, clear on successful recovery.
-- Restore drains cover shared group view counts, image queue, background DB writes, maintenance sweeps, and admin mutations via `apps/web/src/app/[locale]/admin/db-actions.ts:580-635`; the shared-group drain helper is declared at `apps/web/src/app/[locale]/admin/db-actions.ts:47-57`.
-
-### Auth / Session Revocation
-
-- Login path in `apps/web/src/app/actions/auth.ts:79-273`: maintenance gate, trusted same-origin check, mutation barrier, IP/account pre-increment rate limits, Argon2 dummy-hash timing equalization, transactional new-session insert plus old-session delete, secure cookie decision from trusted protocol.
-- Logout path in `apps/web/src/app/actions/auth.ts:275-317`: trusted same-origin redirect gate, DB-side session revocation under mutation slot when possible, queued pending revocation during restore/barrier failures, cookie deletion regardless.
-- Password update path in `apps/web/src/app/actions/auth.ts:319-487`: trusted same-origin check before user read, maintenance and mutation barrier, pre-incremented password-change limit, Argon2 verification, transactional password change plus session rotation, fresh cookie.
-- Session primitives and pending revocation flush are in `apps/web/src/lib/session.ts` and `apps/web/src/lib/pending-session-revocations.ts:1-75`; the accepted residual risk is process-local revocation loss on crash after cookie clear.
-
-### Server Actions / Admin Mutation Barriers
-
-- Scanner gate passed and currently enforces same-origin plus mutation-barrier shape. Relevant scanner/source-contract regions: `apps/web/scripts/check-action-origin.ts:52-169`, `apps/web/scripts/check-action-origin.ts:1371-1482`, and `apps/web/src/__tests__/check-action-origin.test.ts:620-742`.
-- Real admin mutating action families inspected: `apps/web/src/app/actions/images.ts`, `topics.ts`, `tags.ts`, `settings.ts`, `sharing.ts`, `collections.ts`, `lr-tokens.ts`, `admin-users.ts`, `embeddings.ts`, `admin-backfill.ts`, and `auth.ts`.
-- Barrier implementation is `apps/web/src/lib/admin-mutation-barrier.ts`: shared slots reject while exclusive restore is active, and restore drains foreground mutations before import.
-
-### Public Routes / Rate Limits
-
-- Public API route inventory includes `route.ts` and `route.tsx`: `apps/web/src/app/api/health/route.ts`, `live/route.ts`, `search/semantic/route.ts`, `search/similar/[id]/route.ts`, `api/og/route.tsx`, and `api/og/photo/[id]/route.tsx`; admin API routes are under `api/admin`.
-- Public route lint passed via `apps/web/scripts/check-public-route-rate-limit.ts`, which includes `route.tsx` and scans expensive GET/HEAD plus mutating methods.
-- Semantic routes charge before protected DB/embedding work: `apps/web/src/app/api/search/semantic/route.ts:107-270` and `apps/web/src/app/api/search/similar/[id]/route.ts:68-230`.
-- OG routes have route-specific in-memory limits and no-store failure caching: `apps/web/src/app/api/og/route.tsx:71-270` and `apps/web/src/app/api/og/photo/[id]/route.tsx:82-430`.
-- Upload derivative routes carry explicit no-rate-limit exemptions backed by path containment, cache validators, and abort cleanup.
-
-### Semantic Search / Backfills
-
-- Queue writes embeddings only after `processed=true` and resolves mode at write time: `apps/web/src/lib/image-queue.ts:943-993`.
-- Public semantic search filters by active model version and bounded scan limit: `apps/web/src/app/api/search/semantic/route.ts:186-270`; similar search is production-only and filters target/scan rows by `PRODUCTION_MODEL_VERSION`: `apps/web/src/app/api/search/similar/[id]/route.ts:115-190`.
-- Admin action backfill is fenced by same-origin, mutation barrier, per-admin rate limit, semantic advisory lock, maintenance recheck, and active-model selection: `apps/web/src/app/actions/embeddings.ts:59-165`.
-- Operator sidecar backfill checks durable restore marker before start, after lock, per loop, and before writes; it uses target model-version `notExists` selection and bounded concurrency: `apps/web/scripts/backfill-clip-embeddings.ts:109-260`.
-- CLIP runtime is dark by default unless production mode/env/model-root requirements are satisfied in `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/clip-model.ts`, and `apps/web/src/lib/clip-embeddings.ts`.
-
-### Service Worker Caching
-
-- Route classification in `apps/web/public/sw.template.js:51-72`: derivative paths are handled by SWR, admin routes bypass, photo/share/group/collection/map HTML pages bypass offline HTML cache as revocable/public-object pages.
-- Image cache path in `apps/web/public/sw.template.js:312-443`: cached derivatives perform bounded HEAD revalidation with `If-None-Match`, evict on 404/410, preserve freshness on 304/same ETag, and use metadata LRU.
-- HTML network-first cache in `apps/web/public/sw.template.js:446-501`: ignores normal `no-cache` only for offline fallback, skips admin-rendered pages via `x-gk-admin-render`, stamps `sw-cached-at`, and expires entries after 24h.
-- Fetch handler in `apps/web/public/sw.template.js:533-567`: GET-only, admin bypass, derivative SWR, revocable HTML bypass, other HTML network-first fallback.
-- Template/generated-worker contracts in `apps/web/src/__tests__/sw-template-contract.test.ts` intentionally pin photo-page HTML bypass behavior; the apparent `/p/:id` offline-cache exclusion is not a current defect.
-
-### Deploy / Migrate
-
-- Remote deploy wrapper uses a root `.env.deploy` or configured secret file, enforces 0600-ish permissions before sourcing, and builds an SSH command from config: `scripts/deploy-remote.sh:22-93`.
-- Host deploy requires private `apps/web/.env.local`, config JSON, `docker compose up -d --build`, health check, then post-health Docker prune preserving bind-mounted data: `apps/web/deploy.sh:15-108`.
-- Startup registers durable restore marker sync before queue bootstrap and maintenance scheduler before queue bootstrap in `apps/web/src/instrumentation.ts:1-18`.
-- Migration bootstrap/reconcile lives in `apps/web/scripts/migrate.js:329-410` and `apps/web/scripts/migrate.js:744-1030`: per-entry baseline, DML baseline refusal, pending-tail handling, postcondition that every journal hash is recorded, strong admin seed, legacy original migration, and production public-original assertion.
+- Restore causal chain: `src/app/[locale]/admin/db-actions.ts`, restore maintenance durable/process flags, admin mutation barrier, upload-processing contract lock, image queue quiesce, background DB write drain, maintenance scheduler drain, SQL restore scanner.
+- Upload chains: dashboard upload action, LR PAT upload route, original save/metadata, GPS strip, derivative queue enqueue, upload quota tracker, per-upload processing lock, restore maintenance cleanup.
+- Delete chains: single and batch delete actions, queue-state cleanup, pending file deletion ledger, strict original/variant deletion, public derivative serving.
+- Retry/background chains: image queue permanent failures, retry failed image action, semantic/caption backfills, maintenance scheduler, background analytics DB writes, pending session revocations.
+- Cross-request state: process-local rate-limit maps, upload quota tracker, queue state, restore barriers, singleton guard, config cache/semantic mode.
 
 ## Findings
 
-No confirmed defects were found in the traced flows at current HEAD.
+### TRC-22-01 — Durable deletion ledger is not connected to any future retry driver
 
-I specifically retired these competing hypotheses after tracing the current code:
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
+- Causal path:
+  - `apps/web/src/app/actions/images.ts:677-700`: `deleteImage()` creates `pending_file_deletions`, then deletes `images`.
+  - `apps/web/src/app/actions/images.ts:714-727`: it invokes `cleanupPendingFileDeletion()` once after the DB delete and returns success with a cleanup failure count.
+  - `apps/web/src/app/actions/images.ts:808-879`: `deleteImages()` does the same for each image in bounded chunks.
+  - `apps/web/src/lib/pending-file-deletions.ts:70-90`: failed cleanup only updates the row's attempts/error; it does not schedule work.
+  - `apps/web/src/lib/maintenance-scheduler.ts:34-45`: the periodic sweep omits `pending_file_deletions`.
+  - Repo-wide call-site search found no retry path outside the delete action bodies.
+- Competing hypotheses considered:
+  - Hypothesis A: the ledger is a real durable retry queue. Rejected by call-site search and maintenance scheduler inspection.
+  - Hypothesis B: the ledger only records operator-visible failure state. Supported by current code, but the comments at `images.ts:678-680` and `images.ts:809-811` say the row is "retry state"/"retryable", so behavior and causal contract diverge.
+  - Hypothesis C: cleanup failure is harmless because DB rows are deleted. Rejected for privacy/destructive semantics: files can remain addressable by direct derivative URL if the caller knows the UUID filename, and originals can remain on disk.
+- Concrete scenario: batch deletion succeeds in MySQL, but one filesystem unlink fails twice because the upload directory is briefly unavailable. The pending row records `attempts = attempts + 1`, but no background job later reads it. The admin UI can report deletion success, while the old derivative/original persists until a manual DB/file operation.
+- Suggested fix: wire `pending_file_deletions` into a bounded maintenance/backfill worker, guarded by restore maintenance. Trace tests should prove a failed cleanup row is retried on startup/hourly sweep, success deletes the row, repeated failures back off, and restore maintenance suppresses the sweep.
 
-- Stale cycle-20 restore-drain wedge: current `restoreDatabase()` includes `shared-group-view-counts` as the first bounded checklist stage (`apps/web/src/app/[locale]/admin/db-actions.ts:593-597`) and the source contract now expects `drainSharedGroupViewCountsForRestore`, so the older pre-checklist unbounded flush finding is not present at this HEAD.
-- Stale cycle-20 mutation-barrier lint false-green: the scanner now resolves `acquireAdminMutationSlot` provenance from `@/lib/admin-mutation-barrier` and tests reject shadowed, fake-import, bare-call, non-`using`, and missing-acquired-gate shapes (`apps/web/src/__tests__/check-action-origin.test.ts:659-742`).
-- Browser and Lightroom upload drift: both paths now carry the same high-risk checkpoints: maintenance gates, contract lock, upload settings snapshot, HDR rejection, GPS original stripping, late restore cleanup, DB insert before enqueue, and post-commit processing.
-- Service-worker `/p/:id` HTML bypass: this initially looked like a possible offline-photo-page regression, but `sw-template-contract.test.ts` intentionally classifies photo pages as revocable/public-object bypass routes. Current behavior is pinned, not accidental.
-- Semantic stub/production mixing: read and write paths consistently key on `model_version`; production search ignores stub rows, and backfills reselect rows missing the target version.
-- Migration silent-skip class: `migrate.js` still has the per-entry baseline, DML refusal, pending-tail distinction, and postcondition guard for every journal hash.
+### TRC-22-02 — Restore drain checklist is strong but remains a manual registry for future writers
 
-## Residual Risks
+- Severity: Low
+- Confidence: Medium
+- Status: Risk
+- Causal path:
+  - `apps/web/src/lib/restore-drain-checklist.ts:10-17` documents that every process-local DB writer must be added to the restore drain stages.
+  - `apps/web/src/app/[locale]/admin/db-actions.ts:580-635` drains shared-group view counts, image queue, background DB writes, maintenance sweeps, and admin mutations before import.
+  - `apps/web/src/lib/background-db-writes.ts:77-112` tracks and bounds background/analytics DB write drains.
+  - `apps/web/src/lib/maintenance-scheduler.ts:34-45` defines the tasks that are covered by the maintenance sweep drain.
+- Failure scenario: a future feature adds a buffered DB writer or a filesystem-backed cleanup worker and forgets to register its drain. Restore can then import while that writer later commits stale state into the restored DB or mutates files outside the snapshot boundary.
+- Suggested fix: keep the drain-checklist test close to every new queue/background writer. Consider an explicit registry API so new background writers cannot start without declaring a restore drain/restore-suppression policy.
 
-- I did not run the full lint/typecheck/build/test/e2e suite because this was a read-only review plus report rewrite. The three relevant custom scanners passed.
-- I did not inspect binary/media assets, generated `.next` output, or runtime production data volumes. They are outside the source-flow review surface.
-- UI component rendering outside the causal flows above was not exhaustively reviewed except where it participates in public routing, service-worker registration, OG generation, or analytics side effects.
-- External production state, deployed container logs, MySQL live schema, and actual CLIP model files were not inspected.
+### TRC-22-03 — Single-writer warnings do not prevent causal splits across process-local state
 
-## Final Sweep
+- Severity: Medium
+- Confidence: Medium
+- Status: Risk / accepted topology constraint
+- Causal path:
+  - `CLAUDE.md:245-247` declares single web instance/single writer and lists process-local coordination state.
+  - `apps/web/src/lib/single-writer-guard.ts:6-16` says the boot guard detects but cannot enforce the topology.
+  - `apps/web/src/lib/single-writer-guard.ts:218-235` logs a loud warning and continues startup.
+- Failure scenario: a rolling deploy overlap is tolerated, but a misconfigured second permanent web instance keeps serving. Each process has its own upload quota tracker, queue memory, fast rate-limit maps, restore process flag, and backfill status. DB advisory locks reduce some races, but user-visible state and abuse controls can still diverge.
+- Suggested fix: preserve single-instance deployment as an operational invariant. If scale-out is introduced, first move the stateful guards/queues/rate buckets into a shared store or make persistent contention fail closed after the rolling-deploy grace period.
 
-Relevant source categories inspected: required docs, app actions, API routes including `route.tsx`, queue/processing/storage helpers, restore/durable maintenance, auth/session/revocation, public route limiters, semantic search/backfill writers, service worker template/generated worker contracts, deploy scripts, Docker compose, startup instrumentation, migration script, and current scanner/test contracts.
+### TRC-22-04 — Proxy/rate-limit causal evidence can collapse under a mismatched edge chain
 
-Relevant categories not inspected: binary assets/media files, generated build artifacts, live production data, and external service state.
+- Severity: Medium
+- Confidence: Medium
+- Status: Risk / manual-validation
+- Causal path:
+  - `apps/web/nginx/default.conf:20-28` notes edge limiter keys use nginx's TCP peer.
+  - `apps/web/nginx/default.conf:59-71` overwrites XFF with `$remote_addr`, correct only when that address is the true client.
+  - `apps/web/src/lib/rate-limit.ts:175-216` either derives a trusted client IP from configured proxy headers or returns `unknown`.
+- Failure scenario: CDN/LB -> nginx -> app without realip/hop alignment. Nginx limits by LB IP, the app may limit by LB IP or `unknown`, and audit/rate-limit records cannot separate users. A noisy client can cause broad 429s; a distributed attacker can hide behind edge aggregation depending on topology.
+- Suggested fix: add deployment evidence for the actual proxy chain: sample request headers at app, nginx access log client IP, `TRUST_PROXY`, `TRUSTED_PROXY_HOPS`, and `real_ip` config. Treat mismatches as release blockers for abuse-control claims.
+
+## Retired Or Lowered Hypotheses
+
+- Restore importing over known current writers: lowered. The code sets durable maintenance, holds DB/upload/backfill locks, and drains shared-group view counts, image queue, background writes, maintenance sweeps, and admin mutations before import (`db-actions.ts:580-635`).
+- LR upload parse-slot leak on multipart parse errors: lowered. The route releases the parse slot in a `finally` and settles quota claims on parse failure per inspected `api/admin/lr/upload/route.ts`.
+- Failed image retry reuses stale processing settings: lowered. `retryFailedImage` clears failure/settings fields under a failed-state predicate before requeueing.
+- Backup download path traversal: lowered. The route validates the filename, resolves/realpaths containment, opens a descriptor, stats it, and streams that descriptor (`api/admin/db/download/route.ts:21-89`).
+- Public privacy field regression: lowered. `data.ts:368-488` maintains explicit public omit blocks and compile-time guards; targeted privacy tests passed.
+
+## Missed-Issue Sweep
+
+- Cross-request state reviewed: upload quota tracker, image queue maps, permanently failed IDs, retry maps, admin mutation barrier, maintenance sweeps, background DB write queues, singleton guard, proxy-derived IP buckets.
+- Restore/upload/delete interleavings reviewed: upload blocks on maintenance and upload-processing contract lock; restore drains queue/background/admin mutation paths; delete removes queue state before DB delete and records pending cleanup before deleting image rows.
+- Retry/background reviewed: image retry, queue permanent failure, semantic backfill gating, analytics DB writes, pending session revocations, maintenance scheduler. The only confirmed missing retry driver is `pending_file_deletions`.
+- Product constraints preserved: no payment path, no culling/scoring flow, no supported remote storage path in causal flows.
+
+## Uninspected Or Partially Inspected
+
+- No live restore/upload/delete race was executed against a real MySQL/filesystem deployment.
+- No production nginx/CDN/request-header trace was available.
+- Full Playwright/admin browser flows and full test suite were not run in this lane.
+- Binary image fixtures, generated build output, and live upload directories were not inspected.
