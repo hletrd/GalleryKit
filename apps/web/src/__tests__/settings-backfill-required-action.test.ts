@@ -32,6 +32,7 @@ const {
     requireSameOriginAdminMock,
     hasActiveUploadClaimsMock,
     acquireUploadProcessingContractLockMock,
+    getConnectionMock,
 } = vi.hoisted(() => {
     // Two queues model the two chain shapes the action actually issues:
     // `.where(...).limit(1)` (single-row lookups) and a bare `.where(...)`
@@ -72,6 +73,7 @@ const {
         requireSameOriginAdminMock: vi.fn(),
         hasActiveUploadClaimsMock: vi.fn(),
         acquireUploadProcessingContractLockMock: vi.fn(),
+        getConnectionMock: vi.fn(),
     };
 });
 
@@ -81,6 +83,9 @@ vi.mock('@/db', () => ({
         select: dbSelectMock,
         insert: vi.fn(),
         delete: vi.fn(),
+    },
+    connection: {
+        getConnection: getConnectionMock,
     },
     adminSettings: {
         key: 'admin_settings.key',
@@ -132,15 +137,31 @@ vi.mock('@/lib/upload-processing-contract-lock', () => ({
 
 import { updateGallerySettings } from '@/app/actions/settings';
 
+function makeColorBackfillLockConnection(acquired: number) {
+    const conn = {
+        query: vi.fn(async (sql: string) => {
+            if (sql.includes('GET_LOCK')) return [[{ acquired }]];
+            if (sql.includes('RELEASE_LOCK')) return [[{ released: 1 }]];
+            return [[]];
+        }),
+        release: vi.fn(),
+        destroy: vi.fn(),
+    };
+    return conn;
+}
+
 describe('updateGallerySettings requiresBackfill (C2-02 run-10 c2)', () => {
     let persistedRows: Array<{ key: string; value: string }>;
     let releaseUploadContractLockMock: ReturnType<typeof vi.fn>;
+    let colorBackfillLockConn: ReturnType<typeof makeColorBackfillLockConnection>;
 
     beforeEach(() => {
         persistedRows = [];
         selectLimitResults.length = 0;
         selectWhereResults.length = 0;
         vi.clearAllMocks();
+        colorBackfillLockConn = makeColorBackfillLockConnection(1);
+        getConnectionMock.mockResolvedValue(colorBackfillLockConn);
         releaseUploadContractLockMock = vi.fn().mockResolvedValue(undefined);
         getTranslationsMock.mockResolvedValue((key: string) => key);
         maintenanceMessageMock.mockReturnValue(null);
@@ -182,6 +203,8 @@ describe('updateGallerySettings requiresBackfill (C2-02 run-10 c2)', () => {
 
         expect(transactionMock).toHaveBeenCalledTimes(1);
         expect(persistedRows).toEqual([{ key: 'image_quality_avif', value: '70' }]);
+        expect(colorBackfillLockConn.query).toHaveBeenCalledWith('SELECT RELEASE_LOCK(?)', ['gallerykit_color_pipeline_backfill']);
+        expect(colorBackfillLockConn.release).toHaveBeenCalledTimes(1);
     });
 
     it('reports requiresBackfill=false when a changed quality key has zero images', async () => {
@@ -214,6 +237,36 @@ describe('updateGallerySettings requiresBackfill (C2-02 run-10 c2)', () => {
         // check was never reached, so selectLimitResults stays fully unconsumed.
         expect(selectLimitResults).toHaveLength(0);
         expect(transactionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a byte-impacting settings change while color backfill holds the coordination lock', async () => {
+        colorBackfillLockConn = makeColorBackfillLockConnection(0);
+        getConnectionMock.mockResolvedValue(colorBackfillLockConn);
+        selectWhereResults.push([]);
+        selectLimitResults.push([{ id: 11 }]);
+
+        await expect(updateGallerySettings({ image_quality_avif: '70' })).resolves.toEqual({
+            error: 'colorBackfillSettingsLocked',
+        });
+
+        expect(transactionMock).not.toHaveBeenCalled();
+        expect(colorBackfillLockConn.query).toHaveBeenCalledTimes(1);
+        expect(colorBackfillLockConn.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases the color backfill coordination lock when persistence fails after acquisition', async () => {
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        selectWhereResults.push([]);
+        selectLimitResults.push([{ id: 11 }]);
+        transactionMock.mockRejectedValueOnce(new Error('deadlock'));
+
+        await expect(updateGallerySettings({ image_quality_avif: '70' })).resolves.toEqual({
+            error: 'failedToUpdateGallerySettings',
+        });
+
+        expect(colorBackfillLockConn.query).toHaveBeenCalledWith('SELECT RELEASE_LOCK(?)', ['gallerykit_color_pipeline_backfill']);
+        expect(colorBackfillLockConn.release).toHaveBeenCalledTimes(1);
+        errorSpy.mockRestore();
     });
 
     it('reports requiresBackfill=false for a non-byte-impacting change even with existing images', async () => {

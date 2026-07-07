@@ -1,7 +1,8 @@
 'use server';
 
-import { db, adminSettings, images } from '@/db';
+import { db, adminSettings, images, connection } from '@/db';
 import { eq, inArray } from 'drizzle-orm';
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { getTranslations } from 'next-intl/server';
 
 import { isAdmin, getCurrentUser } from '@/app/actions/auth';
@@ -18,6 +19,26 @@ import { requireSameOriginAdmin } from '@/lib/action-guards';
 import { hasActiveUploadClaims } from '@/lib/upload-tracker-state';
 import { acquireUploadProcessingContractLock } from '@/lib/upload-processing-contract-lock';
 import { normalizeGallerySettingValue } from '@/lib/settings-normalization';
+import { LOCK_COLOR_PIPELINE_BACKFILL, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
+import { releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
+
+async function acquireColorBackfillSettingsLock(): Promise<PoolConnection | null> {
+    const conn = await connection.getConnection();
+    try {
+        const [rows] = await conn.query<(RowDataPacket & { acquired: number | bigint | string | null })[]>(
+            'SELECT GET_LOCK(?, 0) AS acquired',
+            [LOCK_COLOR_PIPELINE_BACKFILL],
+        );
+        if (!isAdvisoryLockAcquired(rows[0]?.acquired)) {
+            conn.release();
+            return null;
+        }
+        return conn;
+    } catch (err) {
+        conn.destroy();
+        throw err;
+    }
+}
 
 /** @action-origin-exempt: read-only admin getter */
 export async function getGallerySettingsAdmin() {
@@ -84,6 +105,7 @@ export async function updateGallerySettings(settings: Record<string, string>) {
     }
 
     let uploadContractLock: Awaited<ReturnType<typeof acquireUploadProcessingContractLock>> | null = null;
+    let colorBackfillLockConn: PoolConnection | null = null;
     try {
         const changedUploadProcessingKeys = new Set<GallerySettingKey>();
 
@@ -177,6 +199,7 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         // SETTINGS_BACKFILL_WARNING_KEYS export so this can never drift from
         // the settings UI's own warning logic.
         let requiresBackfill = false;
+        let hasBackfillRelevantChange = false;
         const requestedBackfillWarningKeys = SETTINGS_BACKFILL_WARNING_KEYS.filter((key) =>
             Object.prototype.hasOwnProperty.call(sanitizedSettings, key));
 
@@ -190,13 +213,21 @@ export async function updateGallerySettings(settings: Record<string, string>) {
                 currentBackfillWarningSettings[row.key] = row.value;
             }
 
-            if (hasBackfillRelevantDifference(sanitizedSettings, currentBackfillWarningSettings, defaults)) {
+            hasBackfillRelevantChange = hasBackfillRelevantDifference(sanitizedSettings, currentBackfillWarningSettings, defaults);
+            if (hasBackfillRelevantChange) {
                 const [existingProcessedImage] = await db
                     .select({ id: images.id })
                     .from(images)
                     .where(eq(images.processed, true))
                     .limit(1);
                 requiresBackfill = !!existingProcessedImage;
+            }
+        }
+
+        if (hasBackfillRelevantChange) {
+            colorBackfillLockConn = await acquireColorBackfillSettingsLock();
+            if (!colorBackfillLockConn) {
+                return { error: t('colorBackfillSettingsLocked') };
             }
         }
 
@@ -241,6 +272,13 @@ export async function updateGallerySettings(settings: Record<string, string>) {
         console.error('Failed to update gallery settings', err);
         return { error: t('failedToUpdateGallerySettings') };
     } finally {
-        await uploadContractLock?.release();
+        const releaseTasks: Array<Promise<boolean> | Promise<void>> = [];
+        if (uploadContractLock) {
+            releaseTasks.push(uploadContractLock.release());
+        }
+        if (colorBackfillLockConn) {
+            releaseTasks.push(releasePooledAdvisoryLocks(colorBackfillLockConn, [LOCK_COLOR_PIPELINE_BACKFILL], 'gallery settings color backfill coordination'));
+        }
+        await Promise.all(releaseTasks);
     }
 }

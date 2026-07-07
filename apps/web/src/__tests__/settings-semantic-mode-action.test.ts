@@ -19,6 +19,7 @@ const {
     requireSameOriginAdminMock,
     hasActiveUploadClaimsMock,
     acquireUploadProcessingContractLockMock,
+    getConnectionMock,
 } = vi.hoisted(() => {
     const selectLimitResults: Array<unknown[]> = [];
     // C2-02 (run-10 c2): a bare `.where(...)` awaited WITHOUT a further
@@ -58,6 +59,7 @@ const {
         requireSameOriginAdminMock: vi.fn(),
         hasActiveUploadClaimsMock: vi.fn(),
         acquireUploadProcessingContractLockMock: vi.fn(),
+        getConnectionMock: vi.fn(),
     };
 });
 
@@ -68,12 +70,16 @@ vi.mock('@/db', () => ({
         insert: vi.fn(),
         delete: vi.fn(),
     },
+    connection: {
+        getConnection: getConnectionMock,
+    },
     adminSettings: {
         key: 'admin_settings.key',
         value: 'admin_settings.value',
     },
     images: {
         id: 'images.id',
+        processed: 'images.processed',
     },
 }));
 
@@ -117,6 +123,18 @@ vi.mock('@/lib/upload-processing-contract-lock', () => ({
 
 import { updateGallerySettings } from '@/app/actions/settings';
 
+function makeColorBackfillLockConnection() {
+    return {
+        query: vi.fn(async (sql: string) => {
+            if (sql.includes('GET_LOCK')) return [[{ acquired: 1 }]];
+            if (sql.includes('RELEASE_LOCK')) return [[{ released: 1 }]];
+            return [[]];
+        }),
+        release: vi.fn(),
+        destroy: vi.fn(),
+    };
+}
+
 describe('updateGallerySettings semantic_search_mode', () => {
     let persistedRows: Array<{ key: string; value: string }>;
     let releaseUploadContractLockMock: ReturnType<typeof vi.fn>;
@@ -126,6 +144,7 @@ describe('updateGallerySettings semantic_search_mode', () => {
         selectLimitResults.length = 0;
         selectWhereResults.length = 0;
         vi.clearAllMocks();
+        getConnectionMock.mockResolvedValue(makeColorBackfillLockConnection());
         releaseUploadContractLockMock = vi.fn().mockResolvedValue(undefined);
         getTranslationsMock.mockResolvedValue((key: string) => key);
         maintenanceMessageMock.mockReturnValue(null);
