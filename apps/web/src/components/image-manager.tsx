@@ -329,6 +329,9 @@ export function ImageManager({
                         <Dialog
                             open={isBatchTagDialogOpen}
                             onOpenChange={(open) => {
+                                // C6-26: settle-before-close — inert on
+                                // ESC/overlay/Cancel while a batch add is in flight.
+                                if (!open && isBatchAddingTag) return;
                                 setIsBatchTagDialogOpen(open);
                                 if (!open) {
                                     setTagInput('');
@@ -366,7 +369,7 @@ export function ImageManager({
                                     </div>
                                 </DialogHeader>
                                 <DialogFooter>
-                                    <Button variant="outline" onClick={() => { setTagInput(''); setIsBatchTagDialogOpen(false); }}>{t('imageManager.cancelAdd')}</Button>
+                                    <Button variant="outline" onClick={() => { setTagInput(''); setIsBatchTagDialogOpen(false); }} disabled={isBatchAddingTag}>{t('imageManager.cancelAdd')}</Button>
                                     <Button onClick={handleBatchAddTag} disabled={isBatchAddingTag || !tagInput.trim()}>
                                         {isBatchAddingTag ? t('imageManager.adding') : t('imageManager.addTag')}
                                     </Button>
@@ -608,8 +611,14 @@ export function ImageManager({
                 onSubmit={handleBulkEdit}
             />
 
+            {/* C6-26 (run-10 cycle-6): settle-before-close (mirrors the delete
+                flows' COR-R4C16-01 pattern). While a save is in flight the dialog
+                is inert on ESC/overlay/Cancel, so a stale in-flight save cannot
+                force-close a DIFFERENT image's freshly-opened edit dialog (which
+                would discard its edits and mislabel the toast). */}
             <Dialog open={!!editingImage} onOpenChange={(open) => {
                 if (!open) {
+                    if (isSavingEdit) return;
                     setEditingImage(null);
                     setEditErrors({});
                 }
@@ -660,7 +669,7 @@ export function ImageManager({
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setEditingImage(null)}>{t('imageManager.cancel')}</Button>
+                        <Button variant="outline" onClick={() => setEditingImage(null)} disabled={isSavingEdit}>{t('imageManager.cancel')}</Button>
                         <Button onClick={handleSaveEdit} disabled={isSavingEdit}>{isSavingEdit ? t('imageManager.saving') : t('imageManager.save')}</Button>
                     </DialogFooter>
                 </DialogContent>
