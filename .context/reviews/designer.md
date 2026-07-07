@@ -1,103 +1,224 @@
-# GalleryKit Designer Review - Cycle 19
+# GalleryKit Designer Review - Cycle 20
 
 Repo: `/Users/hletrd/flash-shared/gallery`
-Lane: `designer`, PROMPT 1. Review only; no fixes, commits, or pushes. Only write target: `.context/reviews/designer.md`.
+Lane: `designer`
+Date: 2026-07-08
 
-## Scope And Inventory
+This is a review-only artifact. I did not modify application source. Existing concurrent edits in other `.context/reviews/*.md` files were left untouched.
 
-Read first: `AGENTS.md`, `CLAUDE.md` UI/accessibility/color/HDR/touch-target guidance, `README.md`, root and web `package.json` scripts, Playwright config/tests, existing `.context/reviews/*designer*` conventions, and current target report.
+## Scope And Method
 
-Inventory covered:
+Target result: comprehensive UI/UX review of the Next.js web UI, with source and browser evidence for information architecture, affordances, keyboard/focus, WCAG 2.2 accessibility, contrast, ARIA, focus traps, reduced motion, responsive behavior, loading/empty/error states, form validation UX, dark/light mode, i18n/RTL readiness, and perceived performance.
 
-- Public routes: `apps/web/src/app/[locale]/(public)` home, topic, photo, shared photo, shared group, collection read route, map, timeline, year, privacy, about; plus locale `error.tsx`, `not-found.tsx`, `global-error.tsx`, layouts, and loading behavior.
-- Admin routes: `apps/web/src/app/[locale]/admin` login and protected dashboard, images/recent uploads, settings, users, tags, categories, db, tokens, SEO, analytics, password.
-- UI surfaces/components: `apps/web/src/components` nav, search, tag filter, home/masonry, photo viewer, lightbox, info bottom sheet, color/HDR details, map, upload dropzone, admin header/nav, image manager, tag input, admin user manager, and `components/ui` primitives.
-- Supporting assets and contracts: `apps/web/src/app/[locale]/globals.css`, `messages/en.json`, `messages/ko.json`, `apps/web/e2e`, `apps/web/public/sw*.js`, histogram worker, icons/fonts, and fixture uploads/resources.
+Local runtime:
 
-Browser/runtime evidence: started local `next start` on `http://127.0.0.1:3100` from the existing production build. Probed mobile `390x844` and desktop `1280x900` for `/en`, `/en/timeline`, `/en/map`, `/en/privacy`, `/en/not-a-real-route`, and `/en/admin`; probed the search dialog on `/en`. Stopped the local server afterward. Authenticated admin pages were source-reviewed because no admin credentials were available.
+- `npm run dev --workspace=apps/web` and `npm run dev --workspace=apps/web -- --port 3010` both failed because Next reported an existing dev-server lock for PID `7042`.
+- `ps -p 7042` and `lsof -nP -iTCP:3000 -sTCP:LISTEN` returned no running/listening process. I did not kill processes or remove the stale lock in the shared workspace.
+- `npm run start --workspace=apps/web -- --port 3010` rendered usable pages. It emitted the expected warning: `next start` is not the preferred mode for `output: standalone`; use `.next/standalone/server.js` instead.
 
-Validation evidence: focused UI/accessibility contract subset passed: `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/password-form-a11y.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/search-status-source.test.ts src/__tests__/settings-save-affordance-source.test.ts` -> 8 files, 46 tests passed.
+Browser/tooling used:
+
+- `agent-browser` core/navigation: opened `/en`, `/en/p/7`, `/en/map`, `/en/admin`.
+- `agent-browser` config: tested `1440x1000`, `390x844`, and dark media.
+- `agent-browser` query: accessibility snapshots, URL/title, element boxes, computed styles, DOM metrics.
+- `agent-browser` interact/wait: opened search, filled query, opened lightbox, stepped Tab order, waited for load/network/DOM conditions.
+- `agent-browser` debug/network: checked console/errors and request tracking.
+- `agent-browser` visual/state: saved screenshots to `/tmp/gallery-*.png`; saved state to `/tmp/gallery-browser-state.json`.
+
+## Inventory
+
+Routes inventoried:
+
+- Public: home, topic, photo, shared group, shared link, smart collection read route, map, timeline, year, privacy, about, uploads proxy, locale error/not-found/loading.
+- Admin: login plus protected dashboard, analytics, categories, tags, SEO, settings, tokens, password, users, DB, protected loading/error.
+- API/UI-adjacent routes: OG image routes, search routes, uploads routes, feed/sitemap/robots/manifest/icon surfaces.
+
+Components inventoried:
+
+- Public shell: `nav`, `nav-client`, `footer`, `theme-provider`, `register-service-worker`.
+- Gallery: `home-client`, `masonry-card`, `grid-picture`, `grid-picture-fallback-boundary`, `load-more`, `tag-filter`, `search`, `on-this-day-widget`, `topic-empty-state`.
+- Photo: `photo-viewer`, `photo-navigation`, `image-zoom`, `lightbox`, `lightbox-color-pip`, `info-bottom-sheet`, `color-details-section`, `histogram`, `wide-gamut-hint`, `similar-photos`.
+- Map: `map-client`, `map-loader`.
+- Admin: `admin-header`, `admin-nav`, `image-manager`, `upload-dropzone`, `bulk-edit-dialog`, `tag-input`, `admin-user-manager`, protected route clients.
+- Primitives: shadcn/Radix `button`, `dialog`, `alert-dialog`, `dropdown-menu`, `select`, `sheet`, `switch`, `input`, `textarea`, `table`, `tooltip`, etc.
+
+Design/docs/test assets reviewed:
+
+- `CLAUDE.md`, `AGENTS.md`, `.context/plans/`, `.context/reviews/`, `apps/web/e2e/*.spec.ts`.
+- `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
+- `apps/web/src/app/[locale]/globals.css`.
+- Final sweep counted 142 UI-relevant files under `apps/web/src/app` and `apps/web/src/components`.
+
+## Browser Evidence Summary
+
+Home desktop `/en`:
+
+- Snapshot exposed skip link, `navigation "Main navigation"`, `main`, `heading "Latest"`, tag filter group, photo links with image alt text, footer links, and notification region.
+- Search opened as `dialog "Search photos"`; empty state exposed the combobox and close button.
+- Search query `E2E` changed combobox to `expanded=true`, exposed `2 results`, listbox, and result options `E2E Portrait #7` and `E2E Landscape #6`.
+
+Home mobile `390x844`:
+
+- Snapshot exposed collapsed `DisclosureTriangle "Filter by tag"` and mobile nav controls.
+- Element metrics showed 44 px or larger nav controls and footer links.
+- Confirmed finding DES-C20-01 below: tag chips were visually laid out while the disclosure remained closed.
+
+Photo `/en/p/7`:
+
+- Snapshot exposed H1 `E2E Portrait`, back link, fullscreen button, pinned info button with `aria-pressed=true`, next-photo button, image zoom button, EXIF, histogram controls, and download link.
+- Element metrics confirmed toolbar controls and histogram/download controls at or above 44 px.
+- Lightbox opened as `dialog "Photo lightbox"`, focused Close, locked body scroll, and Tab cycled among lightbox controls. Background siblings were both `aria-hidden=true` and `inert=true`.
+
+Map `/en/map`:
+
+- Snapshot exposed H1 `Map`, skip link to photo list, region `Photo map`, help text, Leaflet controls, one marker as `button "Marker"`, and an accessible list `Geotagged photo list`.
+- Confirmed finding DES-C20-02 below: Leaflet marker accessible name was generic.
+
+Admin login `/en/admin`:
+
+- Snapshot exposed H1 `Admin`, username/password labels, password show button, and submit button.
+- Metrics: username/password fields 334x44, show password 44x44, submit 334x44.
+- Global skip link resolved to `#main-content` and moved focus to `<main id="main-content">`.
+
+Dark mode:
+
+- `agent-browser set media dark` produced `htmlClass:"dark"`, body background `rgb(9, 9, 11)`, foreground `rgb(250, 250, 250)`, and `colorScheme:"dark"`.
 
 ## Confirmed Findings
 
-### DES-C19-01 - Map embeds sub-44 px Leaflet controls on a public mobile surface
+### DES-C20-01 - Closed Mobile Tag Filter Still Paints Its Chip Controls
 
 Severity: Medium
 Confidence: High
-Status: Confirmed by browser + source
-File/region: `apps/web/src/components/map/map-client.tsx:109-140`; mitigation/fallback list in `apps/web/src/app/[locale]/(public)/map/page.tsx:80-104`; touch-target contract in `apps/web/src/__tests__/touch-target-audit.test.ts:9-15`.
 
-Why this is real: `MapClient` renders the default `MapContainer`, `TileLayer`, and `Marker` controls without local sizing overrides for Leaflet's own zoom buttons, marker hit target, or attribution links. The page does provide a keyboard skip link and a 44 px fallback photo list, but the visible map controls remain interactive.
+File and region:
 
-Browser evidence: local `/en/map`, viewport `390x844`, reported visible interactive elements below the project's 44 px floor: marker button `25x41`, Zoom in `30x30`, Zoom out `30x30`, Leaflet attribution `51x14`, and OpenStreetMap contributors `154x14`. The same small controls appeared on desktop `1280x900`. Public nav and fallback photo-list links in the same probe were 44 px or larger; the only public-route undersized controls came from the embedded Leaflet UI, ignoring the expected off-screen skip links.
+- `apps/web/src/components/tag-filter.tsx:145-156`
 
-Failure scenario: a visitor using touch, tremor-prone input, or magnification on the map route can miss or accidentally activate the map's zoom/marker/attribution controls. This violates the repo's stricter 44 px target policy and weakens WCAG 2.2 target-size ergonomics on a public route.
+Source evidence:
 
-Suggested fix: disable Leaflet defaults where possible and render custom 44 px zoom controls plus a larger custom marker hit area, or apply scoped Leaflet CSS that preserves visual size while expanding hit boxes. Keep the existing skip link and fallback list; they are useful mitigations, not replacements for visible target sizing.
+- The mobile disclosure renders `<details className="group sm:hidden">`.
+- Its direct non-summary child is `<div className="mt-2 flex flex-wrap gap-2" role="group" ...>`.
+- Because that direct child has author `display:flex`, it overrides the browser's closed-`details` hiding rule.
 
-### DES-C19-02 - Admin photo management is still a horizontal table rather than a photo workbench
+Browser evidence:
 
-Severity: Medium
-Confidence: High
-Status: Confirmed by source; authenticated browser validation pending
-File/region: `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`; `apps/web/src/components/image-manager.tsx:427-604`.
+- At `390x844`, the accessibility snapshot showed `DisclosureTriangle "Filter by tag" [expanded=false]` and did not expose the chip group.
+- DOM metrics at the same state:
+  - `detailsOpen:false`
+  - chip buttons `All`, `e2e(2)`, `landscape(1)`, `portrait(1)`
+  - `display:"flex"`, `visibility:"visible"`, `tabIndex:0`, rectangles at `y:232`, each 44 px tall.
+- Tab order skipped the chips while the disclosure was closed, moving from the summary directly to the first photo link. That means the controls are visible/layout-affecting but not programmatically exposed.
 
-Why this is real: the dashboard places upload and image management side by side only at `2xl`; otherwise the recent uploads panel is a constrained `overflow-auto` container. `ImageManager` then renders a wide table with separate preview, title, filename, topic, tags, gamut, date, and far-right action columns. Preview is fixed at `128x128`; tags require a `min-w-[200px]` cell; actions sit at the row edge.
+Failure scenario:
 
-Failure scenario: an admin reviewing a batch on a laptop, tablet, or split-screen desktop must pan between thumbnail, metadata, tags, and actions. That slows visual quality-control and raises the chance of editing or deleting the wrong row because the visual object and action controls are spatially distant.
+A mobile keyboard or screen-reader user hears the tag filter as collapsed while sighted users can still see chip controls occupying layout space below it. Pointer users may interact with controls that the disclosure state says are hidden, while keyboard users cannot reach them until the disclosure is opened.
 
-Suggested fix: below wide desktop, switch recent uploads to a photo-first card/list workbench: larger thumbnail, title/filename/topic grouped beside the image, status chips near the preview, tags as a wrapped region, and edit/delete/share controls adjacent to the visual. Keep the dense table as an explicit large-screen compact mode.
+Concrete fix:
 
-### DES-C19-03 - Admin navigation remains one flat wrapping strip for unrelated workflows
+Replace the direct child `flex` with a closed-safe display pattern, for example:
+
+```tsx
+<div className="mt-2 hidden flex-wrap gap-2 group-open:flex" role="group" aria-label={t('home.tagFilter')}>
+  {chips}
+</div>
+```
+
+Alternatively, avoid native `<details>` for this control and manage `open` state explicitly with `hidden`, `aria-expanded`, and a controlled region.
+
+### DES-C20-02 - Map Markers Have Generic Accessible Names
 
 Severity: Low-Medium
 Confidence: High
-Status: Confirmed by source; authenticated browser validation pending
-File/region: `apps/web/src/components/admin-nav.tsx:15-49`; `apps/web/src/components/admin-header.tsx:13-26`.
 
-Why this is real: ten admin destinations are rendered as peers in one wrapping nav: dashboard, categories, tags, SEO, settings, tokens, password, users, DB, and analytics. The header places brand, this flat nav, and logout in a single wrapping flex row.
+File and region:
 
-Failure scenario: translated labels and tablet widths can reshuffle daily publishing links, access/security links, DB operations, and analytics into a changing multi-line strip. High-risk operational pages feel as prominent as routine publishing pages, and muscle memory breaks when wrapping changes by viewport or locale.
+- `apps/web/src/components/map/map-client.tsx:120-137`
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:80-110`
 
-Suggested fix: group admin IA into stable sections such as Publish, Organize, Site, Access, Operations, and Insights. Use a sectioned drawer or menu on mobile/tablet, while keeping the active section visible in the header.
+Source evidence:
 
-### DES-C19-04 - SEO settings validation is toast-only and not field-addressable
+- `MapClient` renders each `<Marker position={[marker.latitude, marker.longitude]}>` without marker-level `title`, `alt`, or keyboard label options.
+- The popup button is labelled with `${openPhotoLabel}: ${marker.displayTitle}`, and the page provides an accessible fallback list, but the marker itself is not distinguishable before opening the popup.
 
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed by source; authenticated browser validation pending
-File/region: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:42-72` and `98-184`; server validation in `apps/web/src/app/actions/seo.ts:111-140`.
+Browser evidence:
 
-Why this is real: the server action validates per-field conditions such as title length, locale format, and OG image URL format, returning specific localized errors. The client handles any failure with `toast.error(result.error || t('seo.saveFailed'))` and renders the SEO inputs without field error state, `aria-invalid`, `aria-describedby` for errors, or focus routing to the invalid field.
+- `/en/map` accessibility snapshot exposed the map marker only as `button "Marker"`.
+- DOM metrics for `.leaflet-marker-icon`: `tag:"IMG"`, `role:"button"`, `tabIndex:"0"`, `text:"Marker"`, 44x44 box.
+- The page did include a `Skip map to photo list` link and a `Geotagged photo list`, so this is not a total navigation blocker.
 
-Failure scenario: an admin enters an invalid OG image URL or Open Graph locale, presses Save, and gets a transient toast. Keyboard and screen-reader users are not moved to the affected input, and sighted users must infer which field failed after the toast disappears.
+Failure scenario:
 
-Suggested fix: return or map server error codes to field keys, set field-level error text and `aria-invalid`, focus the first invalid field after a failed save, and keep a persistent summary near the save control. Client-side pre-validation for URL/locale format would make the failure faster, but the server must remain authoritative.
+When a map contains several geotagged photos, screen-reader and keyboard users navigating inside the map encounter repeated indistinguishable `Marker` controls. They must open each popup or skip to the list to know which photo a marker represents.
 
-### DES-C19-05 - Password mismatch validation announces an error but does not move focus to the invalid field
+Concrete fix:
+
+Pass accessible marker options through React Leaflet:
+
+```tsx
+<Marker
+  key={marker.id}
+  position={[marker.latitude, marker.longitude]}
+  title={marker.displayTitle}
+  alt={`${openPhotoLabel}: ${marker.displayTitle}`}
+>
+```
+
+Keep the fallback list. If Leaflet does not propagate the desired name consistently across browsers, add a post-render marker icon attribute sync or use a custom accessible marker element.
+
+## Likely Issues
+
+### DES-C20-03 - Tag Filter Hydrates Duplicate Chip Trees
 
 Severity: Low
-Confidence: Medium-High
-Status: Confirmed by source; authenticated browser validation pending
-File/region: `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:36-45` and `96-114`; `apps/web/src/components/ui/alert.tsx:22-34`; current source contract only checks descriptions in `apps/web/src/__tests__/password-form-a11y.test.ts:10-18`.
+Confidence: Medium
 
-Why this is real: `handleSubmit` detects mismatch, sets `confirmError`, and returns without calling the server action. The confirm input gets `aria-invalid` and an error description, and `Alert` has `role="alert"`, so announcement is partially covered. There is no confirm-field ref, focus call, or selection behavior; focus remains where the submit originated.
+File and region:
 
-Failure scenario: a keyboard admin submits mismatched passwords and hears/sees an error, but focus stays on the submit button or current control. They must manually locate the confirm field before correcting the mismatch.
+- `apps/web/src/components/tag-filter.tsx:11-19`, `70-139`, `143-160`
 
-Suggested fix: add a `confirmPasswordRef`, focus and optionally select the confirm field when mismatch is detected, and extend the existing password a11y test to assert the focus contract. This would align the form with stronger patterns already present in the login and user-create flows.
+Evidence:
 
-## Positive Evidence And Fixed Prior Risks
+- The source memoizes one `chips` fragment and mounts it twice: mobile disclosure and desktop `sm:flex`.
+- On mobile, the hidden desktop copy is not painted, but both copies exist in the hydrated tree.
 
-- Mobile home tag filtering is no longer the old tag wall: `TagFilter` uses a mobile `<details>` disclosure with a 44 px summary at `apps/web/src/components/tag-filter.tsx:125-143`. Local `/en` mobile showed the tag summary at `358x44` and first photo at `y=256`, not the previous full-chip wall.
-- Public nav, footer, timeline, privacy, not-found, admin login, and most public links/buttons measured at or above 44 px in local browser probes. The only visible sub-44 controls were Leaflet internals on `/en/map`; off-screen skip links were intentionally 1x1 until focused.
-- Search dialog source labels the dialog and combobox (`apps/web/src/components/search.tsx:425-470`) and local browser probe confirmed the dialog opens with `aria-label="Search photos"` and the combobox focused.
-- Lightbox/photo viewer/info sheet have strong source evidence for keyboard handling, focus restore/body lock, reduced-motion checks, accessible close controls, and localized photo metadata: `apps/web/src/components/lightbox.tsx`, `photo-viewer.tsx`, and `info-bottom-sheet.tsx`.
-- Token revoke confirmation now includes the token label (`apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:134-137` and `307-329`), category alias deletion includes the alias/topic (`apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:389-396` and `431-445`), and analytics countries display localized labels plus codes (`apps/web/src/app/[locale]/admin/(protected)/analytics/analytics-client.tsx:202-212`). I did not reopen those older issues.
-- Theme/color/HDR support is covered by global tokens, forced-colors/reduced-motion CSS, P3/HDR display conventions, and the passing `theme-token-contract` subset. Photographer color intent guidance remains reflected in the UI source; no edit/culling/scoring UX was introduced.
+Failure scenario:
 
-## Categories Examined
+Large galleries with many tags pay avoidable hydration and DOM cost on public gallery pages. This can add input latency around a first-screen filter control, especially on phones.
 
-Examined: information architecture, affordances, keyboard/focus navigation, WCAG 2.2/touch targets, responsive behavior, loading/empty/error states, form validation UX, dark/light/OLED/forced-colors/reduced-motion support, EN/KO i18n and future RTL direction handling, perceived performance cues, public share/photo/lightbox/search/map/privacy/error/not-found surfaces, admin login/dashboard/settings/users/tags/categories/db/tokens/SEO/analytics surfaces, public assets/service worker, and Playwright/source contracts.
+Concrete fix:
 
-Skipped or limited: protected admin routes were not browser-tested because credentials were unavailable; findings there are source-backed. RTL is a future-readiness risk rather than a current bug because `LOCALES` are `en` and `ko`, and `getLocaleDirection` currently returns `ltr` for both. Shared photo/group pages were source-reviewed but not browser-tested with a generated live share key in this pass.
+Render one chip list and adapt the wrapper across breakpoints, or branch after hydration with a single mounted tree. Fixing DES-C20-01 with a single disclosure/content structure can also reduce this duplication.
+
+## Manual-Validation Risks
+
+- Protected admin workflows beyond login were source-reviewed but not browser-tested with an authenticated session. Highest manual priority: image manager bulk edit, upload dropzone, settings save/backfill, DB backup/restore dialogs, token creation/revoke.
+- Physical P3/HDR display behavior cannot be proven from this browser session. Source has display-gamut and forced-colors handling, but real device validation is still required.
+- RTL is future-facing. The root layout sets `dir={getLocaleDirection(locale)}`, but current locales are English and Korean, both LTR. A new RTL locale would need a full mirrored-layout pass across nav, photo viewer, admin tables, map, and bottom sheet.
+- Browser screenshots were captured, but findings above rely on text-extractable DOM/accessibility/box evidence rather than screenshot interpretation.
+
+## Positive Findings
+
+- Skip links work on public and admin layouts; admin login moved focus to `<main id="main-content">`.
+- Modal isolation is solid in tested search and lightbox flows: background is removed from the accessibility tree, body scroll locks, and lightbox background siblings are inert.
+- Touch target policy is broadly enforced. Runtime metrics and the targeted tests found controls at or above 44 px in nav, search, photo viewer, histogram, admin login, map controls, and footer.
+- Search has strong keyboard and screen-reader semantics after results load: combobox, listbox, active option model, live result count, and keyboard instructions.
+- Reduced motion is handled in global CSS and in major photo interactions (`photo-viewer`, `lightbox`, `image-zoom`, `photo-navigation`, smooth scroll).
+- Dark/light/OLED theme tokens are centralized, and dark-mode runtime styling rendered correct background/foreground/color-scheme values.
+- Korean and English message files have parity tests, and route-level `lang`/`dir` are wired through locale helpers.
+- Map information architecture includes a skip link and accessible list fallback, limiting the impact of marker naming.
+- Loading/empty/error surfaces exist across public restore maintenance, route errors, photo loading, map loader, upload progress, search statuses, and admin protected loading/error.
+
+## Tests Run
+
+Passed:
+
+```sh
+npm test --workspace=apps/web -- src/__tests__/touch-target-audit.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/a11y-us-p15.test.ts src/__tests__/privacy-page-landmark.test.ts src/__tests__/map-thumb-wiring.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts
+```
+
+Result: 6 files passed, 53 tests passed.
+
+## Final Sweep
+
+Final UI sweep counted 142 files under `apps/web/src/app` and `apps/web/src/components`. I reviewed route inventory, key UI source, global styles, messages, e2e specs, and source-contract tests. No additional skipped UI file class was identified after the final sweep.

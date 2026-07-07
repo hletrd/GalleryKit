@@ -1,410 +1,407 @@
-# Cycle 19 Aggregate Review
+# Cycle 20 Aggregate Review
 
 Date: 2026-07-08 KST
 Repository: `/Users/hletrd/flash-shared/gallery`
-Cycle: review-plan-fix 19/100
-Reviewed HEAD: `6efd737b3ad5791c662fded4801701992684e54d`
+Cycle: review-plan-fix 20/100
+Review HEAD: `bd0cc170412b0f70ae231cec27ca54ee50e638fd`
+Implemented source HEAD: `d8e604ef1033584fe09046a921e3d0de9d39b767`
 
 ## Agent Coverage
 
-Native agent roles exposed here were `default`, `explorer`, and `worker`, so the requested specialist lanes were run as role-specific worker prompts. The active agent limit required bounded batches, but every required lane returned and wrote its report.
-
 Reports ingested:
 
+- `.context/reviews/architect.md`
 - `.context/reviews/code-reviewer.md`
-- `.context/reviews/perf-reviewer.md`
-- `.context/reviews/security-reviewer.md`
 - `.context/reviews/critic.md`
-- `.context/reviews/verifier.md`
+- `.context/reviews/debugger.md`
+- `.context/reviews/designer.md`
+- `.context/reviews/document-specialist.md`
+- `.context/reviews/perf-reviewer.md`
+- `.context/reviews/product-marketer-reviewer.md`
+- `.context/reviews/security-reviewer.md`
 - `.context/reviews/test-engineer.md`
 - `.context/reviews/tracer.md`
-- `.context/reviews/architect.md`
-- `.context/reviews/debugger.md`
-- `.context/reviews/document-specialist.md`
-- `.context/reviews/designer.md`
+- `.context/reviews/verifier.md`
 
-Agent failures: none.
+Agent failures: the first cycle-20 subagent stalled before a usable report; a replacement subagent produced review artifacts and one pushed test-risk commit, then stalled. The orchestrator recovered the cycle directly, preserved all per-agent reports, finished aggregation/planning, implemented the bounded high-confidence fixes, and deployed the source commit.
 
-Raw findings before dedupe: 58.
-Unique deduped findings: 34.
-Strongest cross-agent agreement: large multipart memory boundary, request-local semantic vector scans, public map scale, source-contract test debt, Playwright/browser matrix gaps, and stale cycle/deploy ledgers.
+Raw findings before dedupe: 62.
+Unique deduped findings: 37.
+Strongest cross-agent agreement: restore drain ordering, mutation-barrier lint false-greens, revocable photo-page offline caching, duplicated upload ingest contracts, multipart materialization, queue/backfill/shared-pool pressure, request-local public discovery scans, map payload scale, process-local topology limits, source-contract test debt, browser/e2e coverage gaps, and stale cycle ledgers.
 
 ## Findings
 
-### AGG-C19-01 - LR multipart parse slot can leak if PAT usage marking throws
+### AGG-C20-01 - Restore can hang before the bounded drain checklist runs
 
 - Severity: High
 - Confidence: High
-- Source findings: `DBG-C19-01`
-- Cross-agent agreement: debugger
-- Citations: `apps/web/src/app/api/admin/lr/upload/route.ts:152-188`, `apps/web/src/lib/api-auth.ts:23-28`
-- Problem: the LR upload route acquires the singleton multipart parse slot, then awaits `markAdminAuthTokenUsed(request)` before entering the `try/finally` that releases the slot.
-- Failure scenario: a transient DB/token-store failure during `markTokenUsed()` exits the handler with `lrMultipartParseInFlight` stuck at `1`, causing every later Lightroom upload in that process to return 429 until restart.
-- Suggested fix: start the release-protected region immediately after slot acquisition, or move token-use marking before slot acquisition, and add a regression proving a following upload can pass the gate after token-use failure.
+- Status: fixed in `d8e604ef`
+- Source findings: `TRC20-01`, `VER-C20-01`
+- Citations: `apps/web/src/app/[locale]/admin/db-actions.ts:560-611`, `apps/web/src/lib/data.ts:75-155`, `apps/web/src/lib/restore-drain-checklist.ts:20-50`, `apps/web/src/__tests__/restore-drain-checklist.test.ts:74-115`
+- Problem: restore entered durable maintenance and then directly awaited `flushBufferedSharedGroupViewCounts()` before the timeout-aware drain checklist.
+- Failure scenario: a stuck shared-group flush can hold the site in restore maintenance indefinitely before restore reaches the bounded abort path.
+- Fix: move shared-group view-count flushing into `runRestoreDrainChecklist()` through a bounded `drainSharedGroupViewCountsForRestore()` stage and update tests to reject the pre-checklist flush shape.
 
-### AGG-C19-02 - CLIP embedding backfill can stop quietly before later embeddable rows
-
-- Severity: Medium
-- Confidence: High
-- Source findings: `TRC19-01`, `DOC-C19-01`
-- Cross-agent agreement: tracer, document-specialist
-- Citations: `apps/web/scripts/backfill-clip-embeddings.ts:159-189`, `apps/web/scripts/backfill-clip-embeddings.ts:201-244`, `apps/web/src/app/actions/embeddings.ts:141-211`, `CLAUDE.md:597-600`, `apps/web/README.md:84-85`
-- Problem: the backfill reduces SQL page size by remaining embedding-attempt budget, but still treats `rows.length < BATCH_SIZE` as end-of-backlog. A skip-heavy short page can exit without the scan-limit continuation message.
-- Failure scenario: near the scan limit, the next limited page contains only missing-original rows; attempts do not increase, the script logs done, and valid later rows remain unembedded while the operator stops per runbook.
-- Suggested fix: decouple scan page size from attempt budget or compare to the actual fetch limit, continue past skipped rows while budget remains, emit continuation when budget is exhausted, and add sidecar/action behavior tests.
-
-### AGG-C19-03 - Large multipart ingest still materializes request bodies before app-level streaming
+### AGG-C20-02 - Mutation-barrier lint gate accepts spoofed or non-disposable barrier calls
 
 - Severity: High
 - Confidence: High
-- Source findings: `CR-19-01`, `C19-PERF-02`, `ARCH19-01`, `DOC-C19-05`
-- Cross-agent agreement: code-reviewer, perf-reviewer, architect, document-specialist
-- Citations: `apps/web/next.config.ts:111-119`, `apps/web/src/lib/upload-limits.ts:1-35`, `apps/web/src/app/actions/images.ts:129-260`, `apps/web/src/app/api/admin/lr/upload/route.ts:101-188`, `apps/web/src/app/[locale]/admin/db-actions.ts:378-684`, `apps/web/src/lib/process-image.ts:882-887`
-- Problem: browser uploads and restore are Server Action/FormData surfaces, and LR upload still calls `request.formData()`. The helper streams an already-received `File`, but the framework parser has already accepted/materialized large bodies.
-- Failure scenario: large admin uploads or restores pin hundreds of MiB in the web process before app quota/disk streaming can relieve pressure, risking RSS spikes or OOM on the single host.
-- Suggested fix: migrate large binary ingress to streaming route handlers with per-part limits, direct temp-file writes, and a shared ingress semaphore. Reword helper comments so they do not imply end-to-end heap safety.
+- Status: fixed in `d8e604ef`
+- Source findings: `TRC20-02`, `VER-C20-02`, `DBG-C20-01`
+- Citations: `apps/web/scripts/check-action-origin.ts:148-164`, `apps/web/scripts/check-action-origin.ts:1371-1397`, `apps/web/src/__tests__/check-action-origin.test.ts:618-630`, `apps/web/src/lib/admin-mutation-barrier.ts:67-80`
+- Problem: the scanner counted any call expression named `acquireAdminMutationSlot` without proving the approved import, `using` disposable lifetime, or `slot.acquired` early return.
+- Failure scenario: a future admin mutation can pass `lint:action-origin` while not actually holding the restore write fence, reopening the restore-window write race.
+- Fix: resolve import provenance from `@/lib/admin-mutation-barrier`, require a `using` slot declaration, require an acquired-state gate before mutation, and add negative fixtures for spoofed, wrong-module, bare-call, non-using, and missing-acquired cases.
 
-### AGG-C19-04 - Foreground queue and admin backfill can over-reserve the same DB pool
+### AGG-C20-03 - Offline HTML cache can resurrect deleted photo pages
+
+- Severity: Medium
+- Confidence: High
+- Status: fixed in `d8e604ef`
+- Source findings: `VER-C20-03`, `DBG-C20-02`, `CRIT20-03`
+- Citations: `apps/web/public/sw.template.js:31-34`, `apps/web/public/sw.template.js:59-63`, `apps/web/public/sw.template.js:445-499`, `apps/web/public/sw.template.js:554-562`, `apps/web/src/app/actions/images.ts:655-756`
+- Problem: normal `/p/:id` photo pages were eligible for 24-hour offline HTML fallback even though delete/unpublish state must be fresh.
+- Failure scenario: a browser that cached a photo page before deletion could go offline and see the stale page shell and metadata after the photo was removed.
+- Fix: treat localized and unlocalized `/p/:id` photo pages as revocable HTML, bypass offline fallback, regenerate `sw.js`, and expand the service-worker route classifier tests.
+
+### AGG-C20-04 - Browser and PAT uploads duplicate one ingest transaction contract
 
 - Severity: High
 - Confidence: High
-- Source findings: `C19-PERF-01`
-- Cross-agent agreement: perf-reviewer
-- Citations: `apps/web/src/db/index.ts:31-42`, `apps/web/src/lib/image-queue.ts:121-142`, `apps/web/src/lib/image-queue.ts:805-903`, `apps/web/src/lib/admin-backfill-runner.ts:106-143`, `apps/web/src/lib/admin-backfill-runner.ts:520-727`
-- Problem: image queue and admin backfill each independently reserve "live traffic" pool headroom, but their workers can run simultaneously under different locks and pin most of the 10-connection pool.
-- Failure scenario: active upload processing plus a color backfill leaves only one pool slot for public/admin requests, causing live routes to queue behind encode-duration holds and hit `queueLimit`.
-- Suggested fix: add one process-wide background DB budget shared by queue, backfills, semantic backfill, and side effects, or pause/drain foreground queue work before large admin backfills.
+- Source findings: `ARCH20-01`, `CRIT20-01`
+- Citations: `apps/web/src/app/actions/images.ts:129-653`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-634`
+- Problem: browser uploads and Lightroom/PAT uploads independently own config snapshots, quota settlement, topic validation, original save, metadata normalization, DB insert, queue payloads, audit, cleanup, and revalidation.
+- Failure scenario: a future privacy, color/HDR, metadata, queue, or cleanup invariant is added to one adapter and missed in the other.
+- Suggested fix: extract a shared authenticated ingest service with parity tests; keep only auth, request parsing, and response shaping in the two adapters.
 
-### AGG-C19-05 - Semantic and similar-photo routes do request-local vector scans
-
-- Severity: High
-- Confidence: High
-- Source findings: `C19-PERF-04`, `SEC-19-01`, `ARCH19-02`, `C19-CRIT-06`
-- Cross-agent agreement: perf-reviewer, security-reviewer, architect, critic
-- Citations: `apps/web/src/app/api/search/semantic/route.ts:247-368`, `apps/web/src/app/api/search/similar/[id]/route.ts:137-285`, `apps/web/src/lib/clip-embeddings.ts:36-48`, `apps/web/src/db/schema.ts:292-304`
-- Problem: every admitted semantic/similar request can load embedding blobs, decode vectors, score them in Node, and enrich results inside the Next request process.
-- Failure scenario: production semantic traffic or direct clients with valid origin headers burn DB bandwidth, CPU, and heap concurrently with page rendering and image processing.
-- Suggested fix: move vector search to an ANN/vector index, sidecar, or cached generation-owned matrix with concurrency/backpressure; at minimum add a shared semantic-search budget and stronger shared/edge rate limiting.
-
-### AGG-C19-06 - Public map can ship thousands of markers and sub-44 px Leaflet controls
-
-- Severity: Medium
-- Confidence: High
-- Source findings: `CR-19-03`, `C19-PERF-05`, `ARCH19-03`, `C19-CRIT-08`, `DES-C19-01`
-- Cross-agent agreement: code-reviewer, perf-reviewer, architect, critic, designer
-- Citations: `apps/web/src/lib/data.ts:1766-1816`, `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`, `apps/web/src/components/map/map-client.tsx:77-140`, `apps/web/src/__tests__/touch-target-audit.test.ts:9-15`
-- Problem: `/map` can load 10,000 rows, render one Leaflet marker per row and a duplicate fallback list, while default Leaflet zoom/marker/attribution controls are below the repo's 44 px interactive target policy.
-- Failure scenario: large GPS archives freeze mobile browsers and visible map controls remain hard to use for touch or motor-impaired visitors.
-- Suggested fix: add viewport-bounded clustering/pagination for scale. Separately, render or style Leaflet controls so visible hit targets meet 44 px.
-
-### AGG-C19-07 - Migration reconcile coverage does not prove structural schema equivalence
+### AGG-C20-05 - Large binary ingress still depends on framework multipart materialization
 
 - Severity: High
 - Confidence: High
-- Source findings: `VER-C19-03`, `TEST-C19-01`
-- Cross-agent agreement: verifier, test-engineer
-- Citations: `CLAUDE.md:479-485`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-102`, `apps/web/scripts/migrate.js:277-284`
-- Problem: the reconcile coverage is mainly a source/name-presence tripwire and explicitly cannot verify column types, defaults, nullability, index order, or FK actions.
-- Failure scenario: future schema drift mentions the right names in `migrate.js` but applies structurally wrong DDL; tests pass while fresh/legacy baselines diverge from migrated DBs.
-- Suggested fix: add a DB-backed schema-convergence gate or explicit CI/nightly/schema-change command that introspects `information_schema` after reconcile/baseline.
+- Source findings: `ARCH20-02`, `DBG-C20-04`
+- Citations: `apps/web/src/app/actions/images.ts:129-263`, `apps/web/src/app/api/admin/lr/upload/route.ts:101-181`, `apps/web/src/app/[locale]/admin/db-actions.ts:400-407`, `apps/web/src/app/[locale]/admin/db-actions.ts:693-714`, `apps/web/next.config.ts:111-119`, `apps/web/src/lib/upload-limits.ts:1-33`
+- Problem: large upload and restore requests reach application code as framework-parsed `FormData`/`File` objects before most domain checks or disk streaming.
+- Failure scenario: valid near-limit requests can spike RSS/temp pressure in the same single web process that serves public pages and runs Sharp/CLIP work.
+- Suggested fix: move large binary ingress to streaming Route Handlers with pre-parse length checks, per-part limits, a shared large-body semaphore, temp-file handoff, and shared upload/restore services.
 
-### AGG-C19-08 - High-risk invariants still rely on source-string tests
+### AGG-C20-06 - Upload queue and admin backfill budget independently against the same DB/CPU pool
+
+- Severity: High
+- Confidence: High
+- Source findings: `ARCH20-04`, `C20-PERF-01`, `CRIT20-MV-01`
+- Citations: `apps/web/src/db/index.ts:31-45`, `apps/web/src/lib/image-queue.ts:121-153`, `apps/web/src/lib/image-queue.ts:868-883`, `apps/web/src/lib/admin-backfill-runner.ts:106-143`, `apps/web/src/lib/admin-backfill-runner.ts:716-727`, `apps/web/src/lib/process-image.ts:1205-1418`
+- Problem: foreground image processing and admin backfill each compute safe-looking concurrency from the same pool without accounting for the other lane.
+- Failure scenario: fresh uploads plus in-app color/format backfill can oversubscribe DB connections, libvips CPU, and public request latency.
+- Suggested fix: introduce a process-wide background-work budget shared by queue, backfills, semantic/bootstrap work, and heavy side effects; acquire DB/CPU tokens before locks and Sharp work.
+
+### AGG-C20-07 - Public keyword search still uses leading-wildcard multi-query scans
 
 - Severity: Medium
 - Confidence: High
-- Source findings: `CR-19-04`, `C19-CRIT-12`, `TEST-C19-05`
-- Cross-agent agreement: code-reviewer, critic, test-engineer
-- Citations: `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:1-76`, `apps/web/src/__tests__/cycle-17-source-contracts.test.ts:42-50`, `apps/web/src/__tests__/load-more-source-contracts.test.ts:5-30`, `apps/web/src/__tests__/search-status-source.test.ts:15-69`
-- Problem: several behavior-sensitive contracts are guarded by source text or regex presence rather than executed branch/order/cleanup tests.
-- Failure scenario: a refactor keeps the expected string in a helper or dead branch while active behavior drops scan limits, leaks quota, commits stale search results, or fails fallback transitions.
-- Suggested fix: keep source contracts for mechanical import/boundary checks, but add focused behavior tests for semantic scan limits, LR/browser upload cleanup, restore/advisory cleanup, load-more retry/status, search stale-response, and image fallback.
+- Source findings: `ARCH20-05`, `CRIT20-06`, `C20-PERF-03`
+- Citations: `apps/web/src/app/actions/public.ts:247-329`, `apps/web/src/lib/data.ts:1574-1749`, `apps/web/src/lib/sql-like.ts:9-10`
+- Problem: accepted public searches can run `%term%` scans across image, topic, tag, alias, camera, and lens fields.
+- Failure scenario: varied short queries within rate limits burn MySQL CPU and pool slots in the same process as dynamic pages.
+- Suggested fix: use MySQL full-text/ngram or a maintained search-document table, add query plan fixtures, and consider a higher minimum length or short TTL cache while migrating.
 
-### AGG-C19-09 - Playwright browser coverage is desktop Chromium only
+### AGG-C20-08 - Public smart collections can run expensive dynamic predicates on every hit
+
+- Severity: Medium
+- Confidence: Medium
+- Source findings: `ARCH20-05`, `C20-PERF-04`
+- Citations: `apps/web/src/lib/smart-collections.ts:142-352`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:17`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:96-112`, `apps/web/src/lib/data.ts:1488-1551`
+- Problem: public smart collections parse, compile, count, and execute dynamic predicates, including text/tag `contains`, on uncached requests.
+- Failure scenario: a broad public collection can force repeated unindexed scans while only a small first page is rendered.
+- Suggested fix: cost-classify predicates at save time, restrict or warn on non-sargable public predicates, and materialize expensive public collections.
+
+### AGG-C20-09 - Semantic and similar-photo routes perform request-local vector scans in Node
 
 - Severity: Medium
 - Confidence: High
-- Source findings: `CR-19-05`, `TEST-C19-02`, `C19-CRIT-12`
-- Cross-agent agreement: code-reviewer, test-engineer, critic
-- Citations: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/swipe-visual-reset.spec.ts:23-49`
-- Problem: the standard E2E matrix runs only Desktop Chrome; touch behavior is synthetic rather than executed in a true mobile/touch device context.
-- Failure scenario: mobile Safari/WebKit, Firefox, real touch dispatch, responsive nav, and lightbox/photo rendering regressions pass the normal e2e gate.
-- Suggested fix: add opt-in or scheduled mobile WebKit, desktop Firefox, and mobile Chromium smoke projects for critical public flows.
+- Source findings: `ARCH20-05`, `CRIT20-05`, `C20-PERF-05`
+- Citations: `apps/web/src/db/schema.ts:292-304`, `apps/web/src/lib/clip-embeddings.ts:22-48`, `apps/web/src/app/api/search/semantic/route.ts:263-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:177-214`
+- Problem: every admitted semantic/similar request can load embedding blobs from MySQL, decode vectors, and score them in the Next request process.
+- Failure scenario: production semantic traffic competes with page rendering, image processing, and backfills for heap, CPU, and DB bandwidth.
+- Suggested fix: move vector search to an ANN/vector index, sidecar, or process-owned preloaded matrix with generation invalidation and explicit concurrency/backpressure.
 
-### AGG-C19-10 - Admin E2E workflows are credential-gated and shallow
+### AGG-C20-10 - Public map ships one large exact-coordinate SSR/client payload
 
 - Severity: Medium
 - Confidence: High
-- Source findings: `CR-19-06`, `TEST-C19-06`
-- Cross-agent agreement: code-reviewer, test-engineer
-- Citations: `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/helpers.ts:28-45`, `apps/web/e2e/admin.spec.ts:20-165`
-- Problem: local `npm run test:e2e` can pass with admin workflows skipped, and existing admin browser coverage does not exercise many high-risk protected flows.
-- Failure scenario: settings, token, backup/restore, sharing, semantic setup, or destructive confirmation UI breaks in hydration while unit/source tests remain green.
-- Suggested fix: split admin Playwright into tagged flows with explicit skip reporting and require relevant tags for touched admin areas.
+- Source findings: `ARCH20-06`, `CRIT20-04`
+- Citations: `apps/web/src/app/[locale]/(public)/map/page.tsx:13-14`, `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`, `apps/web/src/lib/data.ts:1766-1816`, `apps/web/src/components/map/map-client.tsx:77-139`, `apps/web/src/db/schema.ts:123-131`
+- Problem: `/map` can serialize up to 10,000 exact coordinates and hydrate one Leaflet marker plus a fallback list entry per photo.
+- Failure scenario: large location-rich galleries can stall mobile browsers and disclose the full opted-in coordinate set to every visitor.
+- Suggested fix: use viewport/bbox APIs, clustering, lower initial payloads, a spatial/geohash index, and paginated/virtualized accessible list output.
 
-### AGG-C19-11 - Public page/semantic availability controls depend on documented topology and manual nginx state
+### AGG-C20-11 - Map markers have generic accessible names
+
+- Severity: Low-Medium
+- Confidence: High
+- Source findings: `DES-C20-02`
+- Citations: `apps/web/src/components/map/map-client.tsx:120-137`, `apps/web/src/app/[locale]/(public)/map/page.tsx:80-110`
+- Problem: Leaflet marker controls are exposed as repeated `button "Marker"` entries before their popups open.
+- Failure scenario: keyboard and screen-reader users cannot distinguish multiple geotagged photo markers without opening each popup or skipping to the fallback list.
+- Suggested fix: pass `title`/`alt` marker options or synchronize accessible attributes after render while keeping the fallback list.
+
+### AGG-C20-12 - Gallery listing indexes omit the final `id` ordering and cursor key
 
 - Severity: Medium
-- Confidence: High for repo state; Medium for live exposure
-- Source findings: `SEC-19-02`, `MV-C19-PERF-01`, `C19-CRIT-02`
-- Cross-agent agreement: security-reviewer, perf-reviewer, critic
-- Citations: `CLAUDE.md:245-247`, `CLAUDE.md:521-548`, `apps/web/nginx/default.conf:274-306`, `apps/web/deploy.sh:51-55`, `apps/web/src/lib/rate-limit.ts:124-133`, `apps/web/src/lib/restore-maintenance.ts:1-60`
-- Problem: public SSR page throttling is edge-only and deploy does not apply host nginx; several safety buckets remain process-local under the documented single-web-instance topology.
-- Failure scenario: stale/bypassed nginx or accidental scale-out removes the intended availability backstop for dynamic public pages and weakens process-local quotas/maintenance flags.
-- Suggested fix: add deploy/live nginx verification or app-layer fallback limits, and fail-loud before unsupported scale-out unless coordination state is moved to shared storage.
+- Confidence: Medium
+- Source findings: `C20-PERF-02`
+- Citations: `apps/web/src/db/schema.ts:123-131`, `apps/web/src/lib/data.ts:761-783`, `apps/web/src/lib/data.ts:806-828`, `apps/web/src/lib/data.ts:918-939`, `apps/web/src/lib/data.ts:1498-1544`
+- Problem: listing and smart-collection queries order/page by `capture_date`, `created_at`, and `id`, but the main indexes stop at `created_at`.
+- Failure scenario: large tie groups can require extra sorting/temp-table work in dynamic public pages.
+- Suggested fix: add full-order composite indexes, validate with production-sized `EXPLAIN ANALYZE`, and retire overlapping indexes only after measured proof.
 
-### AGG-C19-12 - Production CSP still allows inline styles
+### AGG-C20-13 - Single-instance topology is warn-only despite process-local correctness state
+
+- Severity: Medium
+- Confidence: High
+- Source findings: `ARCH20-03`, `CRIT20-08`, `SEC-20-02`
+- Citations: `apps/web/src/lib/upload-tracker-state.ts:7-78`, `apps/web/src/lib/rate-limit.ts:78-109`, `apps/web/src/lib/rate-limit.ts:404-427`, `apps/web/src/lib/data.ts:13-63`, `apps/web/src/lib/single-writer-guard.ts:6-16`, `apps/web/src/lib/single-writer-guard.ts:218-235`, `apps/web/src/instrumentation.ts:22-31`
+- Problem: the supported deploy is single web-instance, but singleton contention logs and serving continues.
+- Failure scenario: an accidental second process splits upload quotas, fast-path limiters, restore state, queue process state, and view buffers.
+- Suggested fix: fail closed in production on persistent singleton contention unless an explicit unsafe override is set, or move the listed controls to shared durable state before scale-out.
+
+### AGG-C20-14 - Public SSR flood protection depends on manually applied host nginx state
+
+- Severity: Medium
+- Confidence: High for repo/deploy mismatch; Medium for live exposure
+- Source findings: `ARCH20-MV01`, `CRIT20-09`, `SEC-20-01`
+- Citations: `CLAUDE.md:247`, `CLAUDE.md:510-522`, `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:274-306`, `apps/web/deploy.sh:51-107`, `scripts/deploy-remote.sh:31-93`
+- Problem: `npm run deploy` rebuilds the app container but does not apply or verify host nginx rate-limit/body-cap templates.
+- Failure scenario: operators believe committed edge protections are live while dynamic public SSR pages reach Next/MySQL without the intended page limiter.
+- Suggested fix: add live nginx config hash/version verification to deploy or a required release step, and consider a cheap app-layer fallback limiter around public page data loaders.
+
+### AGG-C20-15 - Cached shared-group data access owns a view-count side effect
+
+- Severity: Medium
+- Confidence: Medium
+- Source findings: `ARCH20-07`, `TRC20-03`, `VER-C20-L01`, `DBG-C20-03`
+- Citations: `apps/web/src/lib/data.ts:49-63`, `apps/web/src/lib/data.ts:1392-1407`, `apps/web/src/lib/data.ts:1830-1834`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:111-142`, `apps/web/src/app/actions/public.ts:518-559`
+- Problem: `getSharedGroupCached = cache(getSharedGroup)` wraps a reader that can buffer denormalized view-count side effects.
+- Failure scenario: metadata/preload/layout reads with different options can make React cache call order decide whether denormalized and durable counters agree.
+- Suggested fix: split pure cached group reads from explicit view-recording orchestration and test repeated reads as side-effect-free.
+
+### AGG-C20-16 - Topic slug remains a mutable natural key with manual fan-out
+
+- Severity: Medium
+- Confidence: Medium-High
+- Source findings: `ARCH20-08`, `CRIT20-07`
+- Citations: `apps/web/src/db/schema.ts:10-40`, `apps/web/src/db/schema.ts:251-260`, `apps/web/src/app/actions/topics.ts:287-372`, `apps/web/src/__tests__/topic-slug-fk-registry.test.ts:1-79`
+- Problem: topic rename recreates the primary-key slug and manually repoints known children and JSON sites.
+- Failure scenario: a future slug-bearing store outside the registry can keep pointing at the deleted slug after rename.
+- Suggested fix: migrate to immutable topic IDs with mutable route/display slugs, or require every slug persistence site to declare tested rename behavior.
+
+### AGG-C20-17 - Claim-exhaustion permanent failures bypass the bounded-set eviction contract
+
+- Severity: Medium
+- Confidence: High
+- Source findings: `CR20-01`
+- Citations: `apps/web/src/lib/image-queue.ts:112-113`, `apps/web/src/lib/image-queue.ts:320-324`, `apps/web/src/lib/image-queue.ts:767`, `apps/web/src/lib/image-queue.ts:1029-1041`, `apps/web/src/lib/image-queue.ts:1155-1156`, `apps/web/src/__tests__/image-queue-permanent-failure.test.ts:56-63`
+- Problem: the normal permanent-failure branch enforces FIFO eviction, but claim-exhausted jobs add to `permanentlyFailedIds` without the cap helper.
+- Failure scenario: sustained claim-lock anomalies can grow the process-local set and `NOT IN (...)` bootstrap predicate beyond the documented cap.
+- Suggested fix: route all permanent-failure add sites through one helper that caps the set and cleans stale retry/error maps; test the claim-exhaustion path past the cap.
+
+### AGG-C20-18 - Upload quota settlement depends on local discipline after synchronous preclaim
+
+- Severity: Medium
+- Confidence: Medium-High
+- Source findings: `CRIT20-02`
+- Citations: `apps/web/src/app/actions/images.ts:259-269`, `apps/web/src/app/actions/images.ts:563-578`, `apps/web/src/app/api/admin/lr/upload/route.ts:160-188`, `apps/web/src/lib/upload-tracker.ts:19-33`, `apps/web/src/lib/upload-tracker-state.ts:70-78`
+- Problem: quota settlement is an ad hoc closure pattern repeated across upload paths.
+- Failure scenario: a future throwing cleanup or inserted awaited branch can leak process-local count/bytes until the window resets.
+- Suggested fix: introduce a `withUploadQuotaClaim(...)` helper or claim object with exactly-once settlement in `finally` and tests for thrown cleanup/mid-claim failures.
+
+### AGG-C20-19 - Multiple root admins remain a deliberate single-factor authz model
 
 - Severity: Low
 - Confidence: High
-- Source findings: `SEC-19-03`
-- Cross-agent agreement: security-reviewer
-- Citations: `apps/web/src/lib/content-security-policy.ts:182-190`
+- Source findings: `SEC-20-03`
+- Citations: `CLAUDE.md:248`, `CLAUDE.md:649-650`, `apps/web/src/app/actions/admin-users.ts:79-92`, `apps/web/src/app/actions/admin-users.ts:194-218`, `apps/web/src/app/actions/auth.ts:216-253`
+- Problem: one compromised admin password/session grants full root privileges, including DB backup/restore and PAT/admin management.
+- Failure scenario: existing password hashing, rate limits, sessions, and audit logs reduce likelihood but no second factor or role boundary exists for destructive operations.
+- Suggested fix: add optional WebAuthn/TOTP and step-up auth for DB restore, backup download, token creation, and admin-user management, or introduce capability roles.
+
+### AGG-C20-20 - Production CSP still allows inline styles
+
+- Severity: Low
+- Confidence: High
+- Source findings: `SEC-20-04`
+- Citations: `apps/web/src/lib/content-security-policy.ts:182-190`, `apps/web/src/lib/safe-json-ld.ts:14-19`
 - Problem: production `style-src` includes `'unsafe-inline'`.
-- Failure scenario: a future HTML/style injection bug cannot run scripts due to nonce gating, but can still manipulate layout, hide warnings, or create phishing overlays.
-- Suggested fix: track as CSP debt and test framework-supported style nonces/hashes or extracted styles before removing the allowance.
+- Failure scenario: a future HTML/style injection sink could support UI redress or deceptive overlays even though script nonce policy blocks JavaScript.
+- Suggested fix: test framework-supported style nonces/hashes or extracted styles before removing the allowance.
 
-### AGG-C19-13 - Public smart collections can compile expensive dynamic predicates on every fresh hit
-
-- Severity: Medium
-- Confidence: Medium
-- Source findings: `C19-PERF-07`
-- Cross-agent agreement: perf-reviewer
-- Citations: `apps/web/src/lib/smart-collections.ts:142-352`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:17`, `apps/web/src/lib/data.ts:1488-1544`
-- Problem: public smart collections are dynamic and can include broad `%LIKE%`/tag predicates within a large bounded AST.
-- Failure scenario: an admin-published broad collection causes expensive image/tag scans for every public hit even though only the first page is rendered.
-- Suggested fix: classify public smart-collection query cost, restrict non-sargable predicates for public collections, or materialize membership.
-
-### AGG-C19-14 - Public keyword search still uses multi-query leading-wildcard scans
-
-- Severity: Medium
-- Confidence: Medium
-- Source findings: `C19-PERF-08`, `C19-CRIT-07`
-- Cross-agent agreement: perf-reviewer, critic
-- Citations: `apps/web/src/lib/sql-like.ts:9-10`, `apps/web/src/lib/data.ts:1574-1738`, `apps/web/src/app/actions/public.ts:266-317`
-- Problem: accepted searches can run `%term%` scans across image, topic, tag, alias, camera, and lens fields.
-- Failure scenario: varied short searches within allowed rate limits consume DB CPU and increase browsing latency.
-- Suggested fix: add full-text/search document indexing, raise minimum query length, cache popular searches, or gather `EXPLAIN ANALYZE` and add plan regression fixtures.
-
-### AGG-C19-15 - Admin CSV export materializes up to 50k rows and one full CSV string
+### AGG-C20-21 - Historical review logs contain redacted secret-like lines
 
 - Severity: Low
 - Confidence: High
-- Source findings: `C19-PERF-06`
-- Cross-agent agreement: perf-reviewer
-- Citations: `apps/web/src/app/[locale]/admin/db-actions.ts:45-120`
-- Problem: CSV export builds an array of up to 50,000 rows/lines and returns one full string through a Server Action.
-- Failure scenario: near-cap export adds avoidable heap/GC pressure while upload/backfill/public requests share the same process.
-- Suggested fix: stream rows through an authenticated route handler instead of returning a full Server Action string.
+- Source findings: `SEC-20-05`
+- Citations: `.context/reviews/logs-cycle4/security-reviewer.log:158-159`, `.context/reviews/logs-cycle4/security-reviewer.log:19495-19496`, `README.md:152-153`, `CLAUDE.md:81-82`, `apps/web/.env.local.example:27-33`
+- Problem: tracked historical logs contain redacted secret-shaped assignments.
+- Failure scenario: alert fatigue normalizes committing raw transcripts; a future failed redaction could expose live secrets.
+- Suggested fix: summarize review logs instead of committing raw terminal transcripts, or add a tracked-secret guard for `.context/reviews/logs-*` with strict redaction allowlists.
 
-### AGG-C19-16 - Cached shared-group lookup owns view-count side effects
-
-- Severity: Medium
-- Confidence: Medium
-- Source findings: `CR-19-02`
-- Cross-agent agreement: code-reviewer
-- Citations: `apps/web/src/lib/data.ts:1402-1407`, `apps/web/src/lib/data.ts:1830-1834`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:111-142`
-- Problem: a React-cached shared-group read can also buffer denormalized view-count side effects while the page separately owns durable view recording.
-- Failure scenario: a future metadata/preload/refactor call changes cache call order or increment options and silently skips or duplicates counters.
-- Suggested fix: split pure cached reads from explicit view-recording orchestration.
-
-### AGG-C19-17 - Restore quiescence does not clearly own public rate-limit DB writes
-
-- Severity: Medium
-- Confidence: Medium
-- Source findings: `ARCH19-04`
-- Cross-agent agreement: architect
-- Citations: `apps/web/src/app/[locale]/admin/db-actions.ts:547-584`, `apps/web/src/app/actions/public.ts:132-293`, `apps/web/src/lib/rate-limit.ts:480`, `apps/web/src/lib/background-db-writes.ts:42`
-- Problem: restore drains known writers, but public actions can pass maintenance checks before restore flips and later perform persistent rate-limit writes outside the tracked background-writer boundary.
-- Failure scenario: rate-limit DB writes race a restore/import window, causing noisy DB errors or state written against a transient/restored schema snapshot.
-- Suggested fix: make persistent rate-limit storage restore-aware or participate in a foreground/public DB activity tracker.
-
-### AGG-C19-18 - Docker native optional dependency pins are only partially lockfile-guarded
-
-- Severity: Low
-- Confidence: High
-- Source findings: `ARCH19-05`
-- Cross-agent agreement: architect
-- Citations: `apps/web/Dockerfile:50`, `apps/web/Dockerfile:76`, `apps/web/src/__tests__/deploy-script-contract.test.ts:258-286`
-- Problem: deploy contract tests only partially compare manually installed native package pins against `package-lock.json`.
-- Failure scenario: a dependency upgrade leaves stale Dockerfile native pins that pass tests but fail container build or native binding runtime.
-- Suggested fix: parse all manually installed native package tokens and compare versions to `package-lock.json` for both build and production stages.
-
-### AGG-C19-19 - Cycle 18 release ledger is stale after the pushed commit
-
-- Severity: Medium
-- Confidence: High
-- Source findings: `VER-C19-01`, `C19-CRIT-01`, `DOC-C19-02`
-- Cross-agent agreement: verifier, critic, document-specialist
-- Citations: `.context/plans/README.md:34-43`, `.context/plans/cycle-18-2026-07-08-plan.md:3-6`, `.context/plans/cycle-18-2026-07-08-plan.md:133-157`, `package.json:17-30`
-- Problem: current HEAD is pushed Cycle 18 commit `6efd737b`, but the Cycle 18 plan/index still say commit/push/deploy finalization is in progress from older HEAD `a1863405`.
-- Failure scenario: later agents cannot tell whether production is stale, repeat already-pushed work, or skip explicit deploy evidence.
-- Suggested fix: mark commit/push complete and record deploy evidence or explicit deploy gap/supersession separately.
-
-### AGG-C19-20 - Carry-forward register still has stale r10c4 age labels
-
-- Severity: Medium
-- Confidence: High
-- Source findings: `VER-C19-02`, `DOC-C19-03`
-- Cross-agent agreement: verifier, document-specialist
-- Citations: `.context/plans/deferred-carry-forward.md:19-27`, `.context/plans/deferred-carry-forward.md:36-80`, `.context/plans/cycle-18-2026-07-08-plan.md:27-37`
-- Problem: the carry-forward prose says run-10 c18, but the table header and some row ages remain keyed to run-10 c4.
-- Failure scenario: old Medium/High rows can miss required 16-cycle or 8-cycle re-review because the register undercounts current age.
-- Suggested fix: update labels/ages for the current cycle or split historical/current age columns.
-
-### AGG-C19-21 - Old unindexed Cycle 19 plan files collide with the current cycle name
+### AGG-C20-22 - `.env.local.example` underspecified `DB_SSL_CA` runtime impact
 
 - Severity: Low-Medium
 - Confidence: High
-- Source findings: `DOC-C19-04`
-- Cross-agent agreement: document-specialist
-- Citations: `.context/plans/cycle-19-plan.md:1-58`, `.context/plans/cycle-19-deferred.md:1-26`, `.context/plans/README.md:34-43`, `.context/reviews/_aggregate.md:1-7`
-- Problem: old `.context/plans/cycle-19-*` files from a different HEAD are unindexed and easy to mistake for the current Cycle 19 work.
-- Failure scenario: a planner opens the stale file and uses wrong review provenance or deferred scope.
-- Suggested fix: archive/rename with run/date prefix or add index entries marking the files historical.
+- Status: fixed in this docs pass
+- Source findings: `DOC-C20-01`
+- Citations: `apps/web/.env.local.example:1-10`, `apps/web/src/db/index.ts:7-18`, `apps/web/scripts/mysql-connection-options.js:13-29`, `apps/web/drizzle.config.ts:5-17`, `CLAUDE.md:94`, `README.md:173`, `apps/web/README.md:52`
+- Problem: the sample env file said `DB_SSL_CA` was required for CLI TLS, but runtime and Drizzle Kit also fail closed for non-local verified TLS without it.
+- Failure scenario: an operator omits the CA for remote MySQL and the app or migration tooling fails before serving.
+- Fix: update the example comment to name runtime, Drizzle Kit, and backup/restore CLI TLS.
 
-### AGG-C19-22 - Admin photo management remains a horizontal table on narrow screens
+### AGG-C20-23 - Plan index and carry-forward ledgers were stale for the current cycle
+
+- Severity: Medium for agent/process safety
+- Confidence: High
+- Status: fixed by this aggregate and cycle-20 plan/deferred pair
+- Source findings: `DOC-C20-02`, `DOC-C20-L01`, `CRIT20-MV-03`
+- Citations: `.context/plans/README.md:34-57`, `.context/reviews/_aggregate.md:1-7`, `.context/plans/cycle-20-plan.md:1-5`, `.context/plans/cycle-21-plan.md:1-5`, `.context/plans/cycle-22-plan.md:1-5`, `.context/plans/deferred-carry-forward.md:19-24`
+- Problem: the plan index still pointed at run-10 cycle 19 and loop-B cycle 9 as active, the aggregate was still cycle 19, and bare cycle-20/21/22 files remained ambiguous.
+- Failure scenario: future agents can read stale plans as active, skip cycle-20 findings, or cite the wrong aggregate.
+- Fix: replace `_aggregate.md`, add dated cycle-20 plan/deferred files, refresh the active-plan index, disambiguate bare names, and update the carry-forward check.
+
+### AGG-C20-24 - ESLint warnings are allowed to pass the blocking lint gate
 
 - Severity: Medium
 - Confidence: High
-- Source findings: `C19-CRIT-11`, `DES-C19-02`
-- Cross-agent agreement: critic, designer
-- Citations: `apps/web/src/components/image-manager.tsx:427-604`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`
-- Problem: the recent uploads manager is a wide table with horizontally separated preview, metadata, tags, and actions.
-- Failure scenario: phone/tablet/split-screen admins lose row context and risk editing/deleting the wrong image.
-- Suggested fix: add a responsive card/list workbench below wide desktop while keeping the table for dense desktop use.
+- Source findings: `C20-TE-01`
+- Citations: `apps/web/eslint.config.mjs:18-29`, `apps/web/package.json:13-15`, `.github/workflows/quality.yml:54-55`
+- Problem: `@typescript-eslint/no-unused-vars` is warning-level and `npm run lint` does not use `--max-warnings=0`.
+- Failure scenario: unused/dead code can satisfy source-string assertions while CI remains green.
+- Suggested fix: make warnings blocking or restore unused-vars to error while keeping underscore ignore patterns.
 
-### AGG-C19-23 - Admin navigation is one flat wrapping strip
-
-- Severity: Low-Medium
-- Confidence: High
-- Source findings: `DES-C19-03`
-- Cross-agent agreement: designer
-- Citations: `apps/web/src/components/admin-nav.tsx:15-49`, `apps/web/src/components/admin-header.tsx:13-26`
-- Problem: ten unrelated admin destinations render as peers in one wrapping strip.
-- Failure scenario: translated/tablet layouts reshuffle high-risk operations and routine publishing links, breaking muscle memory.
-- Suggested fix: group admin IA into stable sections and use a drawer/menu on smaller viewports.
-
-### AGG-C19-24 - SEO settings validation is toast-only and not field-addressable
-
-- Severity: Low-Medium
-- Confidence: High
-- Source findings: `DES-C19-04`, legacy `C96-09` lineage
-- Cross-agent agreement: designer plus carry-forward register
-- Citations: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:42-184`, `apps/web/src/app/actions/seo.ts:111-140`
-- Problem: server-side field validation returns one toast message; fields do not get `aria-invalid`, persistent error text, or focus routing.
-- Failure scenario: keyboard/screen-reader admins must infer and manually locate the invalid field after a transient toast.
-- Suggested fix: return/map error codes to field keys and render field-level errors with focus on first invalid input.
-
-### AGG-C19-25 - Password mismatch validation does not move focus to the invalid field
-
-- Severity: Low
-- Confidence: Medium-High
-- Source findings: `DES-C19-05`
-- Cross-agent agreement: designer
-- Citations: `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:36-45`, `apps/web/src/app/[locale]/admin/(protected)/password/password-form.tsx:96-114`, `apps/web/src/__tests__/password-form-a11y.test.ts:10-18`
-- Problem: mismatch sets an alert and `aria-invalid`, but focus remains on the submit/current control.
-- Failure scenario: keyboard admins must manually locate the confirm field after the local validation error.
-- Suggested fix: focus/select the confirm field on mismatch and extend the a11y test.
-
-### AGG-C19-26 - Desktop photo metadata, color details, similar photos, and downloads are hidden by default
+### AGG-C20-25 - Touch-target audit warning budgets can hide primitive regressions
 
 - Severity: Medium
 - Confidence: High
-- Source findings: `C19-CRIT-10`
-- Cross-agent agreement: critic
-- Citations: `apps/web/src/components/photo-viewer.tsx:111-115`, `apps/web/src/components/photo-viewer.tsx:747-800`, `apps/web/src/components/photo-viewer.tsx:965-1010`
-- Problem: important trust/utility details sit behind a hidden info sidebar by default on desktop.
-- Failure scenario: visitors miss download or color-management context and assume those features are unavailable.
-- Suggested fix: revisit photo-page IA and consider a compact always-visible metadata/download rail or better default-open/first-use behavior.
+- Source findings: `C20-TE-02`
+- Citations: `apps/web/src/__tests__/touch-target-audit.test.ts:97-117`, `apps/web/src/__tests__/touch-target-audit.test.ts:188-243`, `apps/web/src/__tests__/touch-target-audit.test.ts:769-803`, `apps/web/src/components/ui/button.tsx:23-30`
+- Problem: nonzero per-file warning budgets can still pass if a button primitive regresses below 44 px.
+- Failure scenario: existing controls become real touch-target violations while the audit only catches new uses beyond the budget.
+- Suggested fix: assert every button size variant carries a >=44 px class and retire budgets that are only historical primitive allowances.
 
-### AGG-C19-27 - Topic slug is a mutable natural key with manual fan-out
+### AGG-C20-26 - i18n parity checks do not compare placeholder sets
 
 - Severity: Medium
 - Confidence: High
-- Source findings: `C19-CRIT-05`
-- Cross-agent agreement: critic
-- Citations: `apps/web/src/db/schema.ts:10-39`, `apps/web/src/app/actions/topics.ts:287-372`
-- Problem: topic identity is route slug and FK/JSON/analytics key; rename manually updates every known reference.
-- Failure scenario: a new slug-bearing table or JSON field is missed and silently points to a deleted old slug.
-- Suggested fix: move to surrogate topic IDs or add database-level cascades/central slug-reference registry tests.
+- Source findings: `C20-TE-04`
+- Citations: `apps/web/src/__tests__/i18n-key-parity.test.ts:13-20`, `apps/web/src/__tests__/i18n-key-parity.test.ts:135-168`, `apps/web/messages/en.json:156-177`, `apps/web/messages/ko.json:156-177`
+- Problem: locale tests compare leaf keys and duplicate keys, but not placeholder-name parity.
+- Failure scenario: a translation can keep the same key while dropping or renaming `{current}`, `{total}`, `{failed}`, or another runtime argument.
+- Suggested fix: extract placeholders from every leaf value and compare placeholder-name sets across locales, with ICU support.
 
-### AGG-C19-28 - Browser and Lightroom upload paths duplicate one ingest transaction contract
+### AGG-C20-27 - Source contracts over-represent high-risk behavior coverage
+
+- Severity: Medium
+- Confidence: High
+- Source findings: `CRIT20-11`, `C20-TE-05`
+- Citations: `apps/web/src/__tests__/cycle-20-source-contracts.test.ts:8-82`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-77`, `apps/web/src/__tests__/load-more-source-contracts.test.ts:7-30`, `apps/web/src/components/search.tsx:163-281`, `apps/web/src/components/load-more.tsx:43-111`
+- Problem: some safety-critical branch/order/cleanup claims are protected by strings instead of executed behavior.
+- Failure scenario: a refactor leaves expected strings in a dead branch while active behavior regresses.
+- Suggested fix: keep source contracts for mechanical boundaries only and add behavior tests or pure state-machine tests for client search/load-more, rate-limit charging, cleanup, and query-limit flows.
+
+### AGG-C20-28 - Migration reconcile coverage is not a structural schema proof
 
 - Severity: High
 - Confidence: High
-- Source findings: `C19-CRIT-03`
-- Cross-agent agreement: critic
-- Citations: `apps/web/src/app/actions/images.ts:129-620`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-620`
-- Problem: two ingestion paths must preserve the same privacy/color/topic/quota/disk/restore/audit/queue invariants by duplicated code.
-- Failure scenario: a new upload-time column or setting is added to one path and missed in the other, bypassing a privacy or processing invariant.
-- Suggested fix: extract a shared ingest service with adapter-specific auth/parsing only.
+- Source findings: `C20-TE-06`
+- Citations: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-103`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:175-180`, `apps/web/scripts/migrate.js:348-493`
+- Problem: tests mostly prove names appear in `migrate.js`; they cannot prove column types, defaults, nullability, index order, charsets, collations, or FK actions.
+- Failure scenario: a reconcile-baselined database can diverge structurally from migrated schema while name-presence tests pass.
+- Suggested fix: add disposable MySQL integration that runs reconcile/baseline and diffs `information_schema` against the schema/migration contract.
 
-### AGG-C19-29 - Upload quota settlement remains fragile control flow
+### AGG-C20-29 - Backup/restore child-process paths rely heavily on source pins
+
+- Severity: High
+- Confidence: Medium
+- Source findings: `C20-TE-07`
+- Citations: `apps/web/src/__tests__/db-restore.test.ts:47-136`, `apps/web/src/app/[locale]/admin/db-actions.ts:137-260`
+- Problem: important child-process success/failure/timeout/trailer/cleanup guarantees are asserted through source substrings and ordering.
+- Failure scenario: executable behavior around `mysqldump`/`mysql` exits, timeouts, stream flushing, tmp-file handoff, or lock release can break while source pins still pass.
+- Suggested fix: add a test harness with stub binaries injected through `PATH` and temp backup dirs covering success, nonzero exits, timeout, truncated trailer, bad header, write errors, migration failure, and lock-release failure.
+
+### AGG-C20-30 - Browser, admin, SW/PWA, CLIP, and visual coverage gaps remain
 
 - Severity: Medium
-- Confidence: Medium-High
-- Source findings: `C19-CRIT-04`
-- Cross-agent agreement: critic
-- Citations: `apps/web/src/app/actions/images.ts:259-269`, `apps/web/src/app/actions/images.ts:563-578`, `apps/web/src/lib/upload-tracker.ts:19-33`
-- Problem: quota claim settlement depends on comments and hand-maintained early-exit cleanup paths.
-- Failure scenario: a future throwing cleanup or new awaited branch leaks count/bytes for the one-hour upload window.
-- Suggested fix: use an owned claim object or `try/finally` wrapper that settles exactly once from final success counters.
+- Confidence: High
+- Source findings: `C20-TE-03`, `C20-TE-08`, `C20-TE-09`, `C20-TE-10`, `C20-TE-11`, `VER-C20-T01`, `CRIT20-10`
+- Citations: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:69-83`, `apps/web/e2e/admin.spec.ts:20-165`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/src/components/register-service-worker.tsx:13-23`, `apps/web/src/__tests__/sw-template-contract.test.ts:1-16`, `apps/web/scripts/build-sw.ts:27-43`
+- Problem: standard browser checks are desktop Chromium only, many admin workflows are credential-gated or shallow, SW behavior is not installed/offline-tested in a browser, CLIP real-weight tests are scheduled/manual, and nav screenshots are saved but not compared.
+- Failure scenario: mobile WebKit/touch, hydrated admin flows, production SW registration/offline behavior, real CLIP model layout, or visual regressions can ship despite green local gates.
+- Suggested fix: add mobile WebKit/mobile Chromium smoke projects, workflow-tagged admin e2e, production Playwright PWA coverage, CLIP path-filtered preflight, and screenshot baselines or clearer artifact-only naming.
 
-### AGG-C19-30 - IPv6 public clients can rotate rate-limit buckets
+### AGG-C20-31 - Closed mobile tag filter still paints its chip controls
+
+- Severity: Medium
+- Confidence: High
+- Source findings: `DES-C20-01`
+- Citations: `apps/web/src/components/tag-filter.tsx:145-156`
+- Problem: the closed mobile `<details>` contains a direct child with author `display:flex`, overriding native closed-details hiding.
+- Failure scenario: sighted mobile users see visible chip controls while the accessibility tree reports the disclosure collapsed and keyboard tab order skips the chips.
+- Suggested fix: use `hidden group-open:flex` or a controlled disclosure with `hidden`, `aria-expanded`, and a managed region.
+
+### AGG-C20-32 - Tag filter hydrates duplicate chip trees
+
+- Severity: Low
+- Confidence: Medium
+- Source findings: `DES-C20-03`
+- Citations: `apps/web/src/components/tag-filter.tsx:11-19`, `apps/web/src/components/tag-filter.tsx:70-160`
+- Problem: one memoized chip fragment is mounted in both mobile and desktop wrappers.
+- Failure scenario: large tag vocabularies pay avoidable DOM/hydration work on public gallery pages.
+- Suggested fix: render one chip list with responsive wrapper behavior, or branch to one mounted tree after hydration.
+
+### AGG-C20-33 - Admin image management remains a wide table on narrow screens
+
+- Severity: Medium
+- Confidence: High
+- Source findings: `CRIT20-12`
+- Citations: `apps/web/src/components/image-manager.tsx:427-452`, `apps/web/src/components/image-manager.tsx:474-621`
+- Problem: phone/tablet admins must horizontally scroll a dense table where identity, tags, and destructive actions are separated.
+- Failure scenario: at event speed, an admin can edit or delete the wrong row.
+- Suggested fix: add a responsive card/list management mode below a breakpoint while keeping the dense desktop table.
+
+### AGG-C20-34 - Desktop photo information can remain hidden by hydration/session state
 
 - Severity: Low-Medium
-- Confidence: High
-- Source findings: `C19-CRIT-09`
-- Cross-agent agreement: critic
-- Citations: `apps/web/src/lib/rate-limit.ts:135-205`
-- Problem: full IPv6 addresses are used as rate-limit keys rather than configurable prefix coalescing.
-- Failure scenario: an attacker rotates privacy addresses inside a delegated range to multiply public expensive-route budgets.
-- Suggested fix: normalize IPv6 clients to an operator-configurable prefix, usually `/64`, or use stable edge-provided client identity.
-
-### AGG-C19-31 - Production service-worker/PWA behavior lacks real browser install/offline coverage
-
-- Severity: Medium
-- Confidence: High
-- Source findings: `TEST-C19-03`
-- Cross-agent agreement: test-engineer
-- Citations: `apps/web/src/components/register-service-worker.tsx:13-23`, `apps/web/src/__tests__/sw-template-contract.test.ts:1-16`, `apps/web/src/__tests__/sw-cache.test.ts:1-14`
-- Problem: service worker registration/cache/offline behavior is covered by unit/source contracts, not a production browser install/offline test.
-- Failure scenario: generated `sw.js`, scope, cache headers, or offline route eligibility breaks while source/unit tests still pass.
-- Suggested fix: add a production Playwright PWA spec with service-worker ready, CacheStorage assertions, offline toggle, and sensitive-route cache exclusions.
-
-### AGG-C19-32 - Custom gate CLI discovery/exit wiring is mostly source-pinned
-
-- Severity: Medium
 - Confidence: Medium
-- Source findings: `TEST-C19-04`
-- Cross-agent agreement: test-engineer
-- Citations: `apps/web/src/__tests__/check-api-auth.test.ts:127-132`, `apps/web/scripts/check-api-auth.ts:30-40`, `apps/web/src/__tests__/check-public-route-rate-limit.test.ts:1317-1330`, `apps/web/scripts/check-public-route-rate-limit.ts:986-998`, `apps/web/src/__tests__/check-js-scripts-contract.test.ts:10-19`
-- Problem: scanner fixture logic is strong, but CLI discovery/zero-file/exit-code paths are mainly checked by reading source.
-- Failure scenario: a path constant, extension filter, or exit branch changes and skips real files while source-string tests still pass.
-- Suggested fix: add fixture-root or injectable discovery helpers and spawn the CLIs against temp trees, asserting pass/fail output and exit codes.
+- Source findings: `CRIT20-13`
+- Citations: `apps/web/src/components/photo-viewer.tsx:111-135`, `apps/web/src/components/photo-viewer.tsx:757-811`, `apps/web/src/components/photo-viewer.tsx:975-1020`
+- Problem: desktop photo context intentionally starts hidden for hydration safety and can restore a prior hidden state.
+- Failure scenario: visitors miss color disclosure, similar photos, and download controls if the sidebar remains hidden or hydration is slow.
+- Suggested fix: surface compact download/color metadata outside the collapsible sidebar or keep a persistent visible affordance.
 
-### AGG-C19-33 - Visual E2E captures screenshots without comparing them
+### AGG-C20-35 - Fresh-install/product identity is coupled to tracked production site config
+
+- Severity: Low-Medium
+- Confidence: Medium
+- Source findings: `CRIT20-14`
+- Citations: `apps/web/src/site-config.json:1-12`, `apps/web/src/site-config.example.json:1-12`, `apps/web/scripts/ensure-site-config.mjs:12-40`, `README.md:60-72`
+- Problem: the checked-in production `site-config.json` is necessary for this deployment but can mislead forks/fresh installs.
+- Failure scenario: a copied worktree builds with `gallery.atik.kr` metadata/canonical URLs until the operator replaces config.
+- Suggested fix: before template/package distribution, require explicit non-demo site config or an external `BASE_URL`/config source outside the production checkout.
+
+### AGG-C20-36 - Production CLIP/search/nginx capacity and host state need live proof
+
+- Severity: Medium
+- Confidence: High for validation gap; Low/Medium for current live impact
+- Source findings: `ARCH20-MV02`, `CRIT20-MV-01`, `CRIT20-MV-02`, `MVR20-02`, `SEC-20-01`
+- Citations: `README.md:50`, `CLAUDE.md:169`, `CLAUDE.md:375-381`, `CLAUDE.md:505-523`, `apps/web/src/app/api/search/semantic/route.ts:186-311`, `apps/web/src/app/api/search/similar/[id]/route.ts:115-214`, `apps/web/src/lib/admin-backfill-runner.ts:106-143`
+- Problem: source proves bounds and runbooks, but not live CLIP weights/coverage, production DB query plans, CPU/RSS headroom, or host nginx application.
+- Failure scenario: operators can overstate semantic readiness or capacity, or rely on edge protections that are not applied on the host.
+- Suggested fix: record live preflight evidence for CLIP env/weights/embedding coverage, `EXPLAIN`/latency/RSS under representative load, and host `nginx -T`/reload/burst checks.
+
+### AGG-C20-37 - Product-facing docs emphasize engineering depth before the experience
 
 - Severity: Low
 - Confidence: High
-- Source findings: `TEST-C19-07`
-- Cross-agent agreement: test-engineer
-- Citations: `apps/web/e2e/nav-visual-check.spec.ts:40-86`
-- Problem: visual-check screenshots are manual artifacts; no baseline or semantic visual assertion fails on visual regressions.
-- Failure scenario: nav/header spacing or icon placement regresses while visibility, overlap, and touch target checks pass.
-- Suggested fix: rename/report as smoke artifacts or add stable screenshot baselines for narrow header/nav states.
-
-### AGG-C19-34 - Older broad deferred architecture issues remain live
-
-- Severity: Mixed, up to High
-- Confidence: High
-- Source findings: repeated by critic and carry-forward register
-- Cross-agent agreement: critic plus current `.context/plans/deferred-carry-forward.md`
-- Citations: `.context/plans/deferred-carry-forward.md:36-170`, `plan/plan-377-cycle19-deferred.md:18-166`
-- Problem: several broad items are known and still present: upload service extraction, source-contract retirement, admin redesign, schema/migration infrastructure, map clustering, semantic vector indexing, mobile/admin/browser coverage, and live-host validation.
-- Failure scenario: repeated review cycles rediscover the same broad risks and either over-schedule too much at once or silently drop them.
-- Suggested fix: preserve each item in the cycle deferred register with original severity/confidence, reason for deferral, exit criterion, and carry-forward lineage.
-
-## Final Sweep
-
-The aggregate ingested every requested per-agent file and deduped overlaps by behavior cluster. No agent failures occurred. Generated build output, `node_modules`, runtime upload/resource data, local secrets, and the unrelated untracked `.context/reviews/cycle-9-2026-07-08/` directory were not used as review sources.
+- Source findings: product-marketer sweep of public docs found no blocker, critic noted README/product positioning risk
+- Citations: `README.md:1-208`, `apps/web/src/site-config.json:1-12`
+- Problem: public docs spend substantial first-screen attention on implementation depth and production wiring before the gallery/operator experience.
+- Failure scenario: prospective operators or contributors can miss the product's core value and install expectations.
+- Suggested fix: on the next README/product-docs pass, lead with the gallery experience, deployment target, and operator workflow, then keep engineering details as supporting material.

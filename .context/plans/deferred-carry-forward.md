@@ -16,12 +16,22 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c19):** no newly deferred Cycle 19 High-severity row is a
+**Age-budget check (run-10 c20):** direct high-confidence correctness/security gate
+findings `AGG-C20-01` and `AGG-C20-02` were scheduled and fixed in `d8e604ef`; the
+revocable-photo offline-cache privacy issue `AGG-C20-03` was also fixed. Newly deferred
+High-severity Cycle 20 rows (`AGG-C20-04`, `AGG-C20-05`, `AGG-C20-06`, `AGG-C20-28`,
+`AGG-C20-29`) are broad architecture/performance/test-infrastructure items with explicit
+exit criteria in `cycle-20-2026-07-08-deferred.md`, not contained unpatched data-loss or
+authz defects. Security/operator rows rely on the documented single-web-instance topology
+and nginx-edge boundary in `CLAUDE.md`. Cycle 19 rows are now one cycle old; none crosses
+the 8-cycle High budget or 16-cycle Medium checkpoint.
+
+**Previous check (run-10 c19):** no newly deferred Cycle 19 High-severity row is a
 direct unpatched correctness/security/data-loss bug; direct correctness items
-`AGG-C19-01` and `AGG-C19-02` are scheduled in `cycle-19-2026-07-08-plan.md`.
-The newly deferred High rows are broad architecture/performance/test-design items
+`AGG-C19-01` and `AGG-C19-02` were scheduled in `cycle-19-2026-07-08-plan.md`.
+The newly deferred High rows were broad architecture/performance/test-design items
 with explicit exit criteria in `cycle-19-2026-07-08-deferred.md`. Security/availability
-deferrals rely on the single-web-instance and nginx-edge operator boundaries
+deferrals relied on the single-web-instance and nginx-edge operator boundaries
 documented in `CLAUDE.md`.
 
 **Previous check (run-10 c18):** no newly deferred Cycle 18 High-severity row is a
@@ -43,7 +53,7 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 
 ## Open carry-forward rows
 
-| ID | Sev/Conf | Home register | First deferred | Age @ r10c19 | Exit criterion (short) |
+| ID | Sev/Conf | Home register | First deferred | Age @ r10c20 | Exit criterion (short) |
 |----|---------|---------------|----------------|-------------|------------------------|
 | C96-04 | MED/High | cycle-96-2026-07-01 | c96 | ~7 | Feed maintenance/caching policy decision for restore windows |
 | C96-07 | MED/High | cycle-96-2026-07-01 | c96 | ~7 | nginx template parameterizes the demo domain (operator template pass) |
@@ -127,29 +137,61 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C6-27 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Next bulk-edit cycle OR a maintainer trips on the `titlePrefix` exact-set naming |
 | C6-28 | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | On-this-day made client-driven, OR a `TZ` operator-config note ships, OR a wrong-day report |
 | C7b-06code | MED/High | cycle-7b-2026-07-07 | r10c7(loop-B) | 0 | `IMAGE_BASE_URL` configured in production (decide the boot-validation story once with C4-25/C2-37res), OR an operator restart-without-rebuild thumbnail incident (boot-time remotePatterns-vs-runtime probe; doc half shipped c7b WP14) |
-| C17-register | mixed, includes High performance/operator rows | cycle-17-2026-07-08 | r10c17 | 1 | Superseded by `cycle-18-2026-07-08-deferred.md` where still open; see the Cycle 17 register for original severity/confidence and citations |
-| C18-03 | HIGH/High | cycle-18-2026-07-08 | r10c18 | 0 | Streaming upload/restore ingestion OR production RSS breach |
-| C18-04 | HIGH/High | cycle-18-2026-07-08 | r10c18 | 0 | Semantic traffic/gallery size exceeds limits OR vector indexing/caching scheduled |
-| C18-05 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Map GPS rows approach thousands OR clustering prioritized |
-| C18-07 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Credentialed admin browser-flow coverage cycle |
-| C18-08 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | WebKit/mobile/Firefox matrix scheduled OR browser-specific regression |
-| C18-09 | LOW-MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Admin e2e skip reporting/setup changes |
-| C18-16 | MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Responsive admin card/workbench mode scheduled |
-| C18-17 | LOW-MED/High | cycle-18-2026-07-08 | r10c18 | 0 | Admin nav redesign or sensitive-operation IA separation |
-| C18-18 | LOW/High | cycle-18-2026-07-08 | r10c18 | 0 | Live semantic/proxy/deploy claim requires host evidence |
-| C18-21 | LOW-MED/Medium | cycle-18-2026-07-08 | r10c18 | 0 | Credentialed protected-admin responsive validation pass |
-| C18-22 | LOW/Medium | cycle-18-2026-07-08 | r10c18 | 0 | Any RTL locale addition |
-| C19-03r | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Streaming upload/restore ingestion OR production RSS breach |
-| C19-04 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Shared DB background budget scheduled OR measured queue/backfill pool starvation |
-| C19-05 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Semantic traffic/gallery size exceeds scan limits OR vector indexing/caching scheduled |
-| C19-06r | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Map clustering/viewport pagination scheduled OR map trace proves thousands-marker jank |
-| C19-07 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 0 | Next migration/schema cycle OR DB-backed reconcile convergence gate |
-| C19-08 | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Next high-risk source-contract-only finding OR behavior-test hardening cycle |
-| C19-09 | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Browser-specific regression OR Playwright mobile/WebKit/Firefox matrix scheduled |
-| C19-10 | MED/High | cycle-19-2026-07-08 | r10c19 | 0 | Admin-flow regression OR admin E2E expansion cycle |
-| C19-11 | MED/High-Med | cycle-19-2026-07-08 | r10c19 | 0 | Operator applies/verifies nginx zones OR app-layer public page limiter project |
-| C19-12 | LOW/High | cycle-19-2026-07-08 | r10c19 | 0 | Style nonce/hash path lands OR CSP hardening cycle |
-| C19-13..34 | mixed, up to High | cycle-19-2026-07-08 | r10c19 | 0 | See `cycle-19-2026-07-08-deferred.md` for preserved citations, reasons, and exit criteria |
+| C17-register | mixed, includes High performance/operator rows | cycle-17-2026-07-08 | r10c17 | 2 | Superseded by `cycle-18-2026-07-08-deferred.md` where still open; see the Cycle 17 register for original severity/confidence and citations |
+| C18-03 | HIGH/High | cycle-18-2026-07-08 | r10c18 | 1 | Streaming upload/restore ingestion OR production RSS breach |
+| C18-04 | HIGH/High | cycle-18-2026-07-08 | r10c18 | 1 | Semantic traffic/gallery size exceeds limits OR vector indexing/caching scheduled |
+| C18-05 | MED/High | cycle-18-2026-07-08 | r10c18 | 1 | Map GPS rows approach thousands OR clustering prioritized |
+| C18-07 | MED/High | cycle-18-2026-07-08 | r10c18 | 1 | Credentialed admin browser-flow coverage cycle |
+| C18-08 | MED/High | cycle-18-2026-07-08 | r10c18 | 1 | WebKit/mobile/Firefox matrix scheduled OR browser-specific regression |
+| C18-09 | LOW-MED/High | cycle-18-2026-07-08 | r10c18 | 1 | Admin e2e skip reporting/setup changes |
+| C18-16 | MED/High | cycle-18-2026-07-08 | r10c18 | 1 | Responsive admin card/workbench mode scheduled |
+| C18-17 | LOW-MED/High | cycle-18-2026-07-08 | r10c18 | 1 | Admin nav redesign or sensitive-operation IA separation |
+| C18-18 | LOW/High | cycle-18-2026-07-08 | r10c18 | 1 | Live semantic/proxy/deploy claim requires host evidence |
+| C18-21 | LOW-MED/Medium | cycle-18-2026-07-08 | r10c18 | 1 | Credentialed protected-admin responsive validation pass |
+| C18-22 | LOW/Medium | cycle-18-2026-07-08 | r10c18 | 1 | Any RTL locale addition |
+| C19-03r | HIGH/High | cycle-19-2026-07-08 | r10c19 | 1 | Streaming upload/restore ingestion OR production RSS breach |
+| C19-04 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 1 | Shared DB background budget scheduled OR measured queue/backfill pool starvation |
+| C19-05 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 1 | Semantic traffic/gallery size exceeds scan limits OR vector indexing/caching scheduled |
+| C19-06r | MED/High | cycle-19-2026-07-08 | r10c19 | 1 | Map clustering/viewport pagination scheduled OR map trace proves thousands-marker jank |
+| C19-07 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 1 | Next migration/schema cycle OR DB-backed reconcile convergence gate |
+| C19-08 | MED/High | cycle-19-2026-07-08 | r10c19 | 1 | Next high-risk source-contract-only finding OR behavior-test hardening cycle |
+| C19-09 | MED/High | cycle-19-2026-07-08 | r10c19 | 1 | Browser-specific regression OR Playwright mobile/WebKit/Firefox matrix scheduled |
+| C19-10 | MED/High | cycle-19-2026-07-08 | r10c19 | 1 | Admin-flow regression OR admin E2E expansion cycle |
+| C19-11 | MED/High-Med | cycle-19-2026-07-08 | r10c19 | 1 | Operator applies/verifies nginx zones OR app-layer public page limiter project |
+| C19-12 | LOW/High | cycle-19-2026-07-08 | r10c19 | 1 | Style nonce/hash path lands OR CSP hardening cycle |
+| C19-13..34 | mixed, up to High | cycle-19-2026-07-08 | r10c19 | 1 | See `cycle-19-2026-07-08-deferred.md` for preserved citations, reasons, and exit criteria |
+| C20-04 | HIGH/High | cycle-20-2026-07-08 | r10c20 | 0 | Shared upload ingest service before next upload parity drift |
+| C20-05 | HIGH/High | cycle-20-2026-07-08 | r10c20 | 0 | Streaming upload/restore ingress OR production RSS/OOM incident |
+| C20-06 | HIGH/High | cycle-20-2026-07-08 | r10c20 | 0 | Shared DB/CPU background budget OR measured queue/backfill starvation |
+| C20-07 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Full-text/search-index project OR measured keyword latency |
+| C20-08 | MED/Medium | cycle-20-2026-07-08 | r10c20 | 0 | Collections UI ships OR public smart-collection latency/materialization project |
+| C20-09 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Semantic traffic reaches scan limits OR vector index/cache project |
+| C20-10 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Map GPS rows approach thousands OR clustering/viewport project |
+| C20-11 | LOW-MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Map a11y polish batch OR AT/keyboard marker-name report |
+| C20-12 | MED/Medium | cycle-20-2026-07-08 | r10c20 | 0 | Next schema/index migration OR listing filesort/temp-table evidence |
+| C20-13 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Scale-out attempt, singleton contention, or shared-state topology project |
+| C20-14 | MED/High-Med | cycle-20-2026-07-08 | r10c20 | 0 | Host nginx verified/applied OR app-layer public page limiter project |
+| C20-15 | MED/Medium | cycle-20-2026-07-08 | r10c20 | 0 | Shared-group cache/refactor OR counter drift report |
+| C20-16 | MED/Med-High | cycle-20-2026-07-08 | r10c20 | 0 | Topic schema migration OR new slug-bearing store/rename bug |
+| C20-17 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Next image-queue cycle OR permanent-failure cap incident |
+| C20-18 | MED/Med-High | cycle-20-2026-07-08 | r10c20 | 0 | Upload quota leak OR upload-flow refactor |
+| C20-19 | LOW/High | cycle-20-2026-07-08 | r10c20 | 0 | Step-up auth/roles product decision |
+| C20-20 | LOW/High | cycle-20-2026-07-08 | r10c20 | 0 | Style nonce/hash support OR CSP hardening cycle |
+| C20-21 | LOW/High | cycle-20-2026-07-08 | r10c20 | 0 | Secret scanner flags review logs OR log retention policy update |
+| C20-24 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Lint/config cleanup OR warning false-green incident |
+| C20-25 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Button primitive touch-target change OR a11y audit cycle |
+| C20-26 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Next i18n/message edit OR placeholder bug |
+| C20-27 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Next source-contract false confidence OR behavior-test hardening cycle |
+| C20-28 | HIGH/High | cycle-20-2026-07-08 | r10c20 | 0 | Next migration/schema cycle OR DB-backed reconcile convergence gate |
+| C20-29 | HIGH/Medium | cycle-20-2026-07-08 | r10c20 | 0 | Next backup/restore cycle OR child-process harness lands |
+| C20-30 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Browser/admin/PWA/CLIP matrix project OR regression in those surfaces |
+| C20-31 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Next tag-filter/UI cycle OR mobile closed-filter report |
+| C20-32 | LOW/Medium | cycle-20-2026-07-08 | r10c20 | 0 | Measured tag-filter hydration cost OR tag-filter redesign |
+| C20-33 | MED/High | cycle-20-2026-07-08 | r10c20 | 0 | Mobile admin priority/wrong-row report OR admin redesign cycle |
+| C20-34 | LOW-MED/Medium | cycle-20-2026-07-08 | r10c20 | 0 | Photo-page IA redesign OR missed controls report |
+| C20-35 | LOW-MED/Medium | cycle-20-2026-07-08 | r10c20 | 0 | Template/package distribution OR wrong canonical URL incident |
+| C20-36 | MED/High-Low | cycle-20-2026-07-08 | r10c20 | 0 | CLIP/search/nginx live preflight or capacity project |
+| C20-37 | LOW/High | cycle-20-2026-07-08 | r10c20 | 0 | README/product positioning pass |
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |

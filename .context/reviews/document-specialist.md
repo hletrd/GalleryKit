@@ -1,191 +1,156 @@
-# Document-Specialist Review - Cycle 19 Prompt 1
+# Document-Specialist Review - Cycle 20
 
 Date: 2026-07-08 KST
-Reviewer lane: document-specialist
-Scope: comprehensive docs/code mismatch review against authoritative repo sources.
+Repository: `/Users/hletrd/flash-shared/gallery`
+Lane: `document-specialist`
+Reviewed working tree: current `master` at `bd0cc170` plus concurrent, unmodified peer review-file edits.
 
-Constraints honored: review-only; no implementation fixes, no commits, no pushes, no deploys. The only file written by this lane is `.context/reviews/document-specialist.md`. Other review-lane worktree edits were left untouched.
+## Scope and Method
 
-## Inventory And Coverage
+I reviewed the repository documentation/code contract surfaces for mismatches that could mislead future agents or operators. The inventory was built from tracked docs and contract files with `git ls-files`, then checked against the current source, scripts, deploy helpers, tests, and repo policy. I did not mutate any peer lane reports.
 
-Required context read:
+External package behavior did not need a web lookup for the confirmed findings: both are repo-local doc/source/provenance mismatches. Where package behavior is described in docs, I checked the current local implementation and tests rather than relying on memory.
+
+## Inventory
+
+Tracked documentation and contract-like surfaces inventoried: 2,638 tracked files matched docs/readme/context-plan/context-review/package/deploy contract globs.
+
+Primary policy/runbook docs:
 
 - `AGENTS.md`
 - `CLAUDE.md`
 - `README.md`
 - `apps/web/README.md`
-- `.context/plans/README.md`
-- Current `.context/plans/*cycle-18*`, `.context/plans/*cycle-19*`, deferred carry-forward, root `plan/plan-374-cycle18-fixes.md`, `plan/plan-375-cycle18-deferred.md`, `plan/done/plan-376-cycle19-fixes.md`, `plan/plan-377-cycle19-deferred.md`
+- `.env.deploy.example`
+- `apps/web/.env.local.example`
 - `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`
 - `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`
 - `apps/web/__test_fixtures__/color/README.md`
 
-Code/test surfaces reviewed against those docs:
+Plan and review ledgers:
 
-- Package scripts and workspace commands: root `package.json`, `apps/web/package.json`
-- Remote/local deploy helpers: `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, Dockerfile, Compose, nginx config, health/live routes
-- Migration/schema contracts: `apps/web/scripts/migrate.js`, Drizzle journal, schema, reconcile logic, migration tests
-- Security gates: `check-api-auth.ts`, `check-action-origin.ts`, `check-public-route-rate-limit.ts`, admin/public API routes
-- Auth/origin/rate-limit/proxy contracts: `request-origin.ts`, `rate-limit.ts`, `auth-rate-limit.ts`, nginx edge comments
-- CLIP semantic search activation/backfill: model path/model loader, sidecar scripts, semantic/similar routes, server action, CLIP tests
-- Storage/upload/image pipeline: upload actions, LR upload route, upload paths, original privacy guard, GPS stripping, color/HDR pipeline comments/tests
-- Public/admin route behavior, i18n, privacy selectors, search enrichment privacy guard, touch-target/focus/i18n source tests
-- `.context` review, aggregate, plan, deferred, and carry-forward ledgers
+- `.context/plans/README.md`
+- `.context/plans/deferred-carry-forward.md`
+- current and historical `.context/plans/*plan.md` / `*deferred.md`, including bare `cycle-20-*`, `cycle-21-*`, `cycle-22-*`, dated run-10 plans, loop-B plans, `archive/`, and `done/`
+- `.context/reviews/_aggregate.md`
+- current peer review reports under `.context/reviews/*.md`
+- historical review directories under `.context/reviews/**`
 
-Skipped: live production host state, secret env files, runtime upload/data directories, binary screenshots/assets, build output, `node_modules`, and historical archive files unless current docs linked or conflicted with them. No external web lookup was needed because every finding is repo-local.
+Package, deploy, and operational contracts:
 
-## Findings
+- root `package.json`
+- `apps/web/package.json`
+- `scripts/deploy-remote.sh`
+- `apps/web/deploy.sh`
+- `apps/web/docker-compose.yml`
+- `apps/web/Dockerfile`
+- `apps/web/nginx/default.conf`
+- `apps/web/next.config.ts`
+- `apps/web/drizzle.config.ts`
+- `apps/web/scripts/migrate.js`
+- `apps/web/scripts/mysql-connection-options.js`
+- `apps/web/scripts/ensure-site-config.mjs`
+- `apps/web/src/site-config.json`
+- `apps/web/src/site-config.example.json`
 
-### DOC-C19-01 - CLIP backfill can exit "complete" while the documented embedding-attempt budget remains
+Source regions checked against docs:
 
-Severity: Medium
-Confidence: High
-Status: Confirmed docs/code mismatch.
+- database/TLS setup: `apps/web/src/db/index.ts`, `apps/web/drizzle.config.ts`, MySQL helper scripts
+- migrations/reconcile/baseline: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, Drizzle migrations
+- CLIP semantic search/runbook: `apps/web/src/lib/clip-embeddings.ts`, `clip-model.ts`, semantic/similar routes, backfill scripts, embedding actions
+- upload/body-limit contracts: `apps/web/src/lib/upload-limits.ts`, `next.config.ts`, upload actions, Lightroom route, restore path, nginx limits
+- origin/auth/rate-limit gates: `apps/web/src/lib/request-origin.ts`, `rate-limit.ts`, `auth-rate-limit.ts`, admin/public actions and routes, lint scripts
+- image/color/HDR/privacy contracts: `apps/web/src/lib/process-image.ts`, `image-types.ts`, color tests, privacy select guards
+- service worker/cache and generated-artifact contracts: `apps/web/public/sw.template.js`, `sw.js`, build stamp tests
+- tests that function as documentation/source-contracts under `apps/web/src/__tests__/` and Playwright specs under `apps/web/e2e/`
 
-Files/regions:
+## Confirmed Issues
 
-- `CLAUDE.md:597-600`
-- `apps/web/README.md:84-85`
-- `apps/web/scripts/backfill-clip-embeddings.ts:159-189`
-- `apps/web/scripts/backfill-clip-embeddings.ts:201-205`
-- `apps/web/scripts/backfill-clip-embeddings.ts:239-244`
-- `apps/web/src/app/actions/embeddings.ts:141-168`
-- `apps/web/src/app/actions/embeddings.ts:179-183`
-- `apps/web/src/app/actions/embeddings.ts:211`
+### DOC-C20-01 - `.env.local.example` narrows `DB_SSL_CA` to CLI TLS, but runtime and Drizzle Kit also fail closed without it
 
-Mismatch:
+- Severity: Low-Medium
+- Confidence: High
+- File/region: `apps/web/.env.local.example:1-10`
+- Contradicting source: `apps/web/src/db/index.ts:7-18`, `apps/web/scripts/mysql-connection-options.js:13-29`, `apps/web/drizzle.config.ts:5-17`
+- Related accurate docs: `CLAUDE.md:94`, `README.md:173`, `apps/web/README.md:52`
 
-The runbook says `SEMANTIC_SCAN_LIMIT` is an embedding-attempt budget, missing-original candidates can be scanned/skipped without consuming it, and operators should repeat the sidecar command until it finishes without the "Reached SEMANTIC_SCAN_LIMIT" message. The sidecar and the unwired server action both fetch `limit(Math.min(BATCH_SIZE, remainingEmbeddingBudget))`, but then decide "no more rows" with `rows.length < BATCH_SIZE` / `pending.length < BACKFILL_BATCH_SIZE`. When the remaining attempt budget is smaller than the batch size, a partial fetch can satisfy the SQL limit, skip missing-original rows without incrementing `attemptedEmbeddings`, and still break as if the backlog ended.
+Problem: the copied environment example says `DB_SSL_CA` is "Required for verified MySQL CLI TLS to non-local DB hosts". Current source requires it for more than CLI helpers. The runtime DB pool throws at import for non-local `DB_HOST` unless `DB_SSL_CA` is set or `DB_SSL=false`; Drizzle Kit config has the same fail-closed behavior; backup/restore CLI helpers also throw.
 
-Concrete failure scenario:
+Failure scenario: an operator preparing a remote MySQL deployment from the example can reasonably infer that `DB_SSL_CA` matters only for MySQL CLI backup/restore flows. They omit the CA, deploy with a non-local `DB_HOST`, and the app fails at runtime/import or migration tooling fails before serving routes.
 
-After 950 successful embeddings in a run, `remainingEmbeddingBudget` is 50. The next 50 candidate rows are missing originals, so they are skipped and do not consume budget. Because `rows.length` is 50 and `BATCH_SIZE` is 100, the sidecar exits without the scan-limit message even if valid later rows still lack embeddings. An operator following the docs can stop after a "complete" run and enable production search with older valid photos still unembedded.
+Concrete fix: update `apps/web/.env.local.example:9` to match the authoritative docs, for example:
 
-Suggested fix:
+```dotenv
+# DB_SSL_CA=/path/to/ca.pem  # Required for verified runtime, Drizzle Kit, and backup/restore CLI TLS to non-local DB hosts
+```
 
-In both backfill paths, compare the fetched row count to the actual fetch limit, not the fixed batch size, and continue when skipped rows leave attempt budget available. For example, store `const fetchLimit = Math.min(BATCH_SIZE, remainingEmbeddingBudget)` and break only on `rows.length < fetchLimit`. Add a regression where a budget-limited partial batch contains only skipped rows followed by valid rows. Keep the docs' embedding-attempt-budget wording if that behavior is preserved.
+Optionally add a second comment that public-CA/managed MySQL still needs an explicitly pinned CA on this path, or `DB_SSL=false` only for a trusted private link.
 
-### DOC-C19-02 - Current-cycle release ledger still says Cycle 18 commit/push is pending after the signed Cycle 18 commit is current HEAD
+### DOC-C20-02 - Plan index and bare cycle files still present stale/future cycle ledgers as active or ambiguous
 
-Severity: Medium
-Confidence: High
-Status: Confirmed provenance mismatch.
+- Severity: Medium for agent/process safety; not a product runtime defect
+- Confidence: High
+- File/region: `.context/plans/README.md:34-45`
+- Supporting regions: `.context/reviews/_aggregate.md:1-7`, `.context/plans/cycle-20-plan.md:1-5` and `:119-125`, `.context/plans/cycle-21-plan.md:1-5` and `:68-78`, `.context/plans/cycle-22-plan.md:1-5` and `:65-75`, `.context/plans/deferred-carry-forward.md:19-24` and `:46-47`
 
-Files/regions:
+Problem: the plan index's "Active Current-Cycle Plans" still points to Run-10 Cycle 19 and loop-B Cycle 9 at reviewed HEAD `6efd737b`. The current repository HEAD is `bd0cc170`, and current peer reports are Cycle 20. The latest aggregate file is also still Cycle 19. Separately, bare `cycle-20-plan.md`, `cycle-21-plan.md`, and `cycle-22-plan.md` exist beside dated run-10 files. The README disambiguates undated `cycle-19-*` and several Cycle 9 lineages, but it does not disambiguate these bare Cycle 20/21/22 files.
 
-- `.context/plans/cycle-18-2026-07-08-plan.md:133-140`
-- `.context/plans/cycle-18-2026-07-08-plan.md:142-157`
-- `.context/plans/README.md:34-43`
-- Current git evidence: `git log -1` reports `6efd737b fix(cycle18): harden review-plan-fix findings` at `HEAD`, `origin/master`, and `origin/HEAD`; that commit includes the Cycle 18 plan/index/review files.
+This is partly self-admitted: `cycle-20-deferred.md:27` records `AGG-C20-40` ("Plan index status may mislead future cycles") with an exit criterion before using the index as a backlog source. The issue remains observable in the current files.
 
-Mismatch:
+Failure scenario: a future agent follows `.context/plans/README.md` as the convenience pointer, reads Cycle 19/loop-B Cycle 9 as active, or treats the bare Cycle 21/22 files as current successor plans. It can then schedule already-completed work, skip current Cycle 20 review findings, or cite the stale Cycle 19 aggregate as the latest review source.
 
-The Cycle 18 plan records all work packages and local gates as done, but still leaves "WP5 signed commit/push and per-cycle deploy finalization" unchecked. The index still calls Cycle 18 the active current-cycle plan "from Cycle 18 aggregate at HEAD `a1863405`", while the repository's current tracked HEAD is the pushed Cycle 18 fix commit `6efd737b`.
+Concrete fix:
 
-Concrete failure scenario:
+- Update `.context/plans/README.md` after this review cycle to mark Run-10 Cycle 19 and loop-B Cycle 9 as completed/superseded and add the current Cycle 20 review/aggregate state with the actual HEAD.
+- Add a "Historical-name disambiguation" entry for bare `cycle-20-*`, `cycle-21-*`, and `cycle-22-*`, or rename/archive those bare files into dated/run-qualified filenames.
+- Update `.context/reviews/_aggregate.md` as part of the normal review aggregation so it is not silently used as the latest Cycle 20 aggregate.
+- Update `deferred-carry-forward.md` when the current cycle's deferred register is final: it currently advertises its last age-budget check as run-10 c19.
 
-A later lane reads `.context/plans/README.md` and believes Cycle 18 is still active from `a1863405`, then re-plans already-committed work or misses the real remaining gap. The commit message says live deploy was not tested and "per-cycle deploy runs after push", so the accurate state is not "commit/push pending"; it is "commit/push complete, deploy evidence still absent unless another ledger records it."
+## Likely Issues
 
-Suggested fix:
+### DOC-C20-L01 - Carry-forward age register has not yet incorporated the current cycle
 
-Update the Cycle 18 plan and plan index to record `6efd737b` as committed/pushed. If no deploy transcript exists, keep that as an explicit deployment evidence gap instead of leaving commit/push and deploy conflated in one unchecked item.
+- Severity: Low-Medium
+- Confidence: Medium
+- File/region: `.context/plans/deferred-carry-forward.md:1-7`, `:19-24`, `:46-47`
 
-### DOC-C19-03 - Carry-forward register says the current check is run-10 c18 but its table still labels ages as run-10 c4
+Problem: the carry-forward register says it must be updated every cycle, but its latest age-budget check and age column are still run-10 c19. Because this lane is running during Cycle 20 review, this may simply be normal in-progress state. It becomes a confirmed stale-doc issue if Cycle 20 finishes and the register still does not include the current cycle's new deferrals and aged rows.
 
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed ledger mismatch.
+Failure scenario: a planner uses the consolidated register to enforce the High 8-cycle and Medium 16-cycle checkpoint rules and undercounts the age of long-lived deferrals by at least one cycle.
 
-Files/regions:
-
-- `.context/plans/deferred-carry-forward.md:19-27`
-- `.context/plans/deferred-carry-forward.md:36-40`
-- `.context/plans/deferred-carry-forward.md:122-138`
-- `.context/plans/cycle-18-2026-07-08-plan.md:16-37`
-
-Mismatch:
-
-Cycle 18 WP1 explicitly required the carry-forward register to remain mechanically auditable, and the prose now says "Age-budget check (run-10 c18)." The table header still says `Age @ r10c4` even though the table includes `C17-register`, `C18-*`, and loop-B rows with later-cycle ages.
-
-Concrete failure scenario:
-
-The age-budget policy in `.context/plans/README.md` depends on this register for High/Medium re-review. A maintainer or agent reading the table header can undercount aged deferred findings by 14 cycles, skip the 8-cycle High rule or 16-cycle Medium checkpoint, and keep carrying stale items without the required re-justification.
-
-Suggested fix:
-
-Refresh the table label and age values to the current cycle basis, or split historical rows from current-cycle rows with explicit "age as of" columns. Add a short note when dual review loops share the register so loop-B rows do not obscure run-10 cycle age accounting.
-
-### DOC-C19-04 - Unindexed root-level Cycle 19 plan/deferred files collide with the current Cycle 19 review context
-
-Severity: Low-Medium
-Confidence: High
-Status: Confirmed provenance risk.
-
-Files/regions:
-
-- `.context/plans/cycle-19-plan.md:1-5`
-- `.context/plans/cycle-19-plan.md:52-58`
-- `.context/plans/cycle-19-deferred.md:1-6`
-- `.context/plans/cycle-19-deferred.md:24-26`
-- `.context/plans/README.md:34-43`
-- `.context/reviews/_aggregate.md:1-7`
-
-Mismatch:
-
-`.context/plans/cycle-19-plan.md` is a completed "Cycle 19" plan from planning HEAD `5c559a0f` and claims its source is `.context/reviews/_aggregate.md`. The current `_aggregate.md` is Cycle 18 at reviewed HEAD `a1863405`, and the plan index does not list these `cycle-19-*` files as active, recently completed, or archived. In the current prompt, "cycle 19" refers to this new review cycle, so these unindexed older files are easy to mistake for current instructions.
-
-Concrete failure scenario:
-
-A current Cycle 19 lane searches for `cycle-19-plan.md`, finds the old completed plan, and treats its deferred/security/a11y scope as the current cycle's source of truth. That can hide the actual current aggregate state and produce duplicate or wrong scheduling.
-
-Suggested fix:
-
-Archive or rename the older files with a run/date prefix that cannot collide with run-10 cycle numbering, and add an index entry marking them historical. If they should remain current, update `_aggregate.md` provenance and the plan index so the source/HEAD references are true.
-
-### DOC-C19-05 - Upload pipeline comment overstates heap-safety compared with the actual entrypoints
-
-Severity: Low
-Confidence: High
-Status: Confirmed source-comment mismatch.
-
-Files/regions:
-
-- `apps/web/src/lib/process-image.ts:882-887`
-- `apps/web/src/app/api/admin/lr/upload/route.ts:180-183`
-- `apps/web/src/app/actions/images.ts:184-260`
-- `CLAUDE.md:655-658`
-- `.context/reviews/_aggregate.md:67-75`
-
-Mismatch:
-
-`saveOriginalAndGetMetadata` says it streams to disk first "to avoid materializing up to 200MB on the heap." Within that helper it does avoid an additional `arrayBuffer()` copy, but the actual upload entrypoints already receive materialized `File`/`FormData` objects: LR upload calls `request.formData()`, and the dashboard server action receives `File[]` from the framework. `CLAUDE.md` correctly documents that multipart uploads are buffered on the heap before the disk-streaming step.
-
-Concrete failure scenario:
-
-A future reviewer sees the helper comment, concludes the upload path is end-to-end streaming, and deprioritizes the documented RSS/multipart risk or rejects a streaming route-handler migration as unnecessary. The mismatch is not that the helper is wrong to stream; it is that the comment makes the memory boundary sound broader than it is.
-
-Suggested fix:
-
-Reword the comment to say the helper streams the already-received `File` to disk to avoid an additional full-size buffer/copy, while framework multipart parsing remains the outer memory boundary documented in `CLAUDE.md`.
-
-## Validated Matches
-
-- Package scripts: README/AGENTS command names match root and app `package.json` for lint, typecheck, build, unit/e2e tests, CLIP preflight, and deploy.
-- Deploy helper: env precedence, SSH derivation, `DEPLOY_REMOTE_SCRIPT`/`DEPLOY_CMD`, deploy-host `git pull --ff-only`, health check, and post-up Docker prune match README/CLAUDE/AGENTS. The only unverified part is live deploy execution evidence.
-- Schema/migrations: migration journal, `when` warning, hash postcondition, and `reconcileLegacySchema` contract match `migrate.js`, schema, and migration tests.
-- Security gates: admin API auth, mutating action origin, and public route rate-limit scanner docs match scanner behavior and current route posture.
-- Auth/proxy/rate-limit docs: `TRUST_PROXY`, forwarded host/proto, same-origin fail-closed, nginx public/nextimage/admin/login limits, and health/live endpoint docs match code/config.
-- Storage/upload/privacy: private-original path, legacy public-original production guard, LR upload contract, response shape, PAT route admission, GPS fail-closed policy, and privacy selector guards match current code, except for DOC-C19-05's helper comment wording.
-- CLIP activation: model path, offline weights, env opt-in, production/stub/disabled gates, `model_version` honesty, public same-origin/rate-limit posture, and scan/top-K route limits match current code, except for DOC-C19-01's backfill-loop completion condition.
-- i18n/privacy: EN/KO key parity, Korean plural convention, privacy-sensitive key guards, search-enrichment field guard, and public/admin selector split match current tests and code.
-- Historical docs under `docs/superpowers/` are clearly labeled as historical design/implementation records and point readers back to current CLAUDE/app README runbooks.
+Concrete fix: after Cycle 20 aggregation/deferred decisions, bump ages, add new open deferrals, remove closed rows, and update the check label from run-10 c19 to the current cycle.
 
 ## Manual-Validation Risks
 
-No new manual-validation-only mismatch was promoted. Static repo review still cannot prove live host deploy state, nginx/proxy application, CLIP weights, production DB mode, or runtime env. That risk is already documented in `.context/plans/cycle-18-2026-07-08-deferred.md:30` and remains the correct operator boundary: require deploy transcripts, health smokes, CLIP preflight, semantic/similar smoke when enabled, and proxy topology checks before making live-state claims.
+- Live deploy topology cannot be proven from repo files alone. The deploy/nginx docs match the checked-in scripts and config, but the actual host, reverse-proxy chain, certificate state, MySQL TLS CA, and CLIP sidecar weights require operator/live-host validation.
+- Historical plans and reviews were inventoried and searched for current-risk signals. I treated files clearly framed as historical records as provenance, not current runbooks, unless the current index or active docs point at them.
+- The CLIP historical design docs under `docs/superpowers/` explicitly identify themselves as historical and point operators to `CLAUDE.md` / `apps/web/README.md` for current operation, so I did not classify their older implementation details as active mismatches.
+- The existing concurrent peer review file modifications were not inspected as finalized cycle artifacts and were not changed.
+
+## Validated Matches
+
+- Root and app README quality-gate commands match the package scripts: lint, auth-origin/rate-limit lints, typecheck, build, Vitest, and Playwright e2e.
+- Deploy docs match `scripts/deploy-remote.sh` and `apps/web/deploy.sh`: root `npm run deploy`, env-file precedence, SSH-derived remote command, runtime `.env.local`, and post-`up -d` Docker pruning.
+- Docker build/runtime environment wiring matches current compose/Dockerfile behavior: `BASE_URL`, `IMAGE_BASE_URL`, `UPLOAD_MAX_TOTAL_BYTES`, and `NEXT_UPLOAD_BODY_MAX_BYTES` are build args; `.env.local` is the runtime env file.
+- Nginx upload/body limits match the documented topology: default small bodies, special admin DB/restore and Lightroom upload limits, and no broad `/api/admin/` large-body opening.
+- Migration docs match current `migrate.js` behavior: journal whens must be monotonic, reconcile baseline mirrors schema state, DML guards run before baseline/migrate, and hash postconditions fail deploy on silently skipped journal entries.
+- CLIP semantic runbook defaults match current source after the recent cycle work: disabled/stub/production modes, scan/top-k bounds, sidecar model root handling, and repeat-until-empty guidance.
+- Image upload limit docs match `upload-limits.ts`, `next.config.ts`, and Docker build args for the app-level total and Next body-size ceiling.
+- Privacy-sensitive select guard docs match the current code/test pattern: admin-only fields remain omitted from public data surfaces and covered by the symmetric privacy fixture.
 
 ## Final Sweep
 
-Examined categories: README/app README/CLAUDE/AGENTS, `.context` plans/deferred/aggregate/current plans, docs/runbooks, package scripts, deploy helpers, migrations/journal/reconcile, lint gates, auth/origin/rate-limit/proxy, CLIP semantic search activation/backfill, storage/upload/image pipeline, public/admin routes, i18n/privacy tests, and contract-heavy comments.
+Commonly missed doc-risk areas checked:
 
-Skipped categories: live production state, secrets, runtime data/uploads, binary screenshots/assets, build artifacts, `node_modules`, and unrelated historical archives not referenced by current docs.
+- stale feature claims in top-level and app READMEs
+- wrong package scripts or workspace names
+- deploy command/env precedence drift
+- Docker/nginx body-limit mismatches
+- migration/journal/runbook drift
+- runtime env defaults and fail-closed behavior
+- CLIP semantic-search activation and backfill instructions
+- source comments that serve as concurrency/security contracts
+- context-plan provenance and cycle-number ambiguity
+- generated/public artifacts whose source templates are documented
+
+Findings are limited to the confirmed and likely issues above. No destructive or unsafe operation was performed.
