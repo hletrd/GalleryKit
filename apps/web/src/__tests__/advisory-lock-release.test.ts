@@ -81,4 +81,32 @@ describe('pooled advisory-lock release helper', () => {
         expect(conn.release).toHaveBeenCalledTimes(1);
         expect(conn.destroy).not.toHaveBeenCalled();
     });
+
+    // AGG8b-27 / TEST8-07 (run-10 c8b): the staged releaser's PARTIAL-failure
+    // path — a failed lock-A release must not skip lock B's best-effort
+    // attempt, the failure must stick across a later success, and finish()
+    // must destroy (never release) the connection exactly once.
+    it('staged partial failure: later locks still attempted, finish destroys', async () => {
+        const conn = makeConn();
+        const error = new Error('release of lock-a failed');
+        conn.query.mockRejectedValueOnce(error);
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const releaser = createPooledAdvisoryLockReleaser(conn);
+
+        await releaser.release('lock-a', 'first');
+        expect(releaser.releaseFailed).toBe(true);
+
+        await releaser.release('lock-b', 'second');
+        // Lock B's RELEASE_LOCK was still attempted after A failed…
+        expect(conn.query).toHaveBeenCalledTimes(2);
+        expect(conn.query).toHaveBeenNthCalledWith(2, 'SELECT RELEASE_LOCK(?)', ['lock-b']);
+        // …and B's success does not clear the sticky failure flag.
+        expect(releaser.releaseFailed).toBe(true);
+
+        releaser.finish();
+        expect(conn.destroy).toHaveBeenCalledTimes(1);
+        expect(conn.release).not.toHaveBeenCalled();
+
+        errorSpy.mockRestore();
+    });
 });
