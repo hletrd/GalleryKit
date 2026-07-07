@@ -1,92 +1,92 @@
-# Multi-Perspective Critic Review — 2026-07-07
+# Critic Review - Run-10 Cycle 5 Prompt 1
 
-Reviewer: critic (correctness, product coherence, operator risk, attacker surface, future
-maintainer, reviewer-of-reviews). Repo `/Users/hletrd/flash-shared/gallery`, main app `apps/web`.
-HEAD reviewed: `642c5091` (== `origin/master`, clean tree except untracked review dirs).
-Mode: read-only, static. No source modified. Findings validated from code, not from CLAUDE.md/comments.
+Reviewer: critic lane. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `591b44bd`.
+Mode: read-only static review except this artifact. Source files were not modified.
 
-## Method / where I deliberately looked
+## Inventory
 
-The run-10 cycle-1 aggregate (`cycle-1-2026-07-06/_aggregate.md`, findings C1-01..C1-36) was
-essentially all CLOSED by the commit run `7e401f3d`..`642c5091` (rate-limit fast path, restore
-mutation-barrier + dump-completeness, claim-exhaustion, topic temp-file age gate, lean count,
-a11y, route gaps, import-cycle extract, drizzle-kit repin, nginx XFF doc). Those fixes are the
-freshest, least-reviewed code in the repo, so I audited **the fixes themselves** and then swept
-surfaces the 100-cycle history under-covers (sitemap, map, feed, page-vs-route rate-limit
-boundary). I deliberately did NOT re-file known/deferred items (embeddings single-version PK,
-COUNT-OVER already fixed, the general test-ossification claim — see CRIT-05 for the fresh instance).
+Review-relevant change surface was built from `git diff --name-only HEAD~10..HEAD`, current plans, and cross-file callers/tests. Generated/build outputs, `node_modules`, `.next`, and runtime uploads were excluded.
 
-## Findings
+Primary changed files examined:
+- `.context/plans/README.md`
+- `.context/plans/cycle-3-2026-07-07-plan.md`
+- `.context/plans/cycle-4-2026-07-07-plan.md`
+- `.context/plans/cycle-4-2026-07-07-deferred.md`
+- `.context/plans/deferred-carry-forward.md`
+- `.gitignore`
+- `CLAUDE.md`
+- `apps/web/README.md`
+- `apps/web/e2e/hydration-photo-page.spec.ts`
+- `apps/web/src/__tests__/image-queue-embedding-bootstrap-cap.test.ts`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/lib/image-queue.ts`
 
-| ID | Severity | Confidence | File:line | Title |
-|----|----------|-----------|-----------|-------|
-| CRIT-01 | Medium | High | `apps/web/nginx/default.conf:201`; all `(public)/**/page.tsx` | Public SSR pages have zero rate limiting at any layer; the `revalidate=0` DB surface is unthrottled |
-| CRIT-02 | Low | High | `apps/web/src/app/sitemap.ts:44-49,90-112` | Sitemap URL budget omits the feed + per-topic-feed rows, so at scale the file exceeds Google's 50,000-URL cap |
-| CRIT-03 | Medium (process) | High | `apps/web/scripts/check-public-route-rate-limit.ts` | Rate-limit lint gate cannot see `page.tsx`, so protection accretes on cheap API routes while the costly SSR surface (CRIT-01) stays invisible to the loop |
-| CRIT-04 | Low | High | `apps/web/src/app/[locale]/admin/db-actions.ts:530-597`; `admin-mutation-barrier.ts` | Restore drains foreground mutations by holding the slot through post-DB file cleanup — a slow bulk-delete on NAS makes restore abort after 30s with no corruption risk left |
-| CRIT-05 | Low | High | commit `642c5091`; `apps/web/src/app/api/health/route.ts:8,37` | Scanner-ossification made concrete: a production comment was reworded (`orchestrator's`->`orchestrator`) to dodge a regex-scanner bug |
+Cross-file interaction files examined:
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/e2e/swipe-visual-reset.spec.ts`
+- `apps/web/e2e/public.spec.ts`
+- `apps/web/src/lib/clip-embeddings.ts`
+- `apps/web/src/instrumentation.ts`
+- relevant `image-queue` tests and source-contract pins located with `rg`
 
----
+## Confirmed Issues
 
-### CRIT-01 — Public SSR pages have no rate limiting at any layer; the loop hardened the cheap API surface and left the expensive page surface open
-- Severity: Medium. Confidence: High. Perspective: operator / attacker. Classification: DoS surface / false-sense-of-coverage.
-- Evidence:
-  - `apps/web/nginx/default.conf`: `limit_req_zone` defines only `login` (10 r/m) and `admin` (30 r/m). Every `limit_req` directive sits inside an `admin`/login `location`. The catch-all `location / { proxy_pass http://nextjs; }` (`:201`) has **no** `limit_req`.
-  - `apps/web/src/proxy.ts` (Next middleware) does i18n routing + admin-cookie auth only — `grep -n 'rate|limit|preIncrement|429'` returns a single unrelated comment. No page-level limiter.
-  - The app-layer limiters (`@/lib/rate-limit`, `auth-rate-limit`) and the `check-public-route-rate-limit` gate cover **API routes and server actions** only. Public *pages* — `/`, `/[topic]`, `/p/[id]`, `/map`, `/timeline`, `/year/[year]`, `/c/[slug]` — are RSCs (not routes/actions), each `revalidate = 0` (live DB per hit, per CLAUDE.md "Public route freshness").
-  - Each hit fires multiple live queries: homepage runs `getImagesLitePage` + parallel `getImageCount` + `getTopics` + `getSeoSettings`; `/map` runs `getMapImages` (up to `MAP_MAX_MARKERS = 10000` rows, `data.ts:1714`) shipping a ~MB payload.
-- Why it matters: The single MySQL writer (10-conn pool) is the documented bottleneck, and C1-07 was scheduled precisely because crawler/burst load on these dynamic pages is a real cost. C1-07 only made each query *cheaper* — it did not throttle requests. A single IP can sweep home + every topic + every photo id + `/map` + `/timeline` in a tight loop with **no 429 anywhere**, pinning pool connections behind SSR latency during the very burst the rate-limit machinery is meant to blunt. The per-IP limiter suite + the lint gate create a reasonable-but-false impression that "public surfaces are rate-limited"; the biggest surface is the exception.
-- Failure scenario: A scraper (or an actor who read this CLAUDE.md, which advertises `revalidate = 0` on all gallery pages) hammers `/map` and `/` from one IP; each `/map` hit runs the 10k-row GPS query; interactive admin/API requests queue behind pool holds. No app or nginx layer sheds it; only an operator-supplied CDN/WAF would.
-- Suggested fix: (a) add a coarse `limit_req zone=public` to nginx `location /` in the shipped config (burst-tolerant so real users are unaffected, single-IP flood capped), or (b) rate-limit public GET pages at the Next middleware, or at minimum (c) document in CLAUDE.md's Security section that SSR pages are intentionally **unthrottled at the app layer** and need an operator CDN/WAF — so the gap is a stated boundary, not implied-covered. This is the honest counterpart to C1-01/C1-07.
-- Caveat: partly an operator-boundary decision for a personal gallery. The finding is the *mismatch* between advertised protection and the unprotected largest surface, not a demand that a personal gallery ship a WAF.
+### CRIT-C5-01 - Embedding bootstrap can exceed the configured scan cap for non-multiple limits
 
-### CRIT-02 — Sitemap URL budget reserves for homepage + topics but not for the feed / per-topic-feed rows, so a large gallery emits a sitemap over Google's 50,000-URL limit
-- Severity: Low. Confidence: High. Perspective: end-user (SEO) / maintainer. Classification: off-by-budget / spec-contract drift.
-- Evidence (`apps/web/src/app/sitemap.ts`):
-  - `MAX_SITEMAP_URLS = 50000` (`:22`), `LOCALES.length = 2` (`constants.ts:2`).
-  - `reservedLocalizedUrls = LOCALES.length * (1 + topics.length)` (`:44`) reserves only homepage (`2`) + topic pages (`2*T`). `imageBudget = floor((50000 - reserved) / 2)` (`:45-48`); `getImageIdsForSitemap(imageBudget)` returns up to `imageBudget` images (`data.ts:1692`, `.limit(safeLimit)` fills it), each emitting `2` URLs.
-  - The final array (`:114-120`) THEN appends `feedEntry` (**1** URL, `:90`) and `topicFeedEntries` (**2*T** URLs, `:103`), never subtracted from the budget.
-  - When images fill the budget: `total ~= 50000 + 1 + 2*T`. With ~50 topics that is ~101 URLs over the 50,000 cap.
-- Why it matters: A single `sitemap.ts` returning `> 50000` entries is one oversized file (Next does not auto-split without `generateSitemaps`). Google processes the first 50,000 and reports the remainder as an error in Search Console; the lowest-priority (oldest) image URLs at the tail silently fall off the index. The code's own comment ("Google recommends max 50,000 URLs per sitemap file") states the exact contract it violates at scale.
-- Failure scenario: A prolific gallery crosses ~25k processed images with a few dozen topics; the sitemap quietly ships ~50,100 URLs; Search Console flags "URLs exceed limit"; tail images stop getting crawled.
-- Suggested fix: Fold the feed rows into the reservation: `reservedLocalizedUrls = LOCALES.length * (1 + topics.length + topics.length) + 1` (homepage + topic page + topic feed per locale, plus the single root feed), or clamp the final array to `MAX_SITEMAP_URLS`. Cheap, deterministic.
+- Severity: Medium
+- Confidence: High
+- File/region: `apps/web/src/lib/image-queue.ts:569-595`; test gap at `apps/web/src/__tests__/image-queue-embedding-bootstrap-cap.test.ts:161-179`
+- Classification: product invariant drift / off-by-budget
 
-### CRIT-03 — The rate-limit lint gate is blind to `page.tsx`, which is exactly why protection keeps landing on cheap routes and never on the expensive SSR pages (reviewer-of-reviews)
-- Severity: Medium (process). Confidence: High. Classification: guardrail shape drives where fixes go.
-- Evidence:
-  - `check-public-route-rate-limit.ts` scans `apps/web/src/app/api/**` route files (and public `route.*` handlers). It does not — and by design cannot easily — scan RSC `page.tsx` modules, which export no HTTP method to hook.
-  - Ledger consequence: cycle-97 (`6f40f66d`) ADDED `preIncrementFeedAttempt` to both `feed.xml` routes and REMOVED their `@public-no-rate-limit-required` exemption — the loop diligently rate-limited an Atom feed already capped at `FEED_LIMIT = 50` and CDN-cacheable (`s-maxage=1800`), the *cheapest* public read. The uncacheable, multi-query, up-to-10k-row SSR pages (CRIT-01) were never touched, because the gate never points at them.
-- Why it matters: This is the mechanism behind CRIT-01. A source-shaped gate does not just add edit friction (last cycle's ARCH-04/CRIT-04) — it *steers the loop's attention* to the files it can parse. After ~100 cycles the API-route surface is exhaustively limited and the page surface has zero — not because pages are cheaper (they are far more expensive) but because they are invisible to the tool that defines "done." "All public routes rate-limited" is being read as "public surface protected."
-- Suggested fix: Extend the gate's scope to public `page.tsx` under `(public)/` — flag any `revalidate = 0` page whose module reaches a DB / `getMapImages` / `getImages*` helper and require an explicit `@public-page-no-rate-limit: <reason>` acknowledgement, mirroring the route exemption. At minimum, schedule CRIT-01 so the ledger stops implying pages are covered.
+`bootstrapMissingActiveEmbeddings` checks `if (scanned >= SEMANTIC_SCAN_LIMIT)` before issuing the next query, but the query always uses `.limit(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE)` where the batch size is 50. After the fetch, `scanned += rows.length`. This respects the cap only when `SEMANTIC_SCAN_LIMIT` is a multiple of 50. `SEMANTIC_SCAN_LIMIT` is env-tunable with arbitrary positive integer values in `apps/web/src/lib/clip-embeddings.ts:37-44`, so values such as `51`, `75`, or `101` are valid. A static arithmetic check shows the current loop scans 100 rows for limit 75 and 150 rows for limit 101.
 
-### CRIT-04 — Restore's foreground-mutation drain is conservative to the point of aborting restores that carry no corruption risk
-- Severity: Low. Confidence: High (barrier logic is otherwise correct). Perspective: operator. Classification: availability tradeoff / over-broad fence.
-- Evidence: `acquireAdminMutationSlot()` (`admin-mutation-barrier.ts:76`) is held for the WHOLE action body via `using`. In `deleteImages` (`images.ts:772`) the slot spans the DB transaction AND the post-commit on-disk derivative cleanup (`IMAGE_CLEANUP_CONCURRENCY`, up to thousands of files, latency-bound on NAS). `drainAdminMutationsForRestore()` (`db-actions.ts:544`) waits `ADMIN_MUTATION_DRAIN_TIMEOUT_MS = 30_000` for `inFlight` to hit 0, then the restore ABORTS (`:545-548`).
-- Why it matters: The corruption hazard the barrier prevents ends the instant the delete's DB transaction commits — everything after is pure filesystem I/O on files the restore does not touch (restore is SQL-only; CLAUDE.md is explicit it does not roll back `public/uploads`). But the slot stays held through that I/O, so a large delete on slow storage forces a spurious 30-second restore abort. On a busy admin this reads as a flaky restore (`restoreFailed`) with no correctness reason. Safe (abort > corrupt, as designed) but an availability papercut.
-- Suggested fix: Dispose the mutation slot at the DB-commit boundary for the delete paths (release explicitly once the transaction resolves, before the file-cleanup loop) rather than at function scope. Keeps the fence tight to the actual hazard.
-- Validated SAFE (so the next reviewer need not re-derive): the barrier's release discipline is otherwise correct — `drainAdminMutationsForRestore` sets `exclusiveActive` only on paths that reach the inner `try` whose `finally` (`db-actions.ts:563`) unconditionally calls `releaseAdminMutationExclusive()`; the earlier lock/maintenance early-returns never call drain, so no path sets the exclusive flag without clearing it (no process-wide mutation-wedge). Restore's contract-lock-first ordering (timeout-0 `acquireUploadProcessingContractLock` at `:442`) also means an in-flight *upload* fails the restore fast rather than causing a 30s drain-abort.
+Concrete failure scenario: an operator lowers `SEMANTIC_SCAN_LIMIT=75` to reduce startup/background DB and CLIP pressure. The missing-embedding bootstrap still scans two full 50-row batches before noticing the cap, exceeding the requested work budget by 25 rows. With `SEMANTIC_SCAN_LIMIT=1`, it scans 50 rows. The log also reports the exceeded number, e.g. `embedding bootstrap reached scan cap (100)`, which obscures that the configured cap was 75.
 
-### CRIT-05 — Fresh, dated instance of scanner ossification: a production comment was reworded to satisfy a regex, not a reader
-- Severity: Low. Confidence: High. Classification: test/scanner-architecture tax (reinforces last cycle's ARCH-04 / CRIT-04 with a concrete new datapoint).
-- Evidence: commit `642c5091` ("stop scanner string-stripping from crossing newlines") fixed a real bug in `check-public-route-rate-limit.ts` (single/double-quote strip regexes now stop at `\n`), AND in the same commit changed `api/health/route.ts` comments `orchestrator's` -> `orchestrator` (`:8`, `:37`) so an apostrophe inside a comment could not pair with a later string quote and mis-scan the file. It also shuffled a helper in `image-queue.ts` purely to appease import-order.
-- Why it matters: The ossification thesis made literal — the codebase now edits English prose in production files to keep a source-text regex happy. Each accommodation is invisible debt: a future comment with an apostrophe re-triggers the class, and the reflex is another prose edit rather than trusting a parser. It confirms the loop is spending real commits on the scanner's fragility.
-- Suggested fix: The scanner already has AST access (`bodyContainsExpensiveGetWork`) — tokenize string literals rather than regex-stripping them; then comments are never confused with strings and no production prose bends around it. Same direction as last cycle's ARCH-04.
+Suggested fix: calculate the remaining budget before the query and use it in the query limit:
 
----
+```ts
+const remaining = SEMANTIC_SCAN_LIMIT - scanned;
+if (remaining <= 0) { ... }
+const batchLimit = Math.min(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE, remaining);
+...
+.limit(batchLimit);
+```
 
-## Validated SAFE (so the next reviewer does not re-derive)
+Add a regression case with `scanLimit: 75` and three 50-row batches; assert the mocked limit receives `50` then `25`, or at least that only 75 rows are consumed and the cursor lands on id 75.
 
-- **C1-07 lean-count fix (`data.ts:885-920`, `1482-1513`) is correct.** `getImageCount` and `getImagesLitePage` both build the tag filter via the shared `buildTagFilterCondition` (`data.ts:619`) — an `IN(subquery)` with `HAVING COUNT(DISTINCT tags.slug) = validTagSlugs.length` (AND semantics). The page query filters via that same subquery in the WHERE (the LEFT JOIN is only for `tag_names` aggregation), and `GROUP BY images.id` collapses to distinct images, so the parallel `count(*)` equals the retired `COUNT(*) OVER()` group count. Only residual: the two run as separate queries (not one snapshot), so the header total can lag the page by a row under concurrent writes — a harmless display race on header copy.
-- **C1-02 dump-completeness (`db-restore.ts`, `db-actions.ts`) is sound** — one latent operator trap: the completeness gate fires only when the header matches `-- MySQL dump` / `-- MariaDB dump`. A `mysqldump --compact` dump (no header, no trailer) bypasses it as "operator SQL." Acceptable, but worth a one-line doc note that `--compact` dumps get no truncation protection.
-- **Map privacy (`getMapImages`, `data.ts:1714-1731`)** is well-guarded: `INNER JOIN topics ON map_visible = true` + runtime `topic_map_visible` assertion + `MAP_MAX_MARKERS = 10000` cap + deterministic ORDER BY. No GPS leak, bounded payload.
-- **i18n parity for the new error keys** (`truncatedSqlDump`, `disallowedSql`, `invalidSqlDump`, `restoreInProgress`, `restoreFailed`) — present in BOTH `en.json` and `ko.json`.
-- **Masonry quantize (`home-client.tsx`, `7a2e3f92`)** uses the correct React bail-out idiom (`setViewportWidth(prev => prev === q ? prev : q)`); column count still derives from raw width, so breakpoints are unchanged.
+## Likely Issues
 
-## Files / areas examined
-- Recent fixes: `lib/admin-mutation-barrier.ts`, `lib/db-restore.ts`, `app/[locale]/admin/db-actions.ts` (full), `app/actions/{images,tags,settings}.ts` (barrier wiring), `lib/data.ts` (`getImageCount`, `getImagesLitePage`, `getImagesForSmartCollection`, `buildTagFilterCondition`, `getImageIdsForSitemap`, `getMapImages`), `components/home-client.tsx`, `api/health/route.ts`, `scripts/check-public-route-rate-limit.ts`.
-- Under-reviewed surfaces: `app/sitemap.ts`, `app/[locale]/(public)/map/page.tsx`, `app/[locale]/(public)/[topic]/feed.xml/route.ts` + `app/feed.xml/route.ts`, `nginx/default.conf`, `proxy.ts`.
-- Process: `.context/reviews/_aggregate.md`, `cycle-1-2026-07-06/{_aggregate,critic,architect,code-reviewer}.md`, `git log --stat -20`, i18n key checks.
-- Deliberately skipped (owned/known): Dockerfile workspace-nested `node_modules` build failure (excluded by task); color/HDR encoder matrix + migration-drift runbook (stable, exhaustively covered); `image_embeddings` single-version PK (deferred C94-10); general source-shape test brittleness (last cycle CRIT-04/ARCH-04 — CRIT-05 here is only the fresh concrete instance).
+None filed. The shared-group shallow URL sync (`photo-viewer.tsx:337-352` plus `g/[key]/page.tsx:199-209`) and swipe-settle reset (`photo-navigation.tsx:119-132,204-221`) are coherent with the surrounding e2e coverage. I did not find a source-level contradiction in those paths.
 
-## Caveats
-- Static review only: no build/lint/typecheck/test/e2e run; no live DB. CRIT-02's overflow is arithmetic-certain but only reachable at ~25k images; CRIT-01's severity depends on deployment (CDN/WAF presence) the repo cannot observe. CRIT-04 is a safe-by-design tradeoff, filed as an availability papercut, not a correctness bug.
+## Manual-Validation Risks
+
+### RISK-C5-01 - Cycle-4 release evidence remains incomplete in the plan artifact
+
+- Severity: Medium evidence risk
+- Confidence: High that the artifact is incomplete; Low on whether deployment actually failed or simply was not recorded
+- File/region: `.context/plans/cycle-4-2026-07-07-plan.md:213-239`; project policy in `AGENTS.md`/`CLAUDE.md` per-iteration deploy rules
+
+The cycle-4 plan marks post-deploy checks unchecked and says `DEPLOY: pending for the current docs-artifact head`. It also records that local Playwright e2e remained infrastructure-blocked and production-target e2e was fixture-dependent, not release evidence. The project policy requires deploy after each pushed iteration, but this artifact does not prove the final cycle-4 head was deployed or smoke-checked. This is an evidence gap, not a confirmed product defect.
+
+Suggested fix: Prompt 2 should either schedule a small docs/evidence reconciliation task or carry an explicit manual-validation item: confirm current deployed SHA, `/api/live`, `/en`, and fresh-slug 404 against the deploy target, then update the plan ledger.
+
+### RISK-C5-02 - Scheduled-next maintenance-scheduler extraction is still only a carry-forward row
+
+- Severity: Low-Medium architecture risk
+- Confidence: High
+- File/region: `.context/plans/cycle-4-2026-07-07-deferred.md:62-74`; `.context/plans/deferred-carry-forward.md:98-100`
+
+The cycle-4 deferred register marks C4-17 as `SCHEDULED-NEXT`: retention sweeps are still parasitic on `image-queue.ts` bootstrap and should be extracted into an `instrumentation.ts`-owned maintenance scheduler. Prompt 1 should not implement it, but Prompt 2 should preserve this row as a planned cycle-5 work package or explicitly re-justify why the scheduled-next handoff is not being honored.
+
+## Final Sweep
+
+Commonly missed issue classes checked:
+- Off-by-budget / cap enforcement: found CRIT-C5-01.
+- Model-version flip / cursor reset: code resets `embeddingScanCursorId` and tracks `embeddingScanModelVersion`; test covers stub-to-production flip.
+- Process-local state honesty: cycle-4 register records durable cursor/per-row failure marking as deferred C4-09d.
+- Shared-group limiter burn: code uses `window.history.replaceState` for in-place sync and `prefetch={false}` on shared-grid tile links; e2e covers repeated stepping without viewer replacement.
+- Swipe stale visual reset: success branches set animated reset plus one-shot skip; layout effect reasserts hard reset on later id changes; e2e covers swipe and chevron.
+- Documentation/plans contradictions: no false "closed" source claim found, but cycle-4 deploy/e2e evidence remains a manual-validation gap.
+
+No additional confirmed issues were found in the examined file groups.

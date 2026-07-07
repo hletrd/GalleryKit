@@ -1,66 +1,95 @@
-# GalleryKit — Evidence-Based Documentation Verification (2026-07-07)
+# Verifier Review - Run-10 Cycle 5 Prompt 1
 
-## Scope and method
+Reviewer: verifier lane. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `591b44bd`.
+Mode: read-only verification except this artifact. I did not run build/test/e2e because the lane was constrained to review-artifact writes only; validation here is static evidence plus `git diff --check HEAD~10..HEAD` (clean).
 
-This is a claim-by-claim audit of the precise behavioral assertions in `/Users/hletrd/flash-shared/gallery/CLAUDE.md` and `apps/web/README.md` against the current source tree in `apps/web`. Six read-only research passes were run (five parallel clusters + one follow-up covering claims the first five didn't reach), plus direct spot-checks of `apps/web/src/lib/session.ts`, `apps/web/src/lib/settings-hash.ts`, `apps/web/src/lib/process-image.ts` (and both call sites of `stripGpsFromOriginal`), and `apps/web/src/components/lightbox-color-pip.tsx` to independently corroborate agent-reported evidence and to check a prior review's finding for regression, rather than take reports at face value. No source was modified. `npm test`/lint scripts were run read-only where agents needed to confirm a script's live behavior (`lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, the touch-target audit, and the three lint-gate fixture suites all currently pass).
+## Inventory
 
-Claim clusters covered: ETag/cache/settings-hash/service-worker; MySQL advisory locks and race-condition protections; auth/password/session/rate-limit/privacy-field/CSV/OG-sanitization/bidi-validation security surfaces; touch-target audit + lint gates + migration runbook; backfill column-set parity + concurrency formulas + view-retention + CLIP inference queue; and a final sweep of OG SSRF hardening, restore-maintenance durability, admin-delete lock, i18n key-parity scope, per-process vs DB-backed rate-limit topology, upload body-size arithmetic, health-check endpoints, and nginx XFF handling.
+I built the inventory before checking claims by combining:
+- `git diff --name-only HEAD~10..HEAD`
+- current cycle-4 plan/deferred ledgers
+- `rg` over callers/tests for `bootstrapMissingActiveEmbeddings`, `embeddingScanCursorId`, `syncPhotoQueryBasePath`, `PhotoNavigation`, `photoId`, `SHARE_MAX_REQUESTS`, and `SEMANTIC_SCAN_LIMIT`
 
-A prior verifier pass (`.context/reviews/` cycle 32, dated 2026-06-30, HEAD `3d174c96`) found one real MEDIUM issue: `lightbox-color-pip.tsx` computed and rendered `transfer_function` in the collapsed pip's aria-label/visible text without gating on `isAdmin`. I re-checked that file at current HEAD as a regression check (not a fresh discovery): **it is fixed.** `transfer` is now computed as `isAdmin ? humanizeTransferFunction(image.transfer_function, t) : null` (`lightbox-color-pip.tsx:66`), and the collapsed-pip render (`:187`) and aria-label builder (`:174`) both consume that already-gated value, so a `null` never renders. The fix carries a `C14-02` comment referencing the same convention. No regression found.
+Files examined from the verifier angle:
+- `AGENTS.md` instructions supplied in the prompt
+- `CLAUDE.md`
+- `.context/plans/README.md`
+- `.context/plans/cycle-4-2026-07-07-plan.md`
+- `.context/plans/cycle-4-2026-07-07-deferred.md`
+- `.context/plans/deferred-carry-forward.md`
+- `apps/web/README.md`
+- `apps/web/src/lib/image-queue.ts`
+- `apps/web/src/lib/clip-embeddings.ts`
+- `apps/web/src/__tests__/image-queue-embedding-bootstrap-cap.test.ts`
+- `apps/web/src/components/photo-viewer.tsx`
+- `apps/web/src/components/photo-navigation.tsx`
+- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx`
+- `apps/web/e2e/swipe-visual-reset.spec.ts`
+- `apps/web/e2e/public.spec.ts`
+- `apps/web/e2e/hydration-photo-page.spec.ts`
+- source/test references located by `rg` for image-queue side effects, queue shutdown, semantic scan limits, and shared-group navigation
 
-**Bottom line: the documentation is unusually accurate.** Of roughly 60 discrete, checkable claims, essentially all were confirmed byte-for-byte against the live source (exact constants, exact regexes, exact SQL, exact call-site wiring). Only small wording-precision gaps surfaced — no claim was found to assert a security or data-integrity property that the code does not actually deliver. The findings below are documentation-precision issues, not code defects; none require a code fix, and none represent an exploitable divergence.
+## Confirmed Issues
 
----
+### VER-C5-01 - The missing-embedding bootstrap does not prove the stated scan-cap behavior for arbitrary valid limits
 
-## Findings (documentation precision gaps)
+- Severity: Medium
+- Confidence: High
+- File/region: `apps/web/src/lib/image-queue.ts:569-595`; tests at `apps/web/src/__tests__/image-queue-embedding-bootstrap-cap.test.ts:161-179,244-307`
+- Stated behavior being checked: the bootstrap retry is bounded by `SEMANTIC_SCAN_LIMIT` and "stops once SEMANTIC_SCAN_LIMIT rows have been scanned" (test comment at `image-queue-embedding-bootstrap-cap.test.ts:4-14` and code comment at `image-queue.ts:570-575`).
 
-### VER-01 — GPS-strip doc overstates re-encode coverage for anomalous HEIC/HEIF
-- **Severity:** LOW (no security/privacy impact — verified fail-closed) **Confidence:** High
-- **Claim:** CLAUDE.md, Privacy section: *"`strip_gps_on_upload` additionally scrubs the on-disk ORIGINAL... PNG and structurally anomalous files take a metadata-free re-encode (autoOrient + keepIccProfile, explicit high-quality settings)."*
-- **Code evidence:** `apps/web/src/lib/process-image.ts:1802-1808` — when the lossless ISOBMFF scrubber reports a structural anomaly on a `.heic`/`.heif` file, the function does **not** re-encode (Sharp's bundled build has no HEVC encoder); it logs `console.error(...)` and `return false` instead. Both call sites correctly treat `false` as "must reject": `apps/web/src/app/actions/images.ts:415-422` deletes the just-saved original and pushes the file into `failedFiles`; `apps/web/src/app/api/admin/lr/upload/route.ts:416-424` deletes the original and returns HTTP 422. I traced both call sites directly and confirmed neither path allows the upload to complete with GPS intact.
-- **Actual behavior vs. doc:** For anomalous HEIC/HEIF specifically, the system does not "take a re-encode" — it rejects the upload and deletes the original outright. The outcome is safe (fails closed, no GPS persisted, nothing silently retained), but the mechanism differs from what the sentence describes for that one format branch. The identical fallback branch for any other unrecognized extension (`process-image.ts:1809-1811`) behaves the same way and is also not "a re-encode."
-- **Suggested fix:** Reword the CLAUDE.md sentence to something like: *"PNG and most structurally anomalous formats (JPEG/WebP/TIFF/AVIF) take a metadata-free re-encode; anomalous HEIC/HEIF and any unrecognized extension instead fail closed — `stripGpsFromOriginal` returns `false`, and both upload paths delete the original and reject the upload rather than persisting it."* Doc-only change.
+Evidence: `BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE` is 50 (`image-queue.ts:112`). The loop checks `scanned >= SEMANTIC_SCAN_LIMIT` before the query, but the query then always fetches up to 50 rows (`image-queue.ts:573-593`) and only afterwards increments `scanned` (`image-queue.ts:595`). The tests set `scanLimit: 100`, exactly two 50-row batches, so they do not exercise a non-multiple cap. `SEMANTIC_SCAN_LIMIT` is parsed from env as any positive integer up to 25,000 (`clip-embeddings.ts:37-44`), so non-multiple values are valid.
 
-### VER-02 — Bidi-validation claim names a function that isn't the actual call-site entry point
-- **Severity:** LOW (cosmetic) **Confidence:** High
-- **Claim:** CLAUDE.md, Database Security section: *"...reject Unicode bidi overrides... at the validation layer (`UNICODE_FORMAT_CHARS` / `containsUnicodeFormatting` in `apps/web/src/lib/validation.ts`)."*
-- **Code evidence:** `validation.ts` does define `UNICODE_FORMAT_CHARS` and `containsUnicodeFormatting`, but no mutation call site for the nine listed fields (`topic.alias`, `tag.name`, `topic.label`, `image.title`, `image.description`, `seo_title`, `seo_description`, `seo_nav_title`, `seo_author`) invokes `containsUnicodeFormatting` directly. All nine route through one of two thin wrappers in `apps/web/src/lib/sanitize.ts` (`requireCleanInput` or `sanitizeAdminString`), both built on the same `UNICODE_FORMAT_CHARS` regex constant. The security property holds (all nine fields are protected), but the specific function name in the doc is never the literal call site.
-- **Suggested fix:** Reword to name `requireCleanInput`/`sanitizeAdminString` in `sanitize.ts` as the actual enforcement points, built on the shared `UNICODE_FORMAT_CHARS` regex from `validation.ts`. Doc-only change.
+Concrete failure scenario: with `SEMANTIC_SCAN_LIMIT=75` and many missing embeddings, the bootstrap scans two 50-row batches and logs the cap at 100. With `SEMANTIC_SCAN_LIMIT=1`, it scans 50 rows. That violates the cap as an operator budget. The semantic/similar route cap may still be correct; this finding is limited to `bootstrapMissingActiveEmbeddings`.
 
-### VER-03 — Delete-during-reencode doc undersells actual robustness (informational only)
-- **Severity:** INFORMATIONAL **Confidence:** Medium
-- **Claim:** CLAUDE.md: *"every UPDATE checks `affectedRows`, and on `0`... they clean up the just-written derivative files."*
-- **Code evidence:** Both `apps/web/src/lib/admin-backfill-runner.ts` and `apps/web/scripts/backfill-color-pipeline.ts` do check `affectedRows === 0`, but neither treats that alone as proof of deletion — both additionally run a follow-up row-existence probe first (in-app: `cleanupIfUpdateMissedDeletedRow`, with an explicit comment that `affectedRows` can be 0 for same-value updates on still-live rows; sidecar: an explicit `rowExists` check). This is not a divergence from the claimed *outcome* (0 → cleanup on genuine deletion), just a case where the code is more careful than the one-line description implies. No action needed; noting for completeness since the review was asked to distinguish confirmed-exactly-as-described from confirmed-but-under-described.
+Suggested fix: limit each query by remaining budget:
 
-### Trivial wording nits (not tracked as separate IDs — no action warranted)
-- `serve-upload.ts`'s ETag uses `${stats.mtimeMs.toFixed(0)}`; CLAUDE.md's inline formula shorthand writes `${mtimeMs}`. Same value, different shorthand.
-- The migration-runbook error string in `migrate.js` is `` `[Migration] Drizzle silently skipped ${n} migration(s): ${tags}. This usually means...` ``; CLAUDE.md quotes it without the `[Migration] ` prefix and trailing sentence. Same substance, paraphrased.
-- The fresh-upload path achieves the same 10-column parity as both backfill paths via an INSERT (8 columns) + a later UPDATE (adds `pipeline_version`, `was_downscaled`, `avif_10bit`) rather than one UPDATE like the backfill paths. CLAUDE.md never claims single-write atomicity — only column-set parity, which holds — so this isn't a discrepancy, just a fact worth knowing if the doc is tightened further.
+```ts
+const remainingScanBudget = SEMANTIC_SCAN_LIMIT - scanned;
+if (remainingScanBudget <= 0) {
+  state.embeddingScanCursorId = cursorId;
+  console.warn(...);
+  break;
+}
+const rows = await db.select(...).limit(Math.min(BOOTSTRAP_EMBEDDING_RETRY_BATCH_SIZE, remainingScanBudget));
+```
 
----
+Add a regression test using `scanLimit: 75` to prove the second query is limited to 25 rows and the cursor resumes after id 75, not 100.
 
-## Verified-true claims (representative sweep — not exhaustive)
+## Likely Issues
 
-**ETag / cache / settings-hash / service worker** — all confirmed exactly: `serve-upload.ts` ETag template `W/"v${IMAGE_PIPELINE_VERSION}-${mtimeMs}-${size}-${settingsHash}"` with `HASH_LENGTH = 8` and no re-slice at the call site (independently re-read the full `settings-hash.ts` myself); `COLOR_IMPACTING_KEYS` is exactly the claimed 9 keys (`gallery-config-shared.ts`); `image_sizes` sorts with `(a, b) => a - b` (numeric, not lexicographic); the `_ColorKeysAreSettingKeys` compile-time guard is a real conditional-type check; `Cache-Control: public, max-age=3600, must-revalidate` (no `immutable`) is identical across `serve-upload.ts`, `next.config.ts`, and `nginx/default.conf`; SW's 50 MB LRU cap, 300 ms `AbortSignal.timeout` HEAD-revalidation bound, `__SW_VERSION__` format, offline-only `networkFirstHtml` semantics (genuinely never serves cache when network succeeds), the route exclusion list, 24h/50-entry HTML cache bounds, and the `x-gk-admin-render: 1` header round-trip between `proxy.ts` and `sw.template.js` all check out; `sw-template-contract.test.ts` performs real content assertions via `vm.Script` execution against both the template and generated `sw.js`, not an existence stub.
+None confirmed beyond VER-C5-01. I specifically re-checked the current patches against their claimed behavior:
 
-**Advisory locks / race conditions** — `withTopicRouteMutationLock` genuinely wraps all four of `createTopic`/`updateTopic`/`deleteTopic`/`createTopicAlias`; the topic-slug-rename transaction re-points `images.topic`, `topicAliases.topicSlug`, `topic_views.topic`, and `smart_collections.query_json` (eq/in only, confirmed `contains`/range predicates fall through untouched) all before deleting the old row, in one transaction; upload-quota TOCTOU claim confirmed by enumerating every return/throw path between the synchronous claim and final settlement — all roll back via `settleUploadTrackerClaim(..., 0, 0)`; `gallerykit_db_restore` uses a dedicated pooled connection with `GET_LOCK`/`RELEASE_LOCK` plus close-based crash safety; per-image processing lock + `WHERE processed = false` conditional UPDATE + loser cleanup all present in `image-queue.ts`; `gallerykit_color_pipeline_backfill` / `gallerykit_semantic_embedding_backfill` names confirmed, sidecar waits via `GET_LOCK(?, 10)` vs in-app non-blocking `GET_LOCK(?, 0)` → `already_running`; all lock sites use raw `GET_LOCK`/`RELEASE_LOCK` SQL (not an ORM-level pseudo-lock), so the server-wide-scope claim is factually sound; `gallerykit_admin_delete` genuinely wraps the last-admin count-check and the delete inside one transaction while holding the lock, closing the two-concurrent-deletes-both-see-2-admins TOCTOU.
+- Hydration fix: `photo-viewer.tsx:111-125` renders deterministic `false` first, then restores persisted/desktop pin state post-mount. The e2e spec now navigates to `/` before locating a photo (`hydration-photo-page.spec.ts:29-34`), so the test setup is coherent.
+- Shared-group shallow stepping: `photo-viewer.tsx:337-352` updates only browser history when `syncPhotoQueryBasePath` is present, while `g/[key]/page.tsx:199-209` disables prefetch on shared-grid photo links. This matches the plan's limiter-burn fix shape.
+- Swipe visual reset: `photo-navigation.tsx:119-132,204-221` resets visuals on successful swipe and skips one hard reset to preserve the settle animation. `swipe-visual-reset.spec.ts:59-131` covers sub-threshold snap-back, threshold in-place navigation, chevron navigation, and repeated shallow stepping.
+- Model-version flip: `image-queue.ts:542-558` resets cursor when the active embedding model version changes; `image-queue-embedding-bootstrap-cap.test.ts:275-307` covers stub-to-production flip with the env gate enabled.
 
-**Auth / security / privacy** — Argon2id with `memoryCost=65536, timeCost=3, parallelism=4` exact match, pinned by its own policy test; session HMAC-SHA256 + `timingSafeEqual` confirmed directly by me in `session.ts` (no naive `===` anywhere in the verify path, structural checks deliberately run after the crypto compare); login rate limiting is genuinely two buckets (per-IP and `acct:<sha256-prefix>`) at 5/15-min each, backed by a real bounded Map with FIFO oldest-entry eviction (not silent-drop); `_PrivacySensitiveKeys` / `_SensitiveKeysInPublic` are real compile-time type-level guards, and `publicSelectFields` is built by destructuring-omission (the sensitive keys don't exist on the object at all, not merely set to `undefined`); GPS EXIF stripping covers the claimed JPEG/TIFF/HEIF-AVIF-HEIC/WebP lossless branches plus PNG re-encode (modulo VER-01 above); no `.withMetadata()` call exists anywhere in the codebase; CSV escaping strips the exact claimed C0/C1, bidi, and zero-width character ranges with leading-whitespace-tolerant formula-char escaping; `sanitizeForOg` has exactly the three claimed consumers, no more, no fewer; OG-route SSRF hardening pins the per-photo route's internal fetch and fallback redirects to the build-validated canonical origin, never `req.url`/`request.url`/host header, and fails closed on an unparseable canonical URL; the topic/home OG route has no internal derivative fetch at all; the previously-flagged (cycle 32) unconditional `transfer_function` exposure in the collapsed lightbox color pip is now fixed (`lightbox-color-pip.tsx:66`) — verified as a regression check, not a new finding.
+## Manual-Validation Risks
 
-**Touch-target audit / lint gates / migrations** — the 44×44 px audit's full regex surface (Button/button/Badge/select/Link/a coverage, the three independently-added `(?<!max-)` ceiling lookbehinds, multi-line tag normalization, `KNOWN_VIOLATIONS` default-0/stale-detector mechanism) is implemented exactly as described, confirmed by reading the actual regex patterns rather than trusting names; all three lint gates (`lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`) exist, are wired in `package.json`, currently pass live against the tree, and their fixture tests perform real scans (hundreds of assertions each) rather than stubs; `migrate.js`'s hash-based post-condition logic (`getAllJournalMigrations`, `prepareLegacyDatabaseIfNeeded`'s `every(hash present)` check, `reconcileLegacySchema` + `baselineAllJournalMigrations`, and `runMigrations`'s throw-on-missing-hash assertion) all trace to exact line-level logic; the journal's historical non-monotonic `when` values (2026 dates followed by 2025 dates at idx 6→7) are still literally present today — confirmed the "fix" is entirely in the hash-based tolerance logic, not a rewrite of the journal, which matches the doc's framing.
+### RISK-VER-C5-01 - Cycle-4 deploy and e2e release evidence is not proven by committed artifacts
 
-**Backfill / concurrency / retention** — both backfill entry points and the fresh-upload path persist the identical 10-column set; `resolveBackfillConcurrency`'s formula reproduces to exactly 2 at `POOL_CONNECTION_LIMIT=10` (arithmetic re-verified by hand: `reserved = max(3, ceil(10/2)) = 5`, `cap = max(1, floor((10-5-1)/2)) = 2`); the clamp-down warning log exists; sidecar `BACKFILL_CONCURRENCY` defaults to 2 and silently clamps (not rejects) values above 8; the detection-failure test genuinely exercises "successful re-encode, transient detection failure, `pipeline_version` left behind"; view-retention's 395-day default, chunked-delete-with-break, and negative/non-finite fallback guard are all present and match the audit-log sweep's identical guard pattern; `view-retention.test.ts` exercises the negative-value and non-finite-string fallback cases directly, not just the happy path; CLIP inference concurrency/pending/timeout defaults and caps match exactly, and abort-based waiter removal is real; the `semantic_search_mode` production-healing resolver genuinely checks the `SEMANTIC_SEARCH_ALLOW_PRODUCTION` env var and defaults closed.
+- Severity: Medium evidence gap
+- Confidence: High that evidence is missing from artifacts; unknown runtime state
+- File/region: `.context/plans/cycle-4-2026-07-07-plan.md:213-239`
 
-**Miscellaneous** — the restore-maintenance marker is a real filesystem-durable JSON file (mode 0600) re-synced at process boot via `instrumentation.ts`, and both upload actions and the queue worker check it at multiple gate points; the i18n key-parity test genuinely checks key-set equality only, never value/ICU-shape equality; OG/share/semantic rate limiters are genuinely in-memory-only (`BoundedMap`, no DB calls), while login/load-more/search/view-record all additionally call the DB-backed `incrementRateLimit`/`checkRateLimit` pair; `NEXT_UPLOAD_BODY_MAX_BYTES`'s default arithmetic (`250 MiB + 16 MiB = 278,921,216`) is exact; `/api/health` only probes the DB when `HEALTH_CHECK_DB=true`, and the Dockerfile's `HEALTHCHECK` targets `/api/live`, not `/api/health`; the shipped nginx config sets (overwrites) `X-Forwarded-For: $remote_addr` rather than appending, which is consistent with the documented `TRUSTED_PROXY_HOPS=1` guidance.
+The plan records all non-e2e gates green, but says Playwright e2e remained infrastructure-blocked in this lane and that deploy was pending for the docs-artifact head. `AGENTS.md`/`CLAUDE.md` require per-iteration deploys after pushed commits. I did not run deploy or e2e in this read-only lane. The next planning step should preserve this as a manual-validation item unless another artifact proves the final head was deployed and smoke-checked.
 
----
+### RISK-VER-C5-02 - C4-17 "SCHEDULED-NEXT" needs explicit Prompt 2 disposition
 
-## Summary table
+- Severity: Low-Medium process risk
+- Confidence: High
+- File/region: `.context/plans/cycle-4-2026-07-07-deferred.md:62-74`; `.context/plans/deferred-carry-forward.md:98-100`
 
-| ID | Severity | Confidence | File:line | Title |
-|---|---|---|---|---|
-| VER-01 | LOW | High | `apps/web/src/lib/process-image.ts:1802-1808` (call sites: `apps/web/src/app/actions/images.ts:415-422`, `apps/web/src/app/api/admin/lr/upload/route.ts:416-424`) | GPS-strip doc overstates re-encode coverage — anomalous HEIC/HEIF fails closed (upload rejected, original deleted) instead of re-encoding; behavior is safe, wording is imprecise |
-| VER-02 | LOW | High | `apps/web/src/lib/validation.ts` (defines) vs `apps/web/src/lib/sanitize.ts` (actual call sites) | Bidi-validation doc names `containsUnicodeFormatting` as the enforcement point; real call sites are `requireCleanInput`/`sanitizeAdminString` wrappers over the same regex |
-| VER-03 | INFORMATIONAL | Medium | `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts` | Delete-during-reencode doc undersells the code — both paths add a row-existence probe beyond the described `affectedRows === 0` check |
+The deferred register explicitly says the maintenance-scheduler extraction should be picked up in cycle 5. Prompt 1 should not implement it, but Prompt 2 should either schedule it or record a concrete re-justification. Silent carry-forward would contradict the register's own "SCHEDULED-NEXT" disposition.
 
-No CRIT/HIGH/MED findings. No confirmed security vulnerability, race condition, or data-loss divergence was found across ETag/cache invalidation, MySQL advisory-lock coverage, TOCTOU protections, rate limiting, privacy field guards, CSV/OG sanitization, bidi validation, touch-target audit coverage, the three architectural lint gates, the migration hash-based post-condition system, backfill column-set parity, concurrency-cap arithmetic, view-retention fallback guards, CLIP inference bounds, OG SSRF hardening, restore-maintenance durability, or the admin-delete last-admin lock. The two LOW findings (VER-01, VER-02) are wording-precision fixes to CLAUDE.md itself, not code changes; VER-03 is purely informational (the code is more defensive than described, not less). A regression check on the prior cycle's one confirmed MEDIUM finding (unconditional `transfer_function` exposure in the collapsed lightbox color pip) found it already fixed at current HEAD.
+## Final Sweep
+
+Evidence collected:
+- `git diff --check HEAD~10..HEAD` reported no whitespace errors.
+- Static arithmetic check of the bootstrap cap showed valid limits `1`, `49`, `51`, `75`, `99`, and `101` overshoot to the next 50-row multiple.
+- `rg` confirmed `SEMANTIC_SCAN_LIMIT` is env-tunable and used by routes/backfill/bootstrap; the confirmed issue applies only to the bootstrap loop's fixed query batch.
+- Shared-group and swipe-navigation claims were checked across component, route, and e2e files rather than from comments alone.
+- Plan/deferred files were checked for no-silent-drop shape and carry-forward linkage.
+
+File groups examined: cycle-4 plan/deferred ledgers, current plan index/carry-forward register, image-queue/CLIP embedding bootstrap source and tests, photo viewer/navigation components, shared-group page, shared-group/swipe/hydration e2e specs, README/CLAUDE operational claims relevant to deploy, CLIP, and per-cycle policy.
