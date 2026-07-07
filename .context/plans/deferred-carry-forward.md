@@ -104,6 +104,26 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C4-09d | MED/High | cycle-4-2026-07-07 | r10c4 | 0 | Real permanently-un-embeddable backlog ≥ SEMANTIC_SCAN_LIMIT in prod (durable cursor + per-row failure marking) |
 | SEC4-03 | LOW/Med | cycle-4-2026-07-07 | r10c4 | 0 | Storage-backend multi-writer/non-local (C2-27) OR threat model adds hostile-local-writer (O_NOFOLLOW/fd-realpath re-check) |
 | C4-46 | INFO/Low | cycle-4-2026-07-07 | r10c4 | 0 | Operator/agent FIND-failure incident on an existing runbook entry OR CLAUDE.md crosses ~1000 lines |
+| C6-05 | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | Measured admin bulk-apply latency OR DB-backed test infra (bulkUpdateImages CASE-UPDATE rewrite) |
+| C6-04c | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | Peer image-queue work lands + measured pool starvation, OR next image-queue cycle (shared pool-budget semaphore; doc half shipped c6 WP7) |
+| C6-06c | MED/Med | cycle-6-2026-07-07 | r10c6 | 0 | DB-TLS import-throw incident OR system-CA opt-in product/ops decision (doc-wording half shipped c6 WP7) |
+| C6-12 | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | Next restore-path cycle OR a reusable child_process spawn-mock harness (db-restore failure behavioral test) |
+| C6-17 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | A real over-strict `lint:action-origin` failure (check-action-origin clear-not-restore) |
+| C6-18 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Peer image-queue lands + new id-reuse trigger, OR next image-queue cycle (`processing_error` processed=false guard) |
+| C6-19 | LOW-MED/Med | cycle-6-2026-07-07 | r10c6 | 0 | AT/keyboard-user report OR next a11y batch (truncated-metadata title-only reveal; folds with C96-13) |
+| C6-20 | LOW/Low-Med | cycle-6-2026-07-07 | r10c6 | 0 | Collections authoring UI ships (chains C1-25(a)) → smart-collection compiled-cost ceiling |
+| C6-21 | LOW-MED/Med | cycle-6-2026-07-07 | r10c6 | 0 | Many-small-file / high-DB-latency perceived upload lag, OR next upload-flow perf cycle (client batching; sequential constraint is C4-10) |
+| C6-22 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Observed brute-force at restart-near-window-boundary, OR rate-limit algorithm unification |
+| C6-23 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Observed concurrent-migrate ER_DUP_KEYNAME/half-reconcile, OR migration-machinery hardening cycle |
+| C6-24 | LOW/High | cycle-6-2026-07-07 | r10c6 | 0 | Real duplicated-cache staleness bug, OR a config-cache refactor adopting one documented rule |
+| C6-25 | LOW-MED/High | cycle-6-2026-07-07 | r10c6 | 0 | Peer cycle-10 closes AGG-C10-19/20, else fold next docs cycle (`.omc/wiki` CLIP "LIVE" drift) |
+| C6-27 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 0 | Next bulk-edit cycle OR a maintainer trips on the `titlePrefix` exact-set naming |
+| C6-28 | MED/High | cycle-6-2026-07-07 | r10c6 | 0 | On-this-day made client-driven, OR a `TZ` operator-config note ships, OR a wrong-day report |
+
+Cycle-6 age-budget check (this loop): all 15 new rows are age 0 and MED-or-lower — no open
+High-severity carry-forward crosses the 8-cycle budget, and none crosses the 16-cycle MED
+checkpoint. Ages of pre-c6 rows above are unchanged here (the two concurrent loops share this
+register; each per-cycle `cycle-N-*-deferred.md` remains the authoritative detail record).
 
 ## Rows that left a register recently (for lineage continuity)
 
