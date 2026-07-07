@@ -28,7 +28,9 @@ verbatim by the orchestrator.)
 - document-specialist: env-var table, advisory-lock names, nginx caps, migration journal 30/30,
   CLIP thresholds — all match code (1 LOW wording nuance).
 
-Raw findings across lanes: ~24. Deduped below: 21 (20 open + 1 already closed by a peer commit).
+Raw findings across lanes: ~26. Deduped below: 23 (22 open + 1 already closed by a peer commit).
+(The code-reviewer lane delivered its final file after the first aggregation pass — C7-22/C7-23
+were appended and the numbering note at the bottom maps its renumbered IDs.)
 
 ## Deduped findings
 
