@@ -73,13 +73,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const router = useRouter();
     const prefersReducedMotion = useReducedMotion();
     const [currentImageId, setCurrentImageId] = useState(initialImageId);
-    const [showLightbox, setShowLightbox] = useState(() => {
-        try {
-            const auto = sessionStorage.getItem('gallery_auto_lightbox') === 'true';
-            if (auto) sessionStorage.removeItem('gallery_auto_lightbox');
-            return auto;
-        } catch { return false; }
-    });
+    const [showLightbox, setShowLightbox] = useState(false);
     const [isSharingPhoto, setIsSharingPhoto] = useState(false);
     // R10-M11: tracks whether the current photo's actual image has finished
     // loading. The blur placeholder stays visible until onLoad fires,
@@ -88,6 +82,21 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
 
     const showLightboxRef = useRef(showLightbox);
     useEffect(() => { showLightboxRef.current = showLightbox; }, [showLightbox]);
+    const autoLightboxRestoredRef = useRef(false);
+    useEffect(() => {
+        if (autoLightboxRestoredRef.current) return;
+        autoLightboxRestoredRef.current = true;
+        try {
+            const auto = sessionStorage.getItem('gallery_auto_lightbox') === 'true';
+            sessionStorage.removeItem('gallery_auto_lightbox');
+            if (auto) {
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- post-hydration restore of client-only navigation state
+                setShowLightbox(true);
+            }
+        } catch {
+            /* keep deterministic default */
+        }
+    }, []);
     const [showBottomSheet, setShowBottomSheet] = useState(false);
     const colorDetailsToggleRef = useRef<(() => void) | null>(null);
     const histogramCycleRef = useRef<(() => void) | null>(null);
@@ -249,11 +258,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             }
         }
     }, [buildPhotoPath, currentIndex, currentImageId, images, prevId, nextId, router]);
-
-    // Clean up auto-lightbox flag after lazy init consumes it
-    useEffect(() => {
-        try { sessionStorage.removeItem('gallery_auto_lightbox'); } catch { console.debug('sessionStorage remove failed') }
-    }, []);
 
     // C4-23 (run-10 c4): the neighbor-preload effect must not re-run when the
     // info panel toggles. photoViewerSizes is derived from showInfo, so with it

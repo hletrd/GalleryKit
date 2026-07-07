@@ -4,10 +4,6 @@
     "workspaces": [
         "apps/*"
     ],
-    "overrides": {
-        "esbuild": "0.28.1",
-        "postcss": "8.5.15"
-    },
     "scripts": {
         "dev": "npm run dev --workspace=apps/web",
         "build": "npm run build --workspaces",
@@ -20,5 +16,8 @@
         "lint:action-origin": "npm run lint:action-origin --workspace=apps/web",
         "lint:public-route-rate-limit": "npm run lint:public-route-rate-limit --workspace=apps/web",
         "deploy": "./scripts/deploy-remote.sh"
+    },
+    "devDependencies": {
+        "esbuild": "^0.28.1"
     }
 }

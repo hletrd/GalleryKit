@@ -180,7 +180,8 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
     // --- Click to toggle zoom (desktop) ---
     const handleClick = useCallback((e: React.MouseEvent) => {
         const target = e.target as HTMLElement;
-        if (target.closest('a, button, [role="button"], input, textarea, select')) return;
+        const interactiveAncestor = target.closest('a, button, [role="button"], input, textarea, select');
+        if (interactiveAncestor && interactiveAncestor !== containerRef.current) return;
         // If we were drag-panning, don't treat mouseup as a click
         if (mouseHasMovedRef.current) {
             mouseHasMovedRef.current = false;
@@ -194,10 +195,7 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
         }
     }, [resetZoom, zoomInAt]);
 
-    // R2C10-MED-01: Dedicated keyboard handler — do not delegate to handleClick
-    // because handleClick's target.closest('[role="button"]') guard matches the
-    // zoom container itself (which has role="button"), preventing keyboard users
-    // from toggling zoom.
+    // R2C10-MED-01: Dedicated keyboard handler — do not delegate to handleClick.
     const handleKeyboardToggle = useCallback(() => {
         if (zoomLevelRef.current > MIN_ZOOM) {
             resetZoom(true);

@@ -24,4 +24,11 @@ describe('maintenance scheduler ownership (run-10 cycle 5)', () => {
         expect(MAINTENANCE_SRC).toContain('purgeOldAuditLog');
         expect(MAINTENANCE_SRC).toContain('purgeOldViewEvents');
     });
+
+    it('skips and drains maintenance sweeps during restore windows', () => {
+        expect(MAINTENANCE_SRC).toContain("from '@/lib/restore-maintenance'");
+        expect(MAINTENANCE_SRC).toContain('isRestoreMaintenanceActive()');
+        expect(MAINTENANCE_SRC).toContain('activeMaintenanceSweeps');
+        expect(MAINTENANCE_SRC).toContain('drainMaintenanceSweepsForRestore');
+    });
 });

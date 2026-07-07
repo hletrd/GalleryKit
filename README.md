@@ -26,7 +26,7 @@
 
 ---
 
-GalleryKit is built for photographers and small teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions within browser and codec limits, and leaves heavy operator features such as semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
+GalleryKit is built for photographers and trusted owner/operator teams who want to publish edited work without handing originals or AI features to a hosted SaaS. The app keeps original uploads private, serves processed public derivatives, preserves photographer-facing color decisions within browser and codec limits, and leaves heavy operator features such as production semantic search behind explicit setup steps. Local view analytics are first-party and self-hosted by default; Google Analytics is optional and disabled unless you configure `google_analytics_id`.
 
 **For:** finished-photo publishing, private original storage, self-hosted sharing, browser-managed color-faithful delivery, and operator-controlled search.  
 **Not for:** editing, culling, scoring, proofing, payment, or hosted SaaS workflows.
@@ -39,9 +39,9 @@ GalleryKit is built for photographers and small teams who want to publish edited
 - **Categories & Sharing** -- organize photos into categories with slug aliases and publish per-photo or group share links with Base56 short keys
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin). Review GPS stripping before the first upload; once any photo exists, the setting is locked because changing it later would not rewrite already stored originals.
 - **Tagging & Search** -- keyword metadata search across titles, descriptions, cameras, and tags
-- **Semantic Search (AI, self-hosted, operator-enabled)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; requires operator setup** (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. A production deployment may enable it after the runbook checks; fresh installs do not.
+- **Semantic Search (AI, self-hosted, operator-runbook)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; production mode is not enabled from the Settings UI** and requires operator setup (model weight download + backfill + env opt-in). Results are served from a bounded newest-first embedding scan, not a vector index. A production deployment may enable it after the runbook checks; fresh installs do not.
 - **Progressive Web App** -- installable PWA with same-origin visited image caching and an offline HTML fallback; it is not a full offline gallery sync
-- **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, PAT-authenticated upload API for external clients (no Lightroom Classic plugin is bundled), multiple root-admin accounts (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
+- **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, PAT-authenticated upload API for external clients (no Lightroom Classic plugin is bundled), multiple root-admin accounts for trusted co-admins (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
 
 GalleryKit is not a photo editor, culler, or scoring tool. Photos are expected to arrive after editing; admin batch operations change metadata only.
 - **Internationalization** -- English and Korean (next-intl), incl. localized color metadata
@@ -49,7 +49,7 @@ GalleryKit is not a photo editor, culler, or scoring tool. Photos are expected t
 
 ## Configuration
 
-File-backed site configuration lives in `apps/web/src/site-config.json` for static links and analytics. SEO/branding fields that admins can edit in the dashboard (`title`, `description`, `nav_title`, `author`, `locale`, and OG image URL) are stored in the database and override the file defaults at runtime.
+File-backed site configuration lives in `apps/web/src/site-config.json` for static links, fallback metadata, and analytics. JSON imports are build-time inlined by Next.js, so changing `home_link`, `footer_text`, `url`, or `google_analytics_id` requires a rebuild/deploy. SEO/branding fields that admins can edit in the dashboard (`title`, `description`, `nav_title`, `author`, OpenGraph locale fallback, and OG image URL) are stored in the database and override file defaults at runtime.
 
 ```json
 {
@@ -188,7 +188,7 @@ npm run build
 
 1. Configure `apps/web/.env.local`
 2. Ensure you are on a Linux host that supports `network_mode: host`, or adapt `apps/web/docker-compose.yml` for your container network.
-3. Provide a real `apps/web/src/site-config.json` on the host before starting the compose stack; production/deploy builds now fail fast when that file is missing instead of silently copying the example template.
+3. Provide a real `apps/web/src/site-config.json` before building the image; production/deploy builds now fail fast when that file is missing instead of silently copying the example template. The compose bind mount is not a live runtime configuration channel for statically imported JSON fields; rebuild/redeploy after changing it.
 4. Run:
 
 ```bash

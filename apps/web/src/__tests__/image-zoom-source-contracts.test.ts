@@ -15,4 +15,9 @@ describe('image-zoom source contracts (R2C10-MED-01)', () => {
         // The onKeyDown prop should invoke handleKeyboardToggle, not handleClick
         expect(source).toMatch(/onKeyDown=\{[^}]*handleKeyboardToggle/);
     });
+
+    it('does not let the container role block pointer click-to-zoom', () => {
+        expect(source).toContain('interactiveAncestor !== containerRef.current');
+        expect(source).not.toContain("if (target.closest('a, button, [role=\"button\"], input, textarea, select')) return");
+    });
 });

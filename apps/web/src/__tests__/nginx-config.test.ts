@@ -52,6 +52,11 @@ describe('nginx production edge hardening', () => {
         expect(forwardedHostHeaders.length).toBe(proxyPasses.length);
     });
 
+    it('keeps the committed template host-neutral', () => {
+        expect(nginxConfig).toContain('server_name _;');
+        expect(nginxConfig).not.toContain('server_name gallery.atik.kr;');
+    });
+
     it('proxies uploads instead of rooting host-side nginx at the container path', () => {
         const uploadsLocation = nginxConfig.match(/location ~ \^\(\?:\/\[a-z\]\{2\}\)\?\/uploads\/\(jpeg\|webp\|avif\)[\s\S]*?\n    \}/)?.[0] ?? '';
         expect(uploadsLocation).toContain('proxy_pass http://nextjs;');

@@ -145,7 +145,7 @@ git values must be treated as compromised and must not be reused.
 | `apps/web/src/lib/auth-rate-limit.ts` | Account-scoped and password-change rate limiting (in-memory Maps with DB backup for login) |
 | `apps/web/src/app/[locale]/admin/db-actions.ts` | DB backup/restore with security hardening |
 | `apps/web/src/app/api/admin/db/download/route.ts` | Authenticated backup file download |
-| `apps/web/src/site-config.json` | File-backed site defaults and static links; DB-backed admin settings override editable SEO/branding fields. **Build-time-inlined** (ARCH-03, run-10 c2): every consumer uses `import siteConfig from '@/site-config.json'`, which Next inlines at build — the read-only compose bind mount is inert at runtime, so editing the mounted file changes NOTHING until the next image rebuild. Fields NOT DB-overridable (`footer_text`, `home_link`, `locale`, `url`, `google_analytics_id`) require a rebuild to change |
+| `apps/web/src/site-config.json` | File-backed site defaults and static links; DB-backed admin settings override editable SEO/branding fields. **Build-time-inlined** (ARCH-03, run-10 c2): every consumer uses `import siteConfig from '@/site-config.json'`, which Next inlines at build — the read-only compose bind mount is inert at runtime, so editing the mounted file changes NOTHING until the next image rebuild. Fields NOT DB-overridable (`footer_text`, `home_link`, `url`, `google_analytics_id`) require a rebuild to change. `locale` is a file fallback for SEO/OpenGraph; DB `seo_locale` can override that fallback, while normal HTML `lang` remains route-driven |
 
 - **Storage Backend (Not Yet Integrated):** The `@/lib/storage` module still exists as an internal abstraction, but the product currently supports local filesystem storage only. Do not document or expose S3/MinIO switching as a supported admin feature until the upload/processing/serving pipeline is wired end-to-end.
 
@@ -701,14 +701,14 @@ Files NOT listed default to 0 violations. Adding a new violation in a file with 
 1. Configure `.env.local` with production MySQL credentials and private file permissions (`chmod 600 apps/web/.env.local`; deploy refuses group/world-readable runtime secret files)
 2. Generate a unique runtime `SESSION_SECRET`: `openssl rand -hex 32`
 3. Copy `apps/web/src/site-config.example.json` to `apps/web/src/site-config.json` and customize it; deploy/build paths now fail fast if the real file is missing. The file is a flat JSON object with **snake_case** keys (read directly via `import siteConfig from '@/site-config.json'` — there is NO camelCase mapping layer, so the key names below are exactly what you must write):
-   - `title` — displayed in nav, footer, and OG title
+   - `title` — fallback site title and OG/title metadata unless DB `seo_title` overrides it
    - `description` — OG description fallback
    - `url` — canonical base URL used when `BASE_URL` is unset. Production deploy/build paths validate the effective base URL (`BASE_URL || siteConfig.url`) before build; OG runtime paths still fail closed rather than falling back to request-derived hosts
-   - `locale` — OG/HTML locale (e.g. `en_US`)
+   - `locale` — OpenGraph/SEO locale fallback (e.g. `en_US`); DB `seo_locale` can override the fallback, while HTML `lang` comes from the `[locale]` route
    - `author` — Atom feed-level attribution
-   - `nav_title` — nav-bar brand text
+   - `nav_title` — nav-bar brand fallback unless DB `seo_nav_title` overrides it
    - `home_link` — nav brand link target (e.g. `/`)
-   - `footer_text` — footer text
+   - `footer_text` — footer text (build-time JSON value)
    - `google_analytics_id` — optional GA measurement id (empty to disable)
    DB-backed admin settings override the editable SEO/branding fields at runtime, but `site-config.json` is the fallback for fresh installs and static build-time values.
 4. For local/manual Docker smoke only, run `docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build`. Production per-iteration deploys use `npm run deploy` from the repo root.

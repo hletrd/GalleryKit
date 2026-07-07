@@ -22,6 +22,7 @@ import { requireSameOriginAdmin } from "@/lib/action-guards";
 import { flushBufferedSharedGroupViewCounts } from "@/lib/data";
 import { quiesceImageProcessingQueueForRestore, resumeImageProcessingQueueAfterRestore } from "@/lib/image-queue";
 import { drainBackgroundDbWritesForRestore } from "@/lib/background-db-writes";
+import { drainMaintenanceSweepsForRestore } from "@/lib/maintenance-scheduler";
 import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { drainAdminMutationsForRestore, releaseAdminMutationExclusive } from "@/lib/admin-mutation-barrier";
 import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
@@ -541,6 +542,11 @@ export async function restoreDatabase(formData: FormData) {
                 await quiesceImageProcessingQueueForRestore();
                 imageQueueQuiesced = true;
                 await drainBackgroundDbWritesForRestore();
+                const maintenanceDrained = await drainMaintenanceSweepsForRestore();
+                if (!maintenanceDrained) {
+                    console.error('Restore aborted: in-flight maintenance sweeps did not settle within the drain budget');
+                    return { success: false, error: t('restoreFailed') };
+                }
                 // C1-03 (run-10 cycle-1, closes C77-ARCH-01): drain FOREGROUND
                 // admin mutations too. Every mutating admin action holds a
                 // shared barrier slot for its whole body; the durable marker

@@ -16,6 +16,7 @@ import { clearSuccessfulLoginAttempts, getLoginRateLimitEntry, getAccountLoginRa
 import { logAuditEvent } from '@/lib/audit';
 import { isSupportedLocale, localizePath } from '@/lib/locale-path';
 import { getRestoreMaintenanceMessage } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { getTrustedRequestProtocol, hasTrustedSameOrigin } from '@/lib/request-origin';
 import { countCodePoints } from '@/lib/utils';
 import { PASSWORD_HASH_OPTIONS } from '@/lib/password-hashing';
@@ -303,6 +304,11 @@ export async function updatePassword(prevState: { error?: string; success?: bool
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };
+    }
+
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot) {
+        return { error: t('restoreInProgress') };
     }
 
     // C9R-RPL-01 / AGG9R-RPL-01: validate form-field shape BEFORE the
