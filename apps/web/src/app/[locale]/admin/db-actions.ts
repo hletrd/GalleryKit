@@ -539,10 +539,22 @@ export async function restoreDatabase(formData: FormData) {
 
         try {
             try {
+                // C6-03 (run-10 cycle-6): restore quiescence is a manual
+                // drain-checklist — EVERY process-local DB writer MUST be drained
+                // here before the import replaces the tables, or the writer's
+                // in-flight commits corrupt the restored state. When adding a new
+                // buffered/queued DB writer (analytics timer, deferred metadata
+                // writer, etc.), add its bounded drain to this sequence. Each
+                // drain either self-limits or races a timeout and ABORTS the
+                // restore on timeout (never imports over concurrent writes).
                 await flushBufferedSharedGroupViewCounts();
                 await quiesceImageProcessingQueueForRestore();
                 imageQueueQuiesced = true;
-                await drainBackgroundDbWritesForRestore();
+                const backgroundWritesDrained = await drainBackgroundDbWritesForRestore();
+                if (!backgroundWritesDrained) {
+                    console.error('Restore aborted: in-flight background DB writes did not settle within the drain budget');
+                    return { success: false, error: t('restoreFailed') };
+                }
                 const maintenanceDrained = await drainMaintenanceSweepsForRestore();
                 if (!maintenanceDrained) {
                     console.error('Restore aborted: in-flight maintenance sweeps did not settle within the drain budget');

@@ -40,6 +40,24 @@ describe('background DB write restore drain', () => {
         expect(getBackgroundDbWriteCountForTests()).toBe(0);
     });
 
+    it('returns false when a tracked write does not settle within the restore drain budget', async () => {
+        let releaseWrite!: () => void;
+        const write = trackBackgroundDbWrite(() => new Promise<string>((resolve) => {
+            releaseWrite = () => resolve('stuck-done');
+        }));
+
+        expect(getBackgroundDbWriteCountForTests()).toBe(1);
+        // A stuck write must not hang the drain forever — the bounded restore
+        // drain aborts with `false` so the restore caller can release its locks.
+        await expect(drainBackgroundDbWritesForRestore(20)).resolves.toBe(false);
+
+        // Clean up so the never-settled write does not leak into later tests.
+        releaseWrite();
+        await write;
+        await drainBackgroundDbWritesForRestore();
+        expect(getBackgroundDbWriteCountForTests()).toBe(0);
+    });
+
     it('does not schedule new writes while restore maintenance is active', async () => {
         isRestoreMaintenanceActiveMock.mockReturnValue(true);
         const write = vi.fn(async () => 'done');
