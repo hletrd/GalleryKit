@@ -67,8 +67,8 @@ function makeConnection(opts: {
             if (compact.startsWith('SELECT hash FROM __drizzle_migrations')) {
                 return [opts.recordedHashes.map((hash) => ({ hash })), []];
             }
-            if (compact.startsWith('SELECT MAX(created_at) AS cursor')) {
-                return [[{ cursor: opts.cursor }], []];
+            if (compact.startsWith('SELECT MAX(created_at) AS migration_cursor')) {
+                return [[{ migration_cursor: opts.cursor }], []];
             }
             // Any other statement (reconcile DDL probes, baseline INSERTs)
             // gets a permissive empty result — the assertions below check

@@ -884,9 +884,9 @@ async function prepareLegacyDatabaseIfNeeded(connection, dbName, migrations) {
     // them (their SQL runs; drizzle records the hash rows itself), and the
     // post-condition regains its meaning.
     const [cursorRows] = await connection.query(
-        'SELECT MAX(created_at) AS cursor FROM __drizzle_migrations'
+        'SELECT MAX(created_at) AS migration_cursor FROM __drizzle_migrations'
     );
-    const cursor = cursorRows?.[0]?.cursor ?? null;
+    const cursor = cursorRows?.[0]?.migration_cursor ?? null;
     const missing = migrations.filter((m) => !haveHashes.has(m.hash));
     if (cursor !== null && missing.every((m) => Number(m.folderMillis) > Number(cursor))) {
         const tags = missing.map((m) => m.tag).join(', ');
