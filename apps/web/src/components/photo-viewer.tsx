@@ -120,7 +120,6 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                 setIsPinned(stored === 'true');
                 return;
             }
-            // eslint-disable-next-line react-hooks/set-state-in-effect -- post-hydration viewport-derived default (matchMedia is client-only)
             setIsPinned(window.matchMedia('(min-width: 1024px)').matches);
         } catch { /* keep the deterministic default */ }
     }, []);
