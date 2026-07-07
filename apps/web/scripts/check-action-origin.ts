@@ -638,17 +638,40 @@ function statementIsMutationSlotEarlyReturnGate(statement: ts.Statement, slotNam
     return false;
 }
 
-function statementIsMutationSlotPositiveGuard(statement: ts.Statement, slotName: string): boolean {
+function statementIsMutationSlotPositiveGuard(statement: ts.Statement, slotName: string): statement is ts.IfStatement {
     if (!ts.isIfStatement(statement)) return false;
     const condition = unwrapExpression(statement.expression);
     return expressionReadsMutationSlotAcquired(condition, slotName);
 }
 
-function statementChecksMutationSlotAcquired(statement: ts.Statement, slotName: string): boolean {
-    return (
-        statementIsMutationSlotEarlyReturnGate(statement, slotName)
-        || statementIsMutationSlotPositiveGuard(statement, slotName)
-    );
+function statementChecksMutationSlotAcquired(
+    statement: ts.Statement,
+    slotName: string,
+    followingStatements: readonly ts.Statement[],
+    localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
+): boolean {
+    if (statementIsMutationSlotEarlyReturnGate(statement, slotName)) {
+        return true;
+    }
+
+    if (!statementIsMutationSlotPositiveGuard(statement, slotName)) {
+        return false;
+    }
+
+    if (statement.elseStatement && nodeContainsMutatingCall(
+        statement.elseStatement,
+        localMutatingFunctions,
+        importedSideEffectFunctionNames,
+    )) {
+        return false;
+    }
+
+    return !followingStatements.some((followingStatement) => nodeContainsMutatingCall(
+        followingStatement,
+        localMutatingFunctions,
+        importedSideEffectFunctionNames,
+    ));
 }
 
 function isApprovedMutationSlotCall(expression: ts.Expression | undefined, approvedImports: Set<string>): boolean {
@@ -665,6 +688,8 @@ function bodyAcquiresAdminMutationSlot(
     body: ts.Node,
     approvedImports: Set<string>,
     shadowsApprovedImport: boolean,
+    localMutatingFunctions: Set<string>,
+    importedSideEffectFunctionNames: Set<string>,
 ): boolean {
     if (shadowsApprovedImport || approvedImports.size === 0 || !ts.isBlock(body)) {
         return false;
@@ -686,7 +711,13 @@ function bodyAcquiresAdminMutationSlot(
                 }
                 const slotName = declaration.name.text;
                 const nextStatement = block.statements[i + 1];
-                if (nextStatement && statementChecksMutationSlotAcquired(nextStatement, slotName)) {
+                if (nextStatement && statementChecksMutationSlotAcquired(
+                    nextStatement,
+                    slotName,
+                    block.statements.slice(i + 2),
+                    localMutatingFunctions,
+                    importedSideEffectFunctionNames,
+                )) {
                     return true;
                 }
             }
@@ -1487,6 +1518,8 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
             body,
             approvedAdminMutationSlotImports,
             functionInfoDeclaresBindingName(bodyInfo, approvedAdminMutationSlotImports),
+            localMutatingFunctions,
+            importedSideEffectFunctionNames,
         )) {
             if (hasReasonedMutationBarrierExemptComment(owner, content)) {
                 report.passed.push(`OK (barrier-exempt with reason): ${relative}::${name}`);

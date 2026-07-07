@@ -5,6 +5,7 @@ import { purgeOldAuditLog } from '@/lib/audit';
 import { purgeOldBuckets } from '@/lib/rate-limit';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { purgeOldViewEvents } from '@/lib/view-retention';
+import { drainPendingFileDeletions } from '@/lib/pending-file-deletions';
 import { flushPendingSessionRevocations } from '@/lib/pending-session-revocations';
 
 const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000;
@@ -39,6 +40,10 @@ async function runMaintenanceSweepOnce(): Promise<void> {
     // in db-actions.ts). runMaintenanceTask's restore-active guard keeps this
     // from deleting rows mid-import.
     await runMaintenanceTask('flushPendingSessionRevocations', flushPendingSessionRevocations);
+    // Retry filesystem cleanup rows left behind by interrupted deletes or by
+    // restores that reintroduced pending-deletion DB rows after the files were
+    // already removed.
+    await runMaintenanceTask('drainPendingFileDeletions', drainPendingFileDeletions);
     await runMaintenanceTask('purgeOldBuckets', purgeOldBuckets);
     await runMaintenanceTask('purgeOldAuditLog', purgeOldAuditLog);
     await runMaintenanceTask('purgeOldViewEvents', purgeOldViewEvents);

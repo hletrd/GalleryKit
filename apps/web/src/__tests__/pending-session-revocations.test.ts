@@ -102,12 +102,16 @@ describe('C7-01 wiring source contracts', () => {
         const source = read('src/app/[locale]/admin/db-actions.ts');
         const endMarker = source.indexOf('endDurableRestoreMaintenance();');
         const flush = source.indexOf('await flushPendingSessionRevocations();');
+        const drainPendingFiles = source.indexOf('await drainPendingFileDeletions()');
         expect(endMarker).toBeGreaterThan(-1);
         expect(flush).toBeGreaterThan(endMarker);
+        expect(drainPendingFiles).toBeGreaterThan(endMarker);
+        expect(drainPendingFiles).toBeGreaterThan(flush);
     });
 
     it('the hourly maintenance sweep includes the flush as a backstop', () => {
         const source = read('src/lib/maintenance-scheduler.ts');
         expect(source).toContain("runMaintenanceTask('flushPendingSessionRevocations', flushPendingSessionRevocations)");
+        expect(source).toContain("runMaintenanceTask('drainPendingFileDeletions', drainPendingFileDeletions)");
     });
 });

@@ -16,7 +16,20 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c21):** direct correctness/data-loss and gate findings
+**Age-budget check (run-10 c22):** direct correctness/privacy/data-retention findings
+`AGG-C22-01`, `AGG-C22-02`, `AGG-C22-03`, and provenance finding `AGG-C22-04`
+are scheduled in `cycle-22-2026-07-08-plan.md`; `AGG-C22-10` and targeted
+`AGG-C22-09` behavior coverage are also scheduled. Newly deferred High-severity
+Cycle 22 rows (`AGG-C22-05`, `AGG-C22-06`, `AGG-C22-07`, residual `AGG-C22-09`)
+are broad architecture/performance/test-infrastructure items with explicit exit
+criteria in `cycle-22-2026-07-08-deferred.md`, not contained unpatched
+authz/security/data-loss bugs. Security/operator rows rely on the documented
+single-web-instance topology, DB-only backup boundary, permanently deferred
+2FA/WebAuthn posture, and nginx-edge/operator boundaries in `CLAUDE.md`.
+Cycle 21 rows are now one cycle old; Cycle 20 rows are two cycles old; none crosses
+the 8-cycle High budget or 16-cycle Medium checkpoint.
+
+**Previous check (run-10 c21):** direct correctness/data-loss and gate findings
 `AGG-C21-01`, `AGG-C21-02`, `AGG-C21-06`, `AGG-C21-15`, `AGG-C21-25`, and
 `AGG-C21-30` were scheduled in `cycle-21-2026-07-08-plan.md`; bounded docs/i18n/a11y
 and ledger findings were also scheduled. Newly deferred High-severity Cycle 21 rows
@@ -213,6 +226,16 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C21-19..24 | mixed, up to MED | cycle-21-2026-07-08 | r10c21 | 0 | Operator/topology/security-model exit criteria in Cycle 21 deferred register |
 | C21-26..29 | mixed, up to MED | cycle-21-2026-07-08 | r10c21 | 0 | Client/browser/e2e hardening exit criteria in Cycle 21 deferred register |
 | C21-37..40 | mixed, up to MED | cycle-21-2026-07-08 | r10c21 | 0 | Admin UX, presentation, and template-distribution exit criteria in Cycle 21 deferred register |
+| C22-05 | HIGH/High | cycle-22-2026-07-08 | r10c22 | 0 | Before upload-time privacy/metadata/processing fields are added, or next confirmed browser/PAT drift |
+| C22-06 | HIGH/High source shape, Medium live impact | cycle-22-2026-07-08 | r10c22 | 0 | Production RSS/OOM incident during upload/restore, or approved streaming-ingress project |
+| C22-07 | HIGH/High | cycle-22-2026-07-08 | r10c22 | 0 | Measured pool starvation during queue/backfill/search, or shared background-budget project approved |
+| C22-08 | MED/Medium | cycle-22-2026-07-08 | r10c22 | 0 | Counter drift bug report, shared-group cache refactor, or analytics consistency cycle |
+| C22-09 residual | HIGH/High | cycle-22-2026-07-08 | r10c22 | 0 | Next high-risk source-contract-only finding, or behavior/integration test-hardening cycle |
+| C22-11 | MED/High | cycle-22-2026-07-08 | r10c22 | 0 | Browser-specific regression, PWA/SW incident, visual regression budget, or test-matrix project approved |
+| C22-12..15 | mixed, up to MED | cycle-22-2026-07-08 | r10c22 | 0 | Public map/search/on-this-day/vector performance exit criteria in Cycle 22 deferred register |
+| C22-16..20 | mixed, up to MED | cycle-22-2026-07-08 | r10c22 | 0 | Operator/topology/backup/security-model exit criteria in Cycle 22 deferred register |
+| C22-21 | LOW/Medium | cycle-22-2026-07-08 | r10c22 | 0 | Next background writer/queue is added, or restore-drain omission escapes review |
+| C22-22..25 | mixed, up to MED | cycle-22-2026-07-08 | r10c22 | 0 | Admin UX, mobile presentation, and template-distribution exit criteria in Cycle 22 deferred register |
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |

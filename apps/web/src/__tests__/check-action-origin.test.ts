@@ -654,6 +654,26 @@ describe('checkActionSource — function declarations', () => {
         expect(report.passed).toEqual(['OK: src/app/actions/settings.ts::updateSettings']);
     });
 
+    it('fails positive admin-mutation barrier checks that leave later mutations outside the acquired branch', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                using mutationSlot = acquireAdminMutationSlot();
+                if (mutationSlot.acquired) {
+                    console.info('admin mutation slot acquired');
+                }
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+        expect(report.failed[0]).toContain('updateSettings');
+    });
+
     it('fails spoofed local admin-mutation barrier functions', () => {
         const src = withApprovedActionGuard(`
             function acquireAdminMutationSlot() {

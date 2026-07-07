@@ -1,144 +1,125 @@
-# GalleryKit Designer Review - Cycle 21
+# GalleryKit Designer Review - Cycle 22
 
-Repo: `/Users/hletrd/flash-shared/gallery`
-HEAD: `45b32d1db373e03d82a29511f53832051c770880`
-Lane: `designer`
+Repo: `/Users/hletrd/flash-shared/gallery`  
+HEAD: `dabf8e8a`  
+Lane: `designer`  
 Date: 2026-07-08
 
-Review-only artifact. I edited only this file and did not commit or push.
+Review-only artifact. I overwrote only this file and did not commit or push.
 
-## Required Context Read
+## Context And Method
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `.context/plans/README.md`
+Read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, and the relevant `agent-browser-*` skill files for core navigation, query, visual, interaction, wait, debug, network, state, and config.
 
-## UI Inventory
+Adapted reviewer posture from the local UI/product reviewer prompts where useful, ignoring their BurstPick-specific paths and claims. GalleryKit is a Next.js finished-photo publishing gallery: no edit, culling, or scoring features are expected.
 
-Routes: 36 app route files under `apps/web/src/app`, including public home/topic/photo/shared/smart-collection/map/timeline/year/privacy/about routes, locale error/not-found/loading surfaces, uploads proxy, and protected admin dashboard/categories/tags/SEO/settings/tokens/password/users/database/analytics routes.
+Runtime: started existing production build with `npm run start --workspace=apps/web -- --hostname 127.0.0.1 --port 3100`. Next served `http://127.0.0.1:3100` and warned that standalone output should normally use `.next/standalone/server.js`; this did not block browser review. Public pages used local E2E seed content. Protected admin runtime was limited to the login page because no plaintext admin password was used in this review.
 
-Components: 61 component files under `apps/web/src/components`, including public shell, masonry/gallery, search, tag filter, photo viewer/lightbox/color details/histogram, map, admin header/nav, upload dropzone, image manager, bulk edit, tag input, admin user manager, and shadcn/Radix primitives.
+Browser evidence collected with `agent-browser`: accessibility snapshots, DOM boxes, attributes, focus state, color-scheme styles, map marker attributes, search dialog modal isolation, mobile card metrics, and login form metrics. Source/static review covered public/admin IA, affordances, WCAG 2.2, ARIA, responsive breakpoints, loading/empty/error states, validation UX, dark/light mode, i18n/RTL posture, and perceived performance.
 
-Styling/messages/assets/tests/docs: `apps/web/src/app/[locale]/globals.css`, `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/public` fonts/icons/PWA/SW/resources/uploads, 12 Playwright e2e files under `apps/web/e2e`, `.context/plans`, `.context/reviews`, and design/product notes in `CLAUDE.md`.
-
-## Browser Method
-
-Used direct Playwright CLI/scripts per the `playwright` skill. `next dev` was blocked by a stale Next dev-server mutex: Next reported PID `7042` on port 3000, but `ps` and `lsof` found no live process/listener. I did not remove lock files. I used `npm run start --workspace=apps/web -- --hostname 127.0.0.1 --port 3100`; it served pages and warned that standalone output should normally use `.next/standalone/server.js`.
-
-Pages exercised: `/`, `/en/timeline`, `/en/map`, `/en/privacy`, `/en/this-route-does-not-exist-xyz`, `/admin`, authenticated `/admin/dashboard`, `/admin/settings`, `/admin/categories`, `/admin/tags`, `/admin/seo`, `/admin/db`, and `/admin/tokens`. Admin auth used a local session cookie inserted into the e2e DB; plaintext login was unavailable because `ADMIN_PASSWORD` is an Argon2 hash.
-
-Evidence collected: DOM roles/headings/landmarks, Playwright `ariaSnapshot()`, focus/tab order, dialog focus restore, mobile 390px nav behavior, computed colors/contrast, touch target boxes, console/page errors, and text output. Static source review covered IA, affordances, WCAG 2.2, ARIA, responsive states, loading/empty/error states, validation UX, dark/light mode, i18n/RTL, and perceived performance.
+Validation: `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/focus-visible-links-scan.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts src/__tests__/info-bottom-sheet-ia.test.ts src/__tests__/search-disclaimer.test.ts src/__tests__/cycle-22-source-contracts.test.ts src/__tests__/free-download-contract.test.ts` passed: 9 files, 63 tests.
 
 ## Findings
 
-### DES-C21-01 - Token/settings dialogs reference missing `common.*` message keys
+### DES-C22-01 - Admin image management still behaves like a spreadsheet instead of a photo review workbench
 
-Severity: Medium
-Confidence: High
-
-File and region:
-
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:460-482`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:157-169`, `242-248`, `314-317`
-- `apps/web/messages/en.json:697-706`, `725-731`
-- `apps/web/messages/ko.json:697-706`, `725-731`
-
-Browser/DOM evidence:
-
-- Visiting authenticated `/admin/settings` and `/admin/tokens` emitted repeated console/server errors: `MISSING_MESSAGE: common.cancel (en)`.
-- `/admin/tokens` rendered an error state containing literal `common.tryAgain` text in the page body.
-- Shutting down the local server also printed `MISSING_MESSAGE: common.cancel (en)` from the settings and token SSR chunks.
-
-Source evidence:
-
-- Settings backfill confirm uses `t('common.cancel')`.
-- Token create/revoke dialogs use `t('common.cancel')`; the token load-error retry button uses `t('common.tryAgain')`.
-- `common` contains `untitled`, `unknown`, `photo`, `loading`, `imageUnavailable`, `skipToContent`, `close`, and `opensInNewWindow`, but no `cancel` or `tryAgain`.
-- `tryAgain` exists under `error.tryAgain`; `cancel` exists under `db.cancel`, `imageManager.cancel`, and other local namespaces.
-
-Failure scenario:
-
-Admins opening token or settings dialogs see fallback translation keys or trigger noisy runtime errors instead of localized button labels. The token load-error state has a visible broken retry affordance, which is a direct form/error-state UX failure.
-
-Suggested fix:
-
-Either add `common.cancel` and `common.tryAgain` to both message files, or switch these call sites to existing scoped keys (`imageManager.cancel`, `db.cancel`, `error.tryAgain`) with parity tests updated to catch client references to missing namespace keys.
-
-### DES-C21-02 - Map markers are announced only as generic "Marker"
-
-Severity: Low-Medium
-Confidence: High
+Severity: Medium  
+Confidence: High  
+Status: Confirmed
 
 File and region:
 
-- `apps/web/src/components/map/map-client.tsx:120-138`
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`
+- `apps/web/src/components/image-manager.tsx:427-620`
 
-Browser/DOM evidence:
+Evidence:
 
-- `/en/map` accessibility snapshot exposed the interactive marker as `button "Marker"`.
-- DOM for `.leaflet-marker-icon`: `tag:"IMG"`, `alt:"Marker"`, `role:"button"`, `tabindex:"0"`, box `44x44`, no `title`.
-- The route does provide `Skip map to photo list` and `list "Geotagged photo list"`, so there is a fallback.
-
-Source evidence:
-
-- `<Marker position={[marker.latitude, marker.longitude]}>` is rendered without marker-level `title` or `alt`.
-- The popup button has `aria-label={`${openPhotoLabel}: ${marker.displayTitle}`}`, but the marker is unnamed until opened.
+- Source wraps recent uploads in a nested scroll region: `max-h-[calc(100vh-16rem)] overflow-auto` at `dashboard-client.tsx:142`.
+- The image manager is a 9-column table inside `overflow-x-auto` at `image-manager.tsx:427-450`.
+- Per-row preview is fixed at `h-32 w-32` (`image-manager.tsx:473-481`), tags require a separate `min-w-[200px]` cell (`image-manager.tsx:500-552`), and edit/delete actions sit at the far-right cell (`image-manager.tsx:571-607`).
+- Runtime admin login was available, but protected dashboard was not browser-clicked because this review did not use plaintext credentials. The finding is therefore source-confirmed and matches the same component shape that shipped in Cycle 21.
 
 Failure scenario:
 
-With multiple geotagged photos, keyboard and screen-reader users encounter a sequence of indistinguishable `Marker` controls inside the map. They must open each popup or abandon the map for the list to know which photo each marker represents.
+On a tablet or narrow laptop, an admin reviewing a batch must scroll vertically inside the dashboard and horizontally inside the table to connect thumbnail, filename, tags, gamut, date, and actions. With similar images, row context is easy to lose before the admin reaches the action cell.
 
-Suggested fix:
+Concrete fix:
 
-Pass a useful marker label through React Leaflet, for example `title={marker.displayTitle}` and `alt={`${openPhotoLabel}: ${marker.displayTitle}`}` on `Marker`. Keep the list fallback; if Leaflet does not propagate names reliably, sync attributes onto `.leaflet-marker-icon` after render or use a custom marker element.
+Keep the table for wide desktop density, but add a responsive card/list workbench below large desktop widths. Group preview, title/filename/topic, status chips, tags, and edit/delete/share actions in one visual cluster per image; avoid nested horizontal and vertical scroll for the daily upload-review loop.
 
-### DES-C21-03 - Dashboard checkbox cells duplicate accessible text
+### DES-C22-02 - Admin navigation is one flat ten-link strip with no workflow grouping
 
-Severity: Low
-Confidence: High
+Severity: Low-Medium  
+Confidence: High  
+Status: Confirmed
 
 File and region:
 
-- `apps/web/src/components/image-manager.tsx:431-442`
-- `apps/web/src/components/image-manager.tsx:462-472`
+- `apps/web/src/components/admin-nav.tsx:15-49`
+- `apps/web/src/components/admin-header.tsx:13-26`
 
-Browser/DOM evidence:
+Evidence:
 
-- Authenticated dashboard `ariaSnapshot()` shows the select-all column header as `Select all images Select all images`.
-- Row checkbox cells similarly announce `Select image E2E Portrait Select image E2E Portrait` before the checkbox.
-- Runtime boxes show the visible checkbox itself is `20x20`, but it is wrapped by a `44x44` label, so this is not a touch-target failure.
-
-Source evidence:
-
-- Each checkbox wrapper includes a hidden `<span className="sr-only">...label...</span>`.
-- The nested `<input type="checkbox">` repeats the same label via `aria-label`.
+- `AdminNav` defines Dashboard, Categories, Tags, SEO, Settings, Tokens, Password, Users, Database, and Analytics as ten peer links (`admin-nav.tsx:15-26`).
+- The render path is one wrapping flex nav (`admin-nav.tsx:29-49`).
+- `AdminHeader` places brand, all nav links, and logout in one wrapping row (`admin-header.tsx:13-26`).
+- The implementation preserves 44px targets and `aria-current`, so the issue is IA/scanning, not touch target compliance.
 
 Failure scenario:
 
-Screen-reader users hear duplicated labels in a dense admin table, increasing verbosity and making row scanning slower. This is most noticeable when bulk-selecting many uploaded photos.
+An admin doing common publishing work has to scan the same visual strip for routine upload/taxonomy tasks and high-risk operations such as database restore, tokens, users, and password changes. On mobile/tablet the wrap order can mix operational and content-management destinations, making destructive or rarely used areas feel as ordinary as daily publishing pages.
 
-Suggested fix:
+Concrete fix:
 
-Keep the 44px wrapper but provide the accessible name once. For example, remove the hidden span and keep `aria-label`, or keep visible/hidden label text and remove `aria-label` from the input if the label association is sufficient.
+Group admin IA into stable sections such as Publish, Organize, Site, Access, Operations, and Insights. On mobile/tablet, use a sectioned drawer or menu instead of a single wrapping strip, while preserving current focus rings, `aria-current`, and 44px targets.
+
+### DES-C22-03 - Mobile masonry cards permanently cover finished photos with metadata chrome
+
+Severity: Low  
+Confidence: High  
+Status: Confirmed
+
+File and region:
+
+- `apps/web/src/components/masonry-card.tsx:149-155`
+
+Evidence:
+
+- Source always renders the mobile overlay as `absolute inset-x-0 top-0 sm:hidden bg-gradient-to-b from-black/75 to-transparent p-3` (`masonry-card.tsx:149-154`).
+- Agent-browser mobile viewport 390x844 on `/en`: first card box `358x556.875`; top metadata gradient box `358x60`, visible and displayed `block`; second card repeats the same `358x60` top overlay.
+- Desktop overlay is separate and hidden until hover/focus (`masonry-card.tsx:155-160`), so the always-on treatment is mobile-specific.
+
+Failure scenario:
+
+On phone galleries, a portrait or landscape with important subject detail near the top is partially covered before the visitor has chosen to open the photo. GalleryKit's product premise is finished-photo publishing; permanent grid chrome competes with the photographer's crop.
+
+Concrete fix:
+
+Move mobile metadata below the image, reserve a compact caption band, or provide a clean-grid mode where metadata appears on focus/open rather than over the bitmap. Preserve the current accessible photo link label and heading semantics.
+
+## Current Non-Issues Checked
+
+- Map marker names are fixed: `/en/map` snapshot exposes marker as `button "Open photo: E2E Landscape"`, and DOM has `alt="Open photo: E2E Landscape"`, `title="E2E Landscape"`, `role="button"`, `tabindex="0"`, and `44x44` box.
+- Search modal behavior is sound in the sampled flow: clicking "Search photos" focuses the combobox, opens a named `role="dialog"`, and sets outside body children inert/`aria-hidden`.
+- Admin login form has labeled username/password fields, a 44px show-password control, a 44px submit button, and no alert on initial load.
+- Mobile tag filter is collapsed behind a 44px `<summary>`; the interactive chips meet 44px boxes when the disclosure is open.
+- Dark mode privacy page rendered with `html.dark`, body background `rgb(9, 9, 11)`, foreground `rgb(250, 250, 250)`, and muted text `rgb(161, 161, 170)`.
+- EN/KO message parity, focus-visible contracts, touch targets, theme tokens, search status, and Cycle 22 source contracts passed targeted Vitest validation.
 
 ## Coverage Notes
 
-IA/affordances: Public nav, footer, map/list fallback, admin nav, dashboard table, settings forms, and token page were reviewed. Public IA is coherent; admin remains dense but predictable for repeated operational use.
+Information architecture: public nav/footer, home grid/tag filter, map/timeline/privacy/about routes, admin shell/login/source-only protected pages.  
+Affordances: search, theme, locale, mobile menu, tag filter, photo links, map markers/list fallback, login controls, admin image-manager source.  
+Keyboard/focus: skip link, focus rings, search modal focus/inert handling, admin login, source/tests for lightbox/info sheet.  
+WCAG/ARIA: landmarks, headings, dialog naming, marker naming, touch target tests, focus-visible tests, message-key parity.  
+Responsive: 390px mobile and 1440px desktop sampled; source reviewed for table/card/nav breakpoints.  
+Loading/empty/error: login, search, not-found/error shells, map no-photos source, admin token/settings source, failed image source.  
+Dark/light: agent-browser dark media sample plus theme token tests.  
+i18n/RTL: English/Korean LTR only; `html dir` exists via `getLocaleDirection`, but no RTL locale is shipped.  
+Perceived performance: source evidence for memoized masonry cards, sized map/search thumbnails, lazy/eager image split, search debounce/abort, and Leaflet route chunking; no Chrome performance trace was run.
 
-Keyboard/focus: Public tab order begins with skip link, nav, search/theme/locale, tag chips, then photo links. Search dialog focuses `#search-input`, traps focus, locks body scroll, and restores focus to the trigger on Escape. Login client validation focuses the first invalid field and sets `aria-invalid`.
+## Final Missed-Issue Sweep
 
-WCAG/contrast/touch: Body text contrast measured about 19.9:1 in light mode. Runtime touch boxes were 44px+ for nav, search, mobile menu, tag chips, login controls, map controls, and admin action buttons; hidden skip links appear as 1x1 until focused, as expected.
+Searched docs/source/messages/tests for UI/a11y and product-claim surfaces including `aria-`, `role`, `tabIndex`, focus, loading, empty, error, validation, RTL/dir, dark mode, semantic search, AI, Lightroom, storage, S3/MinIO, proofing, scoring, payment, analytics, OpenStreetMap, `site-config`, and `BASE_URL`.
 
-Responsive: Mobile home at 390px collapses topics behind the nav expander and uses a tag-filter disclosure. Admin tables still rely on horizontal overflow, which is acceptable for current admin-operational scope but remains a mobile ergonomics risk for heavy phone use.
-
-Loading/empty/error: Verified localized 404, privacy, map help/list fallback, search empty state, login validation, token load-error state, admin DB danger alert, and upload disabled state. DES-C21-01 affects token/settings error/dialog copy.
-
-Dark/light: Theme control is present and labelled. Starting state resolved to `html.light`; one click from system to light did not visibly change colors, which is expected when system is already light. Tokenized foreground/background contrast was strong.
-
-i18n/RTL: English and Korean catalogs exist and route `lang` is set. Current locales are LTR; no true RTL locale exists, so RTL layout was source-reviewed only and remains unproven for nav, admin tables, map, and photo viewer.
-
-Perceived performance: Masonry uses CSS columns, eager first-column images, width bucketing, and memoized cards. Search debounces and aborts semantic requests. Map chunk isolates Leaflet CSS. No performance trace was run; review was DOM/interaction focused.
-
-## Final Sweep
-
-Could not inspect with a fresh `next dev` runtime because of the stale dev mutex, and did not remove generated lock files. Could not validate physical P3/HDR display behavior, real RTL layout, production CDN/SW behavior, or destructive admin workflows such as DB restore. No relevant UI file category was intentionally skipped; app routes, components, CSS, messages, public assets, e2e tests, and design docs were inventoried.
+Uninspected or partially inspected categories: authenticated protected-admin runtime beyond login; destructive admin actions such as DB restore/delete/re-encode; production CDN/service-worker/offline behavior; physical P3/HDR display behavior; true RTL layout; high-volume gallery performance; generated build output and binary assets. No source fixes, commits, pushes, or deploys were performed.

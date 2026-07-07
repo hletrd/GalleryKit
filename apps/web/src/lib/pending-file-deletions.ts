@@ -1,5 +1,5 @@
 import { db, pendingFileDeletions } from '@/db';
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { deleteImageVariantsStrict } from '@/lib/process-image';
 import {
     deleteOriginalUploadFileStrict,
@@ -25,7 +25,19 @@ export type PendingFileDeletionRecord = {
     filename_jpeg: string;
 };
 
+export type PendingFileDeletionDrainResult = {
+    attempted: number;
+    cleaned: number;
+    failed: number;
+};
+
 const CLEANUP_RETRY_DELAY_MS = 50;
+const DEFAULT_PENDING_FILE_DELETION_DRAIN_LIMIT = 25;
+
+function normalizeDrainLimit(limit: number): number {
+    if (!Number.isFinite(limit)) return DEFAULT_PENDING_FILE_DELETION_DRAIN_LIMIT;
+    return Math.max(1, Math.min(100, Math.floor(limit)));
+}
 
 function wait(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -88,4 +100,40 @@ export async function cleanupPendingFileDeletion(record: PendingFileDeletionReco
         .where(eq(pendingFileDeletions.id, record.id));
 
     return failures;
+}
+
+export async function drainPendingFileDeletions(
+    limit = DEFAULT_PENDING_FILE_DELETION_DRAIN_LIMIT,
+): Promise<PendingFileDeletionDrainResult> {
+    const rows: PendingFileDeletionRecord[] = await db.select({
+        id: pendingFileDeletions.id,
+        image_id: pendingFileDeletions.image_id,
+        filename_original: pendingFileDeletions.filename_original,
+        filename_webp: pendingFileDeletions.filename_webp,
+        filename_avif: pendingFileDeletions.filename_avif,
+        filename_jpeg: pendingFileDeletions.filename_jpeg,
+    })
+        .from(pendingFileDeletions)
+        .orderBy(asc(pendingFileDeletions.updated_at), asc(pendingFileDeletions.id))
+        .limit(normalizeDrainLimit(limit));
+
+    let cleaned = 0;
+    let failed = 0;
+
+    for (const row of rows) {
+        const failures = await cleanupPendingFileDeletion(row);
+        if (failures.length === 0) {
+            cleaned++;
+            continue;
+        }
+
+        failed++;
+        console.error('Pending file deletion retry failed', {
+            pendingFileDeletionId: row.id,
+            imageId: row.image_id,
+            failures,
+        });
+    }
+
+    return { attempted: rows.length, cleaned, failed };
 }

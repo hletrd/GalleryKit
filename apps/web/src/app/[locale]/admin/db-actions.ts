@@ -26,6 +26,7 @@ import { drainMaintenanceSweepsForRestore } from "@/lib/maintenance-scheduler";
 import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { drainAdminMutationsForRestore, releaseAdminMutationExclusive } from "@/lib/admin-mutation-barrier";
 import { runRestoreDrainChecklist } from "@/lib/restore-drain-checklist";
+import { drainPendingFileDeletions } from "@/lib/pending-file-deletions";
 import { flushPendingSessionRevocations } from "@/lib/pending-session-revocations";
 import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES, isMysqldumpArtifactHeader, hasMysqldumpCompletionTrailer, MYSQLDUMP_TRAILER_SCAN_BYTES } from "@/lib/db-restore";
@@ -668,6 +669,13 @@ export async function restoreDatabase(formData: FormData) {
                 // restore just re-imported (a pre-import delete would have
                 // been undone by the import). Never throws.
                 await flushPendingSessionRevocations();
+                // C22 AGG-C22-03: a DB restore can reintroduce pending
+                // file-deletion rows after their files were already removed.
+                // Drain them after the marker clears so stale rows do not
+                // remain until a future manual cleanup.
+                await drainPendingFileDeletions().catch((err) => {
+                    console.error('Failed to drain pending file deletions after restore', err);
+                });
             }
             // C8R-RPL-09 / AGG8R-03: log release failure at debug
             // instead of silencing so the operator has a signal if

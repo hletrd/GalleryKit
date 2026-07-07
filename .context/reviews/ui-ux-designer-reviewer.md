@@ -1,89 +1,130 @@
-# UI/UX Designer Reviewer - Cycle 21
+# UI/UX Designer Reviewer - Cycle 22
 
-Repository: `/Users/hletrd/flash-shared/gallery`
-Review HEAD: `45b32d1db373e03d82a29511f53832051c770880`
-Lane: `ui-ux-designer-reviewer`, adapted from the stale BurstPick/SwiftUI profile to GalleryKit's Next.js web UI.
-
-## Inventory
-
-Required context read first: `AGENTS.md`, `CLAUDE.md`, and `.context/plans/README.md`. I also read the stale local reviewer prompt to adapt only its product-design review posture, not its BurstPick/SwiftUI assumptions.
-
-UI-relevant current-HEAD inventory:
-
-- Public routes: 46 TSX files under `apps/web/src/app/[locale]`, including home/topic galleries, photo viewer, shared links/groups, smart collections, map, timeline/year archive, privacy/about, loading/error/not-found shells.
-- Admin routes: dashboard/upload/image manager, categories, tags, SEO, settings/backfill, tokens, password, users, DB backup/restore, analytics, login/protected shell.
-- Components: 60 TSX files under `apps/web/src/components`, including nav/search/home/masonry/photo-viewer/lightbox/info sheet/color details/map/upload/admin nav/image manager/tag input and shadcn/Radix primitives.
-- Localization/styling/tests: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, `apps/web/src/app/[locale]/globals.css`, 9 Playwright specs in `apps/web/e2e`, and 357 Vitest files under `apps/web/src/__tests__`.
-
-Browser evidence: local `http://127.0.0.1:3000/en` was not reachable. I did not run `apps/web/scripts/run-e2e-server.mjs` because it explicitly seeds/destructively prepares a disposable DB, and the task is review-only. I loaded `https://gallery.atik.kr/en`, `/ko/admin`, and `/en/map` with Playwright/CDP and inspected DOM rectangles/computed styles/accessibility roles; however, the deployed public site did not exactly match current HEAD for the mobile tag filter, so live measurements are treated as non-authoritative for findings. Current findings below are source-backed.
-
-Fresh validation run:
-
-- `npm test --workspace=apps/web -- --run src/__tests__/touch-target-audit.test.ts src/__tests__/theme-token-contract.test.ts src/__tests__/i18n-key-parity.test.ts src/__tests__/search-status-source.test.ts src/__tests__/focus-visible-rings-cycle20.test.ts src/__tests__/info-bottom-sheet-ia.test.ts` -> 6 files passed, 32 tests passed.
-- `npm test --workspace=apps/web -- --run src/__tests__/focus-visible-links-scan.test.ts src/__tests__/hdr-badge-contrast.test.ts src/__tests__/switch-geometry-contract.test.ts src/__tests__/lightbox-controls-contract.test.ts` -> 4 files passed, 40 tests passed.
+Repository: `/Users/hletrd/flash-shared/gallery`  
+Review HEAD: `dabf8e8a`  
+Lane: `ui-ux-designer-reviewer`, adapted from the local reviewer prompt to GalleryKit's Next.js web UI.
 
 ## Executive Summary
 
-No Critical or High UI/UX regressions found at current HEAD. Current HEAD has closed several prior review issues: mobile tag filters now collapse behind a `<details>` disclosure, token/alias destructive confirmations name their targets, analytics country labels are localized, and focus/touch/contrast source contracts are materially stronger. The remaining confirmed issues are admin IA/ergonomics and a low-level public-gallery presentation tradeoff.
+No Critical or High UI/UX regression was confirmed at current HEAD. GalleryKit's public surfaces have strong accessibility fundamentals for a self-hosted finished-photo gallery: named landmarks, skip links, 44px touch targets, meaningful map markers, modal isolation, EN/KO parity, and honest no-editor/no-culling product boundaries. The main remaining UX debt is admin ergonomics: protected workflows are still arranged as flat navigation plus spreadsheet-style image management, while the public mobile masonry grid still trades photo fidelity for always-on overlay labels.
+
+## Evidence Base
+
+Local runtime: `next start` served `http://127.0.0.1:3100` from the existing build. Browser evidence used `agent-browser` snapshots and DOM/style metrics rather than screenshots alone.
+
+Sampled routes:
+
+- `/en`: home, desktop/mobile nav, tag filter, masonry cards, search dialog.
+- `/en/map`: map marker names, list fallback, region text.
+- `/en/privacy`: dark-mode colors and document structure.
+- `/en/admin`: unauthenticated login form.
+
+Targeted validation passed: 9 Vitest files, 63 tests, covering touch-target audit, theme tokens, i18n key parity, focus-visible links/rings, info-sheet IA, search disclaimer/status, Cycle 22 source contracts, and free-download contracts.
 
 ## Findings
 
-### UIUX-C21-01 - Admin image management is still a horizontally scrolling table, not a photo workbench
+### UIUX-C22-01 - Admin image management is optimized for table density, not visual photo administration
 
-Severity: Medium
-Confidence: High
-Exact file/region: `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`; `apps/web/src/components/image-manager.tsx:427-591`
+Severity: Medium  
+Confidence: High  
+Status: Confirmed
 
-Evidence: the dashboard constrains recent uploads inside `max-h-[calc(100vh-16rem)] overflow-auto` (`dashboard-client.tsx:142`) and the manager renders a 9-column table inside `overflow-x-auto` (`image-manager.tsx:427-451`). Each photo preview is fixed at `h-32 w-32` (`image-manager.tsx:475`), tags live in a separate `min-w-[200px]` cell (`image-manager.tsx:503-553`), and edit/delete actions sit at the far-right cell (`image-manager.tsx:573-591`).
+Exact file/region:
 
-Concrete failure scenario: on a tablet or small laptop, an admin reviews a newly uploaded set, sees the thumbnail/title on the left, then must pan horizontally to reach tags or actions. Row context is easy to lose, especially when several adjacent photos share similar titles or filenames.
+- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`
+- `apps/web/src/components/image-manager.tsx:427-620`
 
-Suggested fix: keep the table as a wide-desktop compact mode, but add a responsive card/list workbench below large desktop widths: larger preview, title/filename/topic grouped with the image, status chips near the preview, and edit/delete/tag actions in the same visual cluster. Avoid nested horizontal + vertical scroll for the core admin review loop.
+Evidence:
 
-### UIUX-C21-02 - Admin navigation is a flat ten-link strip with no workflow grouping
+- Dashboard recent uploads are placed in `max-h-[calc(100vh-16rem)] overflow-auto` (`dashboard-client.tsx:142`).
+- `ImageManager` renders a horizontally scrollable table with columns for preview, title, filename, topic, tags, gamut, date, and actions (`image-manager.tsx:427-450`).
+- The thumbnail is a fixed `h-32 w-32` tile (`image-manager.tsx:473-481`), tags occupy a separate `min-w-[200px]` area (`image-manager.tsx:500-552`), and edit/delete buttons are detached at the far right (`image-manager.tsx:571-607`).
 
-Severity: Low-Medium
-Confidence: High
-Exact file/region: `apps/web/src/components/admin-nav.tsx:15-49`; `apps/web/src/components/admin-header.tsx:13-26`
+Failure scenario:
 
-Evidence: `AdminNav` defines dashboard, categories, tags, SEO, settings, tokens, password, users, DB, and analytics as ten peer links (`admin-nav.tsx:15-26`) and renders them as one wrapping `flex flex-wrap` nav (`admin-nav.tsx:29-49`). The header combines brand, nav, and logout in a wrapping row (`admin-header.tsx:13-26`) without separating publishing, organization, access, operations, and insights.
+An admin reviewing a fresh upload set on a small laptop must pan horizontally to associate a photo with tags, gamut state, date, and actions. The interface asks the admin to maintain row identity while operating on photo-specific content, which is risky when adjacent frames look similar.
 
-Concrete failure scenario: a Korean admin on a narrow tablet sees daily publishing links wrapped together with credentials, user management, DB restore, and analytics. Common upload/edit workflows take more scanning, while high-risk operational pages feel as visually routine as taxonomy links.
+Concrete fix:
 
-Suggested fix: group the admin IA into stable sections such as Publish, Organize, Site, Access, Operations, and Insights. On mobile/tablet, use a drawer or section menu instead of a single wrapping strip. Keep `aria-current`, focus-visible rings, and 44px targets from the current implementation.
+Introduce a responsive workbench view for non-wide desktops: image preview and primary metadata together, chips/status near the preview, and edit/delete/share/tag actions in the same row/card. Keep the dense table as a desktop mode, not the only shape.
 
-### UIUX-C21-03 - Mobile masonry cards permanently overlay metadata on top of finished photos
+### UIUX-C22-02 - Admin IA gives routine and high-risk pages the same visual weight
 
-Severity: Low
-Confidence: Medium
-Exact file/region: `apps/web/src/components/masonry-card.tsx:149-155`
+Severity: Low-Medium  
+Confidence: High  
+Status: Confirmed
 
-Evidence: every mobile card renders an always-visible `absolute inset-x-0 top-0 sm:hidden` gradient overlay with title and topic text (`masonry-card.tsx:149-154`). Desktop moves metadata to a bottom overlay that is hidden until hover/focus (`masonry-card.tsx:155-160`), but mobile visitors have no clean-thumbnail state in the grid.
+Exact file/region:
 
-Concrete failure scenario: on a phone, a concert portrait or tightly cropped image with important subject detail near the top is partially covered by the title/topic gradient before the visitor has chosen to open the photo. For a finished-photo gallery, the browse grid becomes slightly less faithful to the photographer's crop.
+- `apps/web/src/components/admin-nav.tsx:15-49`
+- `apps/web/src/components/admin-header.tsx:13-26`
 
-Suggested fix: move mobile card metadata below the image, reserve a small caption band, or expose a compact "clean grid" presentation where metadata appears only on focus/long-press/open. Preserve the current accessible `aria-label` and H3 hierarchy if the visual treatment changes.
+Evidence:
 
-## Current Non-Issues Checked
+- Ten admin destinations are a single peer array: Dashboard, Categories, Tags, SEO, Settings, Tokens, Password, Users, Database, Analytics (`admin-nav.tsx:15-26`).
+- The nav renders as one wrapping flex strip (`admin-nav.tsx:29-49`), inside a wrapping header row with logout (`admin-header.tsx:13-26`).
 
-- Mobile filter wall: fixed in current source. `TagFilter` uses collapsed mobile `<details>` and keeps full inline chips for `sm+` only (`apps/web/src/components/tag-filter.tsx:143-160`).
-- Token revoke confirmation: fixed. The dialog title/description interpolate the selected token label (`tokens-client.tsx:307-313`; message keys include `{label}`).
-- Category alias deletion confirmation: fixed. The dialog includes alias and category label (`topic-manager.tsx:431-445`; message keys include `{alias}` and `{label}`).
-- Analytics country display: fixed. Country rows call `formatCountry(row.country_code)` and render localized label plus raw code (`analytics-client.tsx:202-210`).
-- Basic touch/focus/contrast contracts: targeted Vitest suite passed 72 tests across touch target, focus-visible, switch geometry, HDR badge contrast, theme token, i18n parity, search status, lightbox controls, and info-sheet IA.
+Failure scenario:
 
-## Coverage Map
+A trusted operator scanning for daily publishing tasks sees DB restore, access tokens, user management, and password pages as equally prominent peers. On a narrow screen, wrapping can separate related tasks while high-risk operations remain visually ordinary.
 
-- Interaction design: reviewed nav/search, photo viewer, lightbox, tag filters, admin image manager, settings/backfill, upload, token/category dialogs.
-- Keyboard/focus: source and tests cover search trap/restore, lightbox/info-sheet focus restore, focus-visible rings, shortcut labels, and status live regions.
-- Touch targets: blocking audit passed; current source keeps 44px floors on nav, filters, upload, lightbox, and admin action controls.
-- Responsive layout: findings C21-01 through C21-03.
-- Color/contrast: HDR badge contrast, theme token, and focus-ring tests passed; no new contrast defect confirmed.
-- i18n: EN/KO parity passed; Korean-specific protected admin runtime was not browser-clicked.
-- Loading/empty/error states: upload no-topic/skip/progress, token empty/error, image processing loading, search empty/loading/error, and public not-found surfaces reviewed; no new confirmed issue.
+Concrete fix:
 
-## Final Sweep / Uninspected Categories
+Group the admin nav by job: Publish, Organize, Site, Access, Operations, Insights. Use a sectioned drawer/menu at smaller breakpoints. Preserve existing `aria-current`, focus-visible rings, and touch-target sizing.
 
-Uninspected with runtime evidence: credentialed protected-admin pages in a current local server, because local port 3000 was down and the available e2e server path performs DB seed/setup. Physical browser/display validation for P3/HDR rendering was also not performed. Live deployed Playwright data was used only as supplemental shape evidence because it did not fully match current HEAD.
+### UIUX-C22-03 - Mobile grid overlays reduce clean-photo inspection
 
-No commits or pushes were made.
+Severity: Low  
+Confidence: High  
+Status: Confirmed
+
+Exact file/region:
+
+- `apps/web/src/components/masonry-card.tsx:149-155`
+
+Evidence:
+
+- Source renders an always-visible mobile top gradient with title/topic: `absolute inset-x-0 top-0 sm:hidden` (`masonry-card.tsx:149-154`).
+- Agent-browser 390px viewport on `/en` measured each mobile overlay as visible `display:block`, `358px` wide and `60px` tall over the image. The desktop overlay is hidden until hover/focus (`masonry-card.tsx:155-160`).
+
+Failure scenario:
+
+Visitors browsing on phones see title/topic chrome over every finished photo. If the subject, skyline, or face sits near the top crop, the gallery presentation obscures the photographer's intended composition before the visitor opens the detail page.
+
+Concrete fix:
+
+Move mobile metadata to a reserved caption area, or provide a clean-grid presentation with metadata exposed on focus/open. Keep the accessible link label and do not make metadata color-only.
+
+## UI/UX Coverage Map
+
+Information architecture: public nav/footer, about/privacy/map/timeline/home, admin shell/login, source-only protected admin pages.  
+Affordances: search trigger, theme cycle, locale switch, mobile menu, tag filter, map/list fallback, photo links, login, admin source dialogs.  
+Focus/keyboard: skip link, 44px controls, search focus trap/inert behavior, source/tests for lightbox/info sheet and focus-visible rings.  
+WCAG/ARIA: map marker name fixed; search dialog named; login controls labeled; no missing i18n keys in targeted parity test.  
+Responsive: 390px and 1440px sampled; admin table/nav debt remains source-confirmed.  
+Loading/empty/error: public not-found/error shells, map no-photo state source, search status source, token/settings source, failed-image source reviewed.  
+Dark/light: dark privacy route sampled and theme-token tests passed.  
+i18n/RTL: EN/KO catalogs pass parity; only LTR locales ship, so RTL remains future-risk only.  
+Perceived performance: memoized masonry cards, sized thumbnails, search debounce/abort, and map chunking are present; no trace was run.
+
+## Checked Non-Issues
+
+- Prior map-marker issue is closed: DOM marker has `alt="Open photo: E2E Landscape"`, `title="E2E Landscape"`, `role="button"`, `tabindex="0"`, and a 44px box.
+- Prior missing `common.cancel` / `common.tryAgain` issue is closed: both keys exist in EN and KO messages.
+- Search modal had active focus in the combobox and 26 outside body children inert/`aria-hidden` during the sampled open state.
+- Login page initial state has no alert noise and exposes a straightforward form with 44px controls.
+- Tag filter mobile disclosure is compact and accessible enough for the sampled E2E data.
+
+## Prioritized Recommendations
+
+Tier 0: none confirmed.
+
+Tier 1: redesign admin image management below wide desktop so photo identity, tags, metadata, and actions remain together.
+
+Tier 2: section admin IA into workflows and de-emphasize high-risk operations until the user enters an Operations area.
+
+Tier 3: revise mobile card metadata to protect clean photo inspection; add a future RTL browser matrix when an RTL locale ships; add protected-admin browser proof where credentials are available.
+
+## Final Missed-Issue Sweep
+
+Searched source, docs, messages, and tests for IA, affordance, ARIA, focus, touch, validation, loading/empty/error, dark mode, RTL, semantic search, product claims, analytics, and deploy-copy surfaces. Uninspected categories: authenticated admin pages at runtime, destructive workflows, production CDN/SW/offline behavior, physical HDR/P3 output, generated build output, binary media/font/icon assets, and large-gallery performance traces. No implementation, commits, pushes, or deploys were performed.

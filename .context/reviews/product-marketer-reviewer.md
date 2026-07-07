@@ -1,98 +1,104 @@
-# Product Marketer Reviewer - Cycle 21
+# Product Marketer Reviewer - Cycle 22
 
-Review target: current `HEAD` `45b32d1db373e03d82a29511f53832051c770880`.
+Review target: current `HEAD` `dabf8e8a`.
 
-Role surface: `product-marketer-reviewer`, adapted to GalleryKit. The local profile's BurstPick-specific product assumptions were ignored; only the product-truth and positioning-critical review mindset was reused. This is a code/doc review of shipped behavior versus product-facing docs, UI copy, metadata, and operator claims.
+Role surface: `product-marketer-reviewer`, adapted to GalleryKit. The local profile's BurstPick-specific product assumptions were ignored; only the claim-verification and positioning-critical review posture was reused.
 
-## Required Context Read First
+## Executive Summary
 
-- `AGENTS.md`: read before review; repo policy says GalleryKit is a self-hosted finished-photo gallery, with no edit/culling/scoring features, strict quality gates, and product docs/reviews under `.context/`.
-- `CLAUDE.md`: read before review; used as the detailed source of product boundaries, deployment model, semantic-search activation, storage caveat, privacy model, upload API, schema/runbook notes, and unsupported-feature boundaries.
-- `.context/plans/README.md`: read before review; used to avoid treating historical plan text as current product truth.
+GalleryKit's positioning is much sharper than earlier cycles: the README and in-app About copy now say exactly what the product is for, what it is not for, and which operator-runbook features require deliberate activation. Go-to-market readiness is still constrained by one trust risk: the repository ships a real Atik deployment `site-config.json` at the same path new operators are told to customize, and the production validator accepts it as a valid non-placeholder URL. That can silently publish the wrong canonical host/brand for a fresh self-hosted deployment.
 
-## Inventory Before Findings
+## Product-Truth Inventory
 
-Docs and operator-facing product claims:
+Docs and app copy reviewed:
 
-- Root and app docs: `README.md`, `apps/web/README.md`, `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
-- Deployment/config docs and examples: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/src/site-config.example.json`, `apps/web/src/site-config.json`.
-- Current docs were checked for claims about semantic search, similar photos, upload API, no bundled Lightroom plugin, backup/restore scope, local-only storage, privacy/GPS, analytics, PWA behavior, Docker deploy, and unsupported editor/culling/scoring/payment/proofing/SaaS positioning.
+- `README.md`, `apps/web/README.md`, `CLAUDE.md`, `.context/plans/README.md`
+- `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`, `apps/web/scripts/ensure-site-config.mjs`
+- public About/Privacy/Footer/Nav pages and EN/KO message catalogs
+- semantic search config/UI/route source, storage abstraction source, upload token copy, free-download and Cycle 22 source-contract tests
 
-Site config, metadata, OG, feed, robots, sitemap:
+Runtime evidence:
 
-- Site config: `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`, `apps/web/scripts/ensure-site-config.mjs`.
-- Metadata entry points: `apps/web/src/app/[locale]/layout.tsx`, `apps/web/src/app/[locale]/(public)/page.tsx`, photo/topic/shared/smart-collection page metadata, `apps/web/src/app/api/og/route.tsx`, `apps/web/src/app/api/og/photo/[id]/route.tsx`.
-- Discovery surfaces: `apps/web/src/app/sitemap.ts`, `apps/web/src/app/robots.ts`, `apps/web/src/app/feed.xml/route.ts`, `apps/web/src/app/manifest.ts`.
+- Local `next start` rendered `/en`, `/en/map`, `/en/privacy`, and `/en/admin`.
+- Browser title/nav/footer showed Atik branding from the checked-in config on the local build.
 
-Public pages/components and messages:
+Validation:
 
-- Public pages reviewed or inventoried: home, topic, photo, shared album, smart collection, timeline, map, privacy, about GalleryKit, feed, sitemap, robots, manifest, OG routes, and upload/image-serving surfaces.
-- Public components reviewed or inventoried: nav, footer, home client, search, similar photos, photo viewer/lightbox, masonry/gallery cards, color/HDR details, map client/loader, tag filtering, share/download UI, restore-maintenance state.
-- Locale copy reviewed: `apps/web/messages/en.json`, `apps/web/messages/ko.json`.
-
-Admin settings/UI and operator controls:
-
-- Settings and SEO: `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx`, `settings-client.tsx`, `seo/page.tsx`, `seo-client.tsx`.
-- Other admin UI/actions inventoried: dashboard/upload, image manager, bulk edit, categories/map visibility, tags, users, password, analytics, upload tokens, database backup/restore, admin actions, and admin/public API routes.
-- Specific claims checked: GPS strip lock, EXIF alt-text hints, semantic-search Disabled/Stub/production gating, color/HDR controls, upload token scope/expiry copy, and backup/restore warnings.
-
-Tests/source contracts proving product claims:
-
-- Semantic-search truth: `semantic-search-settings-ui.test.ts`, `settings-semantic-mode-action.test.ts`, `search-semantic-toggle-source.test.ts`, `search-disclaimer.test.ts`, semantic/similar API tests and source contracts.
-- Metadata/config truth: `seo-settings-fallback.test.ts`, `home-metadata-title.test.ts`, `ensure-site-config.test.ts`, `sitemap-robots.test.ts`, `atom-feed.test.ts`, `photo-og-metadata.test.ts`, `og-route-source-contracts.test.ts`.
-- Product-boundary/privacy truth: privacy-field tests, map privacy tests, analytics tests, touch-target/source-contract tests, cycle source-contract tests that pin no editor/culling/scoring/payment/plugin claims.
+- Targeted Vitest run passed 9 files / 63 tests, including source contracts for Cycle 22, search disclaimers, i18n parity, and free-download boundaries.
 
 ## Findings
 
-### PMR-21-01 - Committed site config can publish Atik branding/canonicals for a fresh self-hosted deploy
+### PMR-C22-01 - Checked-in Atik site config can silently become a fresh deploy's public brand/canonical
 
-Severity: Medium
+Severity: Medium  
+Confidence: High  
+Status: Confirmed
 
-Confidence: High
+Exact file/region:
 
-Exact files/regions:
+- `apps/web/src/site-config.json:2-10`
+- `README.md:60-77`, `README.md:121-122`, `README.md:171-172`, `README.md:198-200`
+- `apps/web/README.md:19-20`, `apps/web/README.md:49-50`, `apps/web/README.md:57`
+- `apps/web/scripts/ensure-site-config.mjs:12-42`
+- `apps/web/src/app/sitemap.ts:14-18`
+- `apps/web/src/app/[locale]/layout.tsx:15-26`
+- `apps/web/src/components/footer.tsx:33-37`
 
-- `apps/web/src/site-config.json:2-10` contains real deployment values: `Atik Gallery`, `https://gallery.atik.kr`, `Atik`, and `Atik Gallery` footer/nav text.
-- `README.md:60-77` correctly explains that file-backed config controls static links, fallback metadata, analytics, URL, footer, and build-time-inlined values.
-- `README.md:121-122` and `apps/web/README.md:15-20` tell operators to copy the example to `site-config.json` and edit it, but the repo already contains a non-example `site-config.json` at that destination.
-- `apps/web/scripts/ensure-site-config.mjs:12-21` builds `configuredUrl` from `BASE_URL || siteConfig.url` and only rejects placeholder hosts.
-- `apps/web/scripts/ensure-site-config.mjs:23-42` rejects missing, relative, non-http, and placeholder production URLs, but accepts any real URL, including the committed Atik URL.
-- `apps/web/src/app/sitemap.ts:14-18` uses `process.env.BASE_URL || siteConfig.url` for sitemap URLs.
-- `apps/web/src/app/[locale]/layout.tsx:15-26` uses `getSeoSettings()` for `metadataBase`, default title, and description; `apps/web/src/__tests__/seo-settings-fallback.test.ts:89-117` proves the fallback is `site-config.json` unless `BASE_URL` overrides URL.
-- `apps/web/src/__tests__/ensure-site-config.test.ts:53-76` proves the production guard catches placeholder/example URLs and accepts an override, but does not assert that the committed deployment-specific URL is rejected.
+Evidence:
 
-Concrete confusion scenario:
+- The committed config contains real deployment values: `Atik Gallery`, `https://gallery.atik.kr`, `Atik`, and `Atik Gallery` footer/nav text (`site-config.json:2-10`).
+- Getting-started docs tell operators to copy the example into that same path and edit it (`README.md:121-122`; `apps/web/README.md:19-20`), but the path already exists in the repo.
+- Production build validation uses `process.env.BASE_URL || siteConfig.url` and rejects only missing, invalid, localhost, or example hosts (`ensure-site-config.mjs:12-42`). A real Atik URL passes.
+- Sitemap generation uses `process.env.BASE_URL || siteConfig.url` (`sitemap.ts:14-18`), layout metadata uses `seo.url` from config/DB fallback (`layout.tsx:15-26`), and footer text renders `siteConfig.footer_text` directly (`footer.tsx:33-37`).
+- Browser evidence from local build: page title and nav/footer rendered "Atik Gallery" from the checked-in config.
 
-A self-hosting operator clones GalleryKit, sees product docs describing a reusable self-hosted gallery, and runs a production build without setting `BASE_URL` or without overwriting the already-present `apps/web/src/site-config.json`. The build passes because `gallery.atik.kr` is a syntactically valid non-placeholder URL. Public metadata, sitemap entries, manifest/default branding, footer text, and fallback SEO can then point to or name Atik's gallery instead of the operator's site. The failure is product-facing: crawlers and social previews can learn the wrong canonical host/brand, while the operator may believe the admin SEO panel has covered all visible branding.
+Failure scenario:
 
-Suggested fix:
+A self-hosting operator clones the repo, creates `.env.local`, misses the config-copy step because `apps/web/src/site-config.json` already exists, and builds without `BASE_URL`. The production guard passes because `https://gallery.atik.kr` is a syntactically valid non-placeholder URL. Public metadata, sitemap, footer, manifest/fallback branding, and crawler-visible canonicals can then point to Atik's gallery, undermining SEO and operator trust.
 
-Make deployment-specific branding non-committed or non-passable by default. Practical options:
+Concrete fix:
 
-- Track only `site-config.example.json` and make `site-config.json` gitignored/local, then keep `ensure-site-config.mjs` requiring a local production config or `BASE_URL`.
-- Or keep a committed generic `site-config.json` with placeholder values and make the production validator reject placeholder/generic values unless `BASE_URL` is explicitly set.
-- If the Atik config must remain for the primary deployment, add an explicit production validation denylist or environment requirement so a generic GalleryKit build cannot silently ship `gallery.atik.kr` canonicals.
-- Add a source test that the committed default config is either generic/non-production or that production builds without `BASE_URL` fail when the checked-in config belongs to a real deployment.
+Make deployment-specific branding impossible to ship by default. Options:
 
-## Non-Findings Checked
+- Track only `site-config.example.json`, gitignore `site-config.json`, and require a local config or `BASE_URL` for production.
+- Or keep a committed generic config but make production validation reject generic/placeholders unless `BASE_URL` is explicitly set.
+- If the Atik config must remain for the primary deployment, add a denylist or env requirement so generic builds cannot pass with `gallery.atik.kr`.
+- Add a source test that a production build without `BASE_URL` cannot pass with the checked-in deployment-specific config.
 
-- Semantic search docs/UI are accurate: production mode is operator-runbook-only; Settings can save Disabled or Stub only; stub copy says results are not semantically meaningful; similar photos are production-only.
-- EXIF alt-text copy is accurate: it describes EXIF-derived placeholders and explicitly says model-generated descriptions are not implemented.
-- Upload integration copy is accurate: docs/UI describe PAT-authenticated upload API tokens and explicitly do not promise a bundled Lightroom Classic plugin.
-- Privacy/GPS copy is directionally supported by source: public GPS is limited to map-visible categories, analytics rows do not store raw full IP addresses, GA is opt-in via build-time config, and map tiles use OpenStreetMap.
-- Backup/restore copy is accurate: DB dumps are row-only and do not include private originals, derivatives, resources, or host-level file state.
-- Current public docs/About copy correctly excludes editing, culling, scoring, proofing, payment, hosted SaaS workflows, and bundled plugin support.
-- Smart collections have public/source support but are not marketed as admin-authorable; the admin copy that mentions them warns that collections are not editable in the admin UI yet.
+## Product Claims Checked
+
+Semantic search: current copy is supportable. README says it is disabled by default, operator-runbook-only for production, uses CLIP after weights/backfill/env opt-in, and scans bounded newest embeddings rather than a vector index. Source supports this with default `semantic_search_mode: 'disabled'`, resolver gating production on `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, Settings writing only Disabled/Stub, and route 503 behavior outside stub/production.
+
+No editor/culling/scoring: current copy is supportable. README and About page explicitly say GalleryKit is not an editor, culler, scoring tool, proofing portal, payment system, hosted SaaS workflow, or bundled Lightroom Classic plugin.
+
+Upload integration: current copy is supportable. Docs and token copy describe a PAT-authenticated upload API for external clients and do not promise a bundled Lightroom plugin.
+
+Storage: current copy is supportable. CLAUDE and storage source are aligned that live upload/processing/serving paths remain local filesystem and the storage abstraction is not an S3/MinIO product feature.
+
+Analytics/privacy: current copy is supportable. Privacy copy distinguishes optional Google Analytics from first-party local view events and rate-limit buckets, and discloses OpenStreetMap tile requests.
+
+Auto alt text: current copy is supportable. App/docs describe EXIF-derived hints, not model-generated captions.
+
+Free download/payment: current source contract guards no paid/entitlement symbols on the public download path.
+
+## Positioning Assessment
+
+Current strongest position: "A self-hosted finished-photo gallery for photographers/operators who want private originals, color-conscious public delivery, first-party analytics by default, and deliberate operator-controlled search."
+
+This is credible because it avoids over-claiming AI, avoids replacing Lightroom, and names operational limits. The positioning should continue leaning into trust: local originals, no bundled SaaS dependency, explicit semantic-search activation, honest backup scope, and no photo-editing/culling pretense.
+
+## Trust/Risk Recommendations
+
+Tier 0: block silent deployment-specific canonicals by fixing the `site-config.json` default/validator contract.
+
+Tier 1: make the first-run setup copy clearer in docs after the config fix: "this file is intentionally untracked/local" or "production requires BASE_URL".
+
+Tier 2: add a short About/README proof block explaining what "operator-controlled search" means in one sentence: disabled by default, local weights after setup, no cloud query API, bounded scan limits.
+
+Tier 3: add launch-oriented evidence later: sample deployment checklist, semantic-search activation proof transcript, and a public "what GalleryKit does not do" section in docs/site copy.
 
 ## Final Sweep
 
-Search terms swept across current docs, messages, app routes, components, actions, API routes, libraries, and relevant tests included: `Stripe`, `checkout`, `payment`, `paid`, `entitlement`, `license_tier`, `S3`, `MinIO`, `storage backend`, `Lightroom Classic plugin`, `lightroom plugin`, `culling`, `proofing`, `scoring`, `rating`, `AI caption`, `model-generated`, `smart collection`, `semantic search`, `Google Analytics`, `analytics`, `backup`, `restore`, `map_visible`, `GPS`, `OpenStreetMap`, `site-config`, `metadataBase`, `sitemap`, `robots`, `feed`, and `manifest`.
+Searched docs, messages, routes, components, libraries, and tests for `AI`, semantic search, similar photos, culling, scoring, proofing, payment, Stripe, license, Lightroom/plugin, S3/MinIO/storage, Google Analytics, OpenStreetMap, backup/restore, `site-config`, Atik branding, `BASE_URL`, and free-download claims.
 
-Uninspected categories: generated build output, package locks, Drizzle metadata hashes, binary media/font/icon assets, browser-rendered screenshots, and live deployed production state. Historical plan/review artifacts were searched for stale-claim awareness, but not treated as current product promises unless the same claim appears in active README/app docs/messages/source.
-
-## Validation
-
-- Wrote only `.context/reviews/product-marketer-reviewer.md`.
-- Did not edit source code or other review files.
-- Did not commit or push, per user instruction.
-- Did not run executable tests; this lane produced a review artifact based on source/doc inspection.
+Uninspected categories: live production database/settings, generated build output, binary assets, package-lock provenance, real search model weights, production deploy host state, and external marketing channels beyond repository docs/app copy. No source files were edited, and no commits, pushes, or deploys were performed.
