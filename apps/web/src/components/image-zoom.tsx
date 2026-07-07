@@ -259,7 +259,13 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
         };
     }, []);
 
-    const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    // C4-12 (run-10 c4): attached natively with { passive: false } below —
+    // NOT via React's onTouchMove. React registers its delegated touchmove
+    // listener as PASSIVE, so a synthetic-handler preventDefault() is a
+    // silent no-op (Chrome logs "Unable to preventDefault inside passive
+    // event listener") and pinch/pan failed to suppress the browser's own
+    // scroll/zoom. Mirrors this file's own non-passive wheel listener.
+    const handleTouchMove = useCallback((e: TouchEvent) => {
         if (e.touches.length === 2 && isPinchingRef.current) {
             e.preventDefault();
             e.stopPropagation();
@@ -301,6 +307,16 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
         positionRef.current = clamped;
         applyTransform(zoomLevelRef.current, clamped.x, clamped.y, false);
     }, [applyTransform]);
+
+    // C4-12: register touchmove natively so preventDefault() is honored (see
+    // the handler comment). Re-attaches only if handleTouchMove's identity
+    // changes (it is stable — deps [applyTransform]).
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        container.addEventListener('touchmove', handleTouchMove, { passive: false });
+        return () => container.removeEventListener('touchmove', handleTouchMove);
+    }, [handleTouchMove]);
 
     // Snap to 1.0 on pinch end if below threshold
     useEffect(() => {
@@ -357,7 +373,6 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
             onTouchEnd={handleTouchEnd}
             role="button"
             tabIndex={0}
