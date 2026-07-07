@@ -7,6 +7,14 @@ Deferred items preserve original severity/confidence. Security, correctness, and
 
 ## Deferred Items
 
+### DEF-C10-01-UPSTREAM - Nested Next/PostCSS audit remains upstream/tooling-blocked
+
+- Aggregate: AGG-C10-01.
+- Citation: `apps/web/package.json:59`, `package.json:7-9`, `package-lock.json:9194-9205`, `package-lock.json:9334-9337`, `package-lock.json:9850-9853`.
+- Original severity/confidence: Medium / High.
+- Reason for deferral: upstream/tooling blocker after implementation attempt. On 2026-07-07, `npm view next version` returned `16.2.10`, `npm view next@latest dependencies.postcss` returned `8.4.31`, and `npm audit --workspace=apps/web --omit=dev --audit-level=moderate --json` still reports GHSA-qx2v-qp2m-jg93 through `node_modules/next/node_modules/postcss` with only an invalid semver-major downgrade to `next@9.3.3`. Both a generic nested override (`"next": { "postcss": "8.5.16" }`) and exact nested override (`"next@16.2.10": { "postcss": "8.5.16" }`) left the lockfile at `next/node_modules/postcss@8.4.31`; deleting/regenerating the lockfile was not performed because destructive file removal requires explicit confirmation under the repository/user safety rules.
+- Exit criterion: a stable Next release updates its nested PostCSS dependency, npm applies a non-destructive nested override that changes the committed lockfile and passes all gates, or the user explicitly authorizes lockfile regeneration/remediation beyond ordinary install/update.
+
 ### DEF-C10-04 - On This Day month/day query needs schema or cache design
 
 - Aggregate: AGG-C10-04.
@@ -70,3 +78,19 @@ Deferred items preserve original severity/confidence. Security, correctness, and
 - Original severity/confidence: Medium / High.
 - Reason for deferral: explicit repository operational contract. `CLAUDE.md` says, "Deploys do NOT touch host nginx" and that committed nginx templates are inert until an operator applies and verifies them by hand; this cycle's per-cycle deploy rebuilds the container and must not silently mutate host nginx.
 - Exit criterion: nginx template changes, deploy tooling is explicitly expanded to verify host-nginx hashes, or an operator requests a host-nginx apply/check workflow.
+
+### DEF-C10-19 - Ignored `.omc` migration lesson remains stale
+
+- Aggregate: AGG-C10-19.
+- Citation: `.omc/wiki/schema-derived-list-drift-migration-reconcile-lesson.md:19-27`, `CLAUDE.md:446-450`, `apps/web/scripts/migrate.js:791-830`, `apps/web/src/__tests__/migrate-pending-migrations.test.ts:1-16`.
+- Original severity/confidence: Medium / High.
+- Reason for deferral: the stale file lives under `.omc`, which is ignored by `.gitignore`; prior plan history explicitly flags tracked `.omc` artifacts as undesirable. The authoritative tracked docs and tests already describe the current migration behavior, so force-adding ignored wiki state would increase repository noise rather than strengthen the shipped documentation surface.
+- Exit criterion: `.omc/wiki` becomes a tracked documentation source, or the wiki generation/export process gains a safe tracked target for these lessons.
+
+### DEF-C10-20 - Ignored `.omc` CLIP wiki overclaims live production state
+
+- Aggregate: AGG-C10-20.
+- Citation: `.omc/wiki/clip-semantic-search-us-p51.md:13-17`, `.omc/wiki/gallerykit-architecture-overview.md:30-33`, `README.md:47-48`, `apps/web/README.md:65-82`, `CLAUDE.md:160`.
+- Original severity/confidence: Low / High.
+- Reason for deferral: the overclaim is confined to ignored `.omc/wiki` files. Tracked authoritative docs already state CLIP is disabled by default/operator-enabled and require model weights, env opt-in, DB mode, and backfill verification before treating production semantic search as live.
+- Exit criterion: `.omc/wiki` becomes tracked/published documentation, or a tracked docs page reintroduces the same live-production overclaim.
