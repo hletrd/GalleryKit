@@ -5,7 +5,11 @@ import { buildContentSecurityPolicy, parseCspImageBaseUrl } from './src/lib/cont
 
 const withNextIntl = createNextIntlPlugin();
 
-export function parseImageBaseUrl(rawValue: string | undefined, environment: string = process.env.NODE_ENV || 'development'): URL | null {
+// C7-08 (run-10 cycle 7b): forward the optional environment verbatim so
+// parseCspImageBaseUrl alone owns the default-environment expression (the
+// wrapper previously re-specified `process.env.NODE_ENV || 'development'`,
+// a second hand-maintained copy that could silently drift).
+export function parseImageBaseUrl(rawValue: string | undefined, environment?: string): URL | null {
   return parseCspImageBaseUrl(rawValue, environment);
 }
 

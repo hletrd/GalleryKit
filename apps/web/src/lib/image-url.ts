@@ -23,9 +23,28 @@ import { sanitizeImageBaseUrlSafely } from '@/lib/content-security-policy';
  * behavior is unchanged. The read MUST stay inside the function
  * (lazy): module scope would break SSR and pin a stale value.
  */
+// C7-20 (run-10 cycle 7b): the browser-side sanitize/parse result cannot
+// change within a page's lifetime (data-image-base is stamped once by the
+// locale layout), but imageUrl() runs per size/format variant — up to ~600
+// calls on one 100-photo masonry mount, each of which used to re-run the
+// full URL-parse/validate chain. Memoize keyed on the RAW attribute value:
+// repeat calls cost one dataset read + string compare, while a changed (or
+// test-stubbed) attribute still recomputes. The lazy-read-inside-the-function
+// contract above is preserved — the cache only shortcuts the sanitize step,
+// never the document read.
+let cachedClientImageBaseInitialized = false;
+let cachedClientImageBaseRaw: string | undefined;
+let cachedClientImageBase = '';
+
 function resolveImageBase(): string {
     if (typeof document !== 'undefined') {
-        return sanitizeImageBaseUrlSafely(document.documentElement?.dataset?.imageBase);
+        const raw = document.documentElement?.dataset?.imageBase;
+        if (!cachedClientImageBaseInitialized || raw !== cachedClientImageBaseRaw) {
+            cachedClientImageBase = sanitizeImageBaseUrlSafely(raw);
+            cachedClientImageBaseRaw = raw;
+            cachedClientImageBaseInitialized = true;
+        }
+        return cachedClientImageBase;
     }
     return IMAGE_BASE_URL;
 }

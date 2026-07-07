@@ -1,3 +1,5 @@
+import siteConfig from '@/site-config.json';
+
 interface HeaderLookup {
     get(name: string): string | null | undefined;
 }
@@ -44,7 +46,26 @@ function getProtocolFromCandidate(candidate: string | null | undefined) {
 
 function getConfiguredBaseOrigin() {
     const configured = process.env.BASE_URL?.trim();
-    return configured ? toOrigin(configured) : null;
+    if (configured) {
+        return toOrigin(configured);
+    }
+    // C7-05 (run-10 cycle 7b): fall back to siteConfig.url — the documented,
+    // build-gated sibling of the env var (Deployment Checklist step 3;
+    // `ensure-site-config.mjs` validates `BASE_URL || siteConfig.url` before
+    // production builds) — so an operator who configured ONLY
+    // site-config.json still gets the canonical-origin anchor for CSRF
+    // same-origin checks instead of silently dropping to header inference.
+    // Production-only: in dev/test the checked-in file commonly carries the
+    // production URL while the app runs on localhost, where header-derived
+    // origin resolution is the correct behavior (e2e sets BASE_URL env
+    // explicitly via run-e2e-server.mjs).
+    if (process.env.NODE_ENV === 'production') {
+        const fileConfigured = typeof siteConfig.url === 'string' ? siteConfig.url.trim() : '';
+        if (fileConfigured) {
+            return toOrigin(fileConfigured);
+        }
+    }
+    return null;
 }
 
 export function getTrustedRequestProtocol(requestHeaders: HeaderLookup) {
@@ -68,6 +89,12 @@ function getExpectedOrigin(requestHeaders: HeaderLookup) {
 
     const protocol = getTrustedRequestProtocol(requestHeaders);
 
+    // C7-13 (INFO, cycle 7b): under the SHIPPED nginx template Host and
+    // X-Forwarded-Host are both set to the same $host, so this preference
+    // order only matters for non-default proxy topologies where the two
+    // diverge AND no canonical base URL is configured. The canonical anchor
+    // above (BASE_URL / siteConfig.url) is the primary CSRF defense — do not
+    // treat this fallback as the load-bearing protection.
     const rawHost = normalizeHeaderValue(requestHeaders.get('host'))
         || (trustsProxyHeaders()
             ? normalizeTrustedProxyHeaderValue(requestHeaders.get('x-forwarded-host'))

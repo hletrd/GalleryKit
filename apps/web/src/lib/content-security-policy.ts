@@ -1,3 +1,15 @@
+/**
+ * MODULE BOUNDARY (C7-07, run-10 cycle 7b): this file is imported from THREE
+ * bundling contexts simultaneously —
+ *   1. `next.config.ts` at Next config-load/typegen time (build tooling),
+ *   2. server modules (`constants.ts`, `proxy.ts`) at runtime,
+ *   3. the CLIENT bundle, transitively via `image-url.ts` from 'use client'
+ *      components (masonry-card, photo-viewer, search, similar-photos).
+ * Keep it free of Node built-ins (`node:*`), APIs that exist solely on the
+ * server, and heavy dependencies: only Web-platform globals (URL, Set, regex)
+ * and statically replaced `process.env` reads are safe in all three contexts.
+ * A source-guard test pins this (content-security-policy.test.ts).
+ */
 const ALLOWED_IMAGE_BASE_PROTOCOLS = new Set(['http:', 'https:']);
 
 export function parseCspImageBaseUrl(rawValue: string | undefined, environment: string = process.env.NODE_ENV || 'development'): URL | null {
@@ -37,10 +49,21 @@ export function sanitizeImageBaseUrl(rawValue: string | undefined, environment?:
   return `${parsed.origin}${pathPrefix}`;
 }
 
+let hasLoggedImageBaseSanitizeFailure = false;
+
 export function sanitizeImageBaseUrlSafely(rawValue: string | undefined, environment?: string): string {
   try {
     return sanitizeImageBaseUrl(rawValue, environment);
-  } catch {
+  } catch (error) {
+    // C7-03 (run-10 cycle 7b): a rejected IMAGE_BASE_URL used to degrade to
+    // '' with ZERO diagnostics, silently disabling the CDN app-wide while the
+    // sibling buildCspSafely logged its identical failure class. Log once per
+    // process, server-side only (this module is also bundled client-side via
+    // image-url.ts, where the server has already logged the same failure).
+    if (!hasLoggedImageBaseSanitizeFailure && typeof window === 'undefined') {
+      hasLoggedImageBaseSanitizeFailure = true;
+      console.error('[content-security-policy] IMAGE_BASE_URL rejected by the sanitizer; image base disabled (relative /uploads paths will be served):', error);
+    }
     return '';
   }
 }
