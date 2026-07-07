@@ -24,6 +24,8 @@ const {
     generateSessionTokenMock,
     hashSessionTokenMock,
     getRestoreMaintenanceMessageMock,
+    acquireAdminMutationSlotMock,
+    enqueuePendingSessionRevocationMock,
 } = vi.hoisted(() => ({
     argonVerifyMock: vi.fn(),
     argonHashMock: vi.fn(),
@@ -48,6 +50,8 @@ const {
     generateSessionTokenMock: vi.fn(),
     hashSessionTokenMock: vi.fn(),
     getRestoreMaintenanceMessageMock: vi.fn(),
+    acquireAdminMutationSlotMock: vi.fn(),
+    enqueuePendingSessionRevocationMock: vi.fn(),
 }));
 
 vi.mock('argon2', () => ({
@@ -141,6 +145,8 @@ vi.mock('@/lib/auth-rate-limit', () => ({
 
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn(async () => undefined) }));
 vi.mock('@/lib/restore-maintenance', () => ({ getRestoreMaintenanceMessage: getRestoreMaintenanceMessageMock }));
+vi.mock('@/lib/admin-mutation-barrier', () => ({ acquireAdminMutationSlot: acquireAdminMutationSlotMock }));
+vi.mock('@/lib/pending-session-revocations', () => ({ enqueuePendingSessionRevocation: enqueuePendingSessionRevocationMock }));
 
 import { login, logout, updatePassword } from '@/app/actions/auth';
 
@@ -194,6 +200,10 @@ describe('auth server-action behavior locks', () => {
         hashSessionTokenMock.mockReturnValue('hashed-session-token');
         verifySessionTokenMock.mockResolvedValue({ userId: 7 });
         getRestoreMaintenanceMessageMock.mockReturnValue(null);
+        acquireAdminMutationSlotMock.mockImplementation(() => ({
+            acquired: true,
+            [Symbol.dispose]: () => {},
+        }));
         dbDeleteWhereMock.mockResolvedValue(undefined);
         dbDeleteMock.mockReturnValue({ where: dbDeleteWhereMock });
         dbInsertValuesMock.mockResolvedValue([{ insertId: 1 }]);
@@ -251,6 +261,50 @@ describe('auth server-action behavior locks', () => {
         expect(dbSelectMock).not.toHaveBeenCalled();
         expect(argonVerifyMock).not.toHaveBeenCalled();
         expect(dbTransactionMock).not.toHaveBeenCalled();
+    });
+
+    // AGG8b-21 / TEST8-01 (run-10 c8b): behavioral locks for the C7-01
+    // pending-revocation wiring — every skipped/failed DB-side session
+    // delete MUST queue the token hash; a successful delete must NOT.
+    it('logout during a restore window skips the DB delete and queues the revocation', async () => {
+        getRestoreMaintenanceMessageMock.mockReturnValue('restore in progress');
+
+        await expect(logout(form({ locale: 'en' }))).rejects.toThrow('NEXT_REDIRECT:/en/admin');
+
+        expect(dbDeleteMock).not.toHaveBeenCalled();
+        expect(enqueuePendingSessionRevocationMock).toHaveBeenCalledWith('hashed-session-token');
+        expect(cookieDeleteMock).toHaveBeenCalledWith({ name: 'admin_session', path: '/' });
+    });
+
+    it('logout without an admin mutation slot skips the DB delete and queues the revocation', async () => {
+        acquireAdminMutationSlotMock.mockImplementation(() => ({
+            acquired: false,
+            [Symbol.dispose]: () => {},
+        }));
+
+        await expect(logout(form({ locale: 'en' }))).rejects.toThrow('NEXT_REDIRECT:/en/admin');
+
+        expect(dbDeleteMock).not.toHaveBeenCalled();
+        expect(enqueuePendingSessionRevocationMock).toHaveBeenCalledWith('hashed-session-token');
+        expect(cookieDeleteMock).toHaveBeenCalledWith({ name: 'admin_session', path: '/' });
+    });
+
+    it('logout queues the revocation when the DB delete itself throws', async () => {
+        dbDeleteWhereMock.mockRejectedValue(new Error('connection lost'));
+
+        await expect(logout(form({ locale: 'en' }))).rejects.toThrow('NEXT_REDIRECT:/en/admin');
+
+        expect(dbDeleteMock).toHaveBeenCalledTimes(1);
+        expect(enqueuePendingSessionRevocationMock).toHaveBeenCalledWith('hashed-session-token');
+        expect(cookieDeleteMock).toHaveBeenCalledWith({ name: 'admin_session', path: '/' });
+    });
+
+    it('logout does NOT queue a revocation when the DB delete succeeds', async () => {
+        await expect(logout(form({ locale: 'en' }))).rejects.toThrow('NEXT_REDIRECT:/en/admin');
+
+        expect(dbDeleteMock).toHaveBeenCalledTimes(1);
+        expect(enqueuePendingSessionRevocationMock).not.toHaveBeenCalled();
+        expect(cookieDeleteMock).toHaveBeenCalledWith({ name: 'admin_session', path: '/' });
     });
 
     it('sets a Secure session cookie for trusted HTTPS login requests', async () => {
