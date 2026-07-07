@@ -14,7 +14,7 @@ const whereMock = vi.fn(async () => undefined);
 const deleteMock = vi.fn(() => ({ where: whereMock }));
 
 vi.mock('@/db', () => ({
-    db: { delete: (...args: unknown[]) => deleteMock(...args) },
+    db: { delete: () => deleteMock() },
     sessions: { id: Symbol('sessions.id') },
 }));
 

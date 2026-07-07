@@ -1,10 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getTrustedRequestProtocol, hasTrustedSameOrigin, hasTrustedSameOriginWithOptions } from '@/lib/request-origin';
 
 const originalTrustProxy = process.env.TRUST_PROXY;
 const originalBaseUrl = process.env.BASE_URL;
-const originalNodeEnv = process.env.NODE_ENV;
 
 function makeHeaders(values: Record<string, string | undefined>) {
     return {
@@ -26,11 +25,9 @@ describe('hasTrustedSameOrigin', () => {
         } else {
             process.env.BASE_URL = originalBaseUrl;
         }
-        if (originalNodeEnv === undefined) {
-            delete process.env.NODE_ENV;
-        } else {
-            process.env.NODE_ENV = originalNodeEnv;
-        }
+        // NODE_ENV is typed read-only under @types/node — stubbed via
+        // vi.stubEnv in the production-branch test below, undone here.
+        vi.unstubAllEnvs();
     });
 
     it('accepts same-origin Origin headers', () => {
@@ -113,7 +110,7 @@ describe('hasTrustedSameOrigin', () => {
 
     it('uses site-config url as the production canonical origin when BASE_URL is unset', () => {
         delete process.env.BASE_URL;
-        process.env.NODE_ENV = 'production';
+        vi.stubEnv('NODE_ENV', 'production');
         process.env.TRUST_PROXY = 'true';
 
         expect(hasTrustedSameOrigin(makeHeaders({
