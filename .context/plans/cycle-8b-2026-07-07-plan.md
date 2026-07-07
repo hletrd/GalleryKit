@@ -124,19 +124,31 @@ deduped findings (each verified in the current tree; see the aggregate's
   prohibited by repo git-safety rules), -35 (bounded retry log noise), -36 (superseded by
   peer's acquire-error destroy helper), -37 (process observation).
 
-## Gate evidence (to be filled during PROMPT 3)
+## Gate evidence (implementation HEAD `a1620767` + peer-converged tree, 2026-07-08)
 
 | Gate | Result |
 |------|--------|
-| eslint | pending |
-| typecheck | pending |
-| vitest | pending |
-| build | pending |
-| lint:api-auth | pending |
-| lint:action-origin | pending |
-| lint:public-route-rate-limit | pending |
-| playwright e2e | pending |
+| eslint (`npm run lint --workspace=apps/web`) | PASS (0 errors, 0 warnings) |
+| typecheck (`npm run typecheck --workspace=apps/web`) | PASS (app + scripts) |
+| vitest (`npm test --workspace=apps/web`) | PASS — 354 files + 2 skipped, 3291 passed / 4 skipped (documented CLIP/admin env-gated skips) |
+| build (`npm run build`) | PASS (production build, full route table emitted) |
+| lint:api-auth | PASS |
+| lint:action-origin | PASS |
+| lint:public-route-rate-limit | PASS (root feed.xml now under the limiter) |
+| playwright e2e (`npm run test:e2e --workspace=apps/web`) | PASS — 45 passed, 2 skipped (admin/CI-gated), run synchronously |
+
+**Shared-worktree gate incident (recorded per the caveat):** the first full vitest run
+showed 9 failures in 4 files. Ownership was verified with a clean `git worktree` at HEAD:
+`cycle-20-source-contracts.test.ts` failed because THIS cycle's WP10 rewrote the pinned
+watchdog cleanup text — fixed by aligning the pin (`a1620767`, intent preserved).
+`api-auth-response-headers` / `embeddings-action-behavior` failures reproduced ONLY with
+the peer session's uncommitted edits (clean worktree at my HEAD passed both), and
+`lr-upload-route-behavior` was already 7/7 red at the peer's own baseline commit
+`a1863405` — a peer test committed ahead of its in-flight route fix. Per the
+shared-worktree rule the peer's in-flight files were not touched; by the final gate run
+the peer's edits had converged and the whole suite was green in the shared tree.
 
 ## Deploy record
 
-- pending (DEPLOY_MODE: per-cycle)
+- Pre-deploy checks: `git pull --rebase` clean, no concurrent peer deploy in `ps aux`.
+- `npm run deploy` (repo root): see final ledger line below.
