@@ -3,6 +3,8 @@ export const LOCALES = ['en', 'ko'] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = 'en';
 
+import { sanitizeImageBaseUrlSafely } from '@/lib/content-security-policy';
+
 /**
  * Base URL for image assets. Override with the IMAGE_BASE_URL env var for
  * CDN-fronted deployments.
@@ -14,7 +16,7 @@ export const DEFAULT_LOCALE: Locale = 'en';
  * `app/[locale]/layout.tsx`. Do not consume this constant directly from
  * client components.
  */
-export const IMAGE_BASE_URL = process.env.IMAGE_BASE_URL || '';
+export const IMAGE_BASE_URL = sanitizeImageBaseUrlSafely(process.env.IMAGE_BASE_URL);
 
 import siteConfig from '@/site-config.json';
 

@@ -37,12 +37,27 @@ describe('imageUrl base resolution (COR-R4C16-03)', () => {
         expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('/uploads/jpeg/a.jpg');
     });
 
+    it('browser: ignores malformed or credential-bearing stamped bases', () => {
+        vi.stubGlobal('document', {
+            documentElement: { dataset: { imageBase: 'https://user:pass@cdn.example.com?token=x' } },
+        });
+        expect(imageUrl('/uploads/jpeg/a.jpg')).toBe('/uploads/jpeg/a.jpg');
+    });
+
     it('server: reads the IMAGE_BASE_URL env via the module constant', async () => {
         vi.stubEnv('IMAGE_BASE_URL', 'https://cdn.example.com');
         vi.resetModules();
         const fresh = await import('@/lib/image-url');
         expect(typeof document).toBe('undefined');
         expect(fresh.imageUrl('/uploads/jpeg/a.jpg')).toBe('https://cdn.example.com/uploads/jpeg/a.jpg');
+        vi.resetModules();
+    });
+
+    it('server: falls back to relative paths for credential-bearing IMAGE_BASE_URL values', async () => {
+        vi.stubEnv('IMAGE_BASE_URL', 'https://user:pass@cdn.example.com?token=x');
+        vi.resetModules();
+        const fresh = await import('@/lib/image-url');
+        expect(fresh.imageUrl('/uploads/jpeg/a.jpg')).toBe('/uploads/jpeg/a.jpg');
         vi.resetModules();
     });
 
@@ -55,6 +70,7 @@ describe('imageUrl base resolution (COR-R4C16-03)', () => {
             'utf8',
         );
         expect(layoutSource).toContain('data-image-base={IMAGE_BASE_URL || undefined}');
+        expect(layoutSource).not.toContain('process.env.IMAGE_BASE_URL');
     });
 });
 

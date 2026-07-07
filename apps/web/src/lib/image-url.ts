@@ -1,5 +1,6 @@
 import { IMAGE_BASE_URL } from '@/lib/constants';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { sanitizeImageBaseUrlSafely } from '@/lib/content-security-policy';
 
 /**
  * COR-R4C16-03: resolve the image base for BOTH runtimes.
@@ -24,7 +25,7 @@ import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-
  */
 function resolveImageBase(): string {
     if (typeof document !== 'undefined') {
-        return document.documentElement?.dataset?.imageBase ?? '';
+        return sanitizeImageBaseUrlSafely(document.documentElement?.dataset?.imageBase);
     }
     return IMAGE_BASE_URL;
 }

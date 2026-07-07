@@ -1,16 +1,19 @@
+const ALLOWED_IMAGE_BASE_PROTOCOLS = new Set(['http:', 'https:']);
+
 export function parseCspImageBaseUrl(rawValue: string | undefined, environment: string = process.env.NODE_ENV || 'development'): URL | null {
-  if (!rawValue) {
+  const value = rawValue?.trim();
+  if (!value) {
     return null;
   }
 
   let parsed: URL;
   try {
-    parsed = new URL(rawValue);
+    parsed = new URL(value);
   } catch {
     throw new Error('IMAGE_BASE_URL must be an absolute http(s) URL, for example https://cdn.example.com');
   }
 
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
+  if (!ALLOWED_IMAGE_BASE_PROTOCOLS.has(parsed.protocol)) {
     throw new Error('IMAGE_BASE_URL must use http or https');
   }
 
@@ -23,6 +26,23 @@ export function parseCspImageBaseUrl(rawValue: string | undefined, environment: 
   }
 
   return parsed;
+}
+
+export function sanitizeImageBaseUrl(rawValue: string | undefined, environment?: string): string {
+  const parsed = parseCspImageBaseUrl(rawValue, environment);
+  if (!parsed) {
+    return '';
+  }
+  const pathPrefix = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+  return `${parsed.origin}${pathPrefix}`;
+}
+
+export function sanitizeImageBaseUrlSafely(rawValue: string | undefined, environment?: string): string {
+  try {
+    return sanitizeImageBaseUrl(rawValue, environment);
+  } catch {
+    return '';
+  }
 }
 
 let hasLoggedCspBuildFailure = false;
