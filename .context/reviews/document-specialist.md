@@ -1,58 +1,52 @@
-# Document Specialist Review - Cycle 9
+# Cycle 11 Document-Specialist Review - 2026-07-07
 
-Reviewer: document-specialist. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `ff0c79d6`.
-Mode: documentation/code mismatch review. Only this requested review artifact was written. No application code, commits, pushes, deploys, service changes, database actions, or container mutations were performed.
+Reviewer: document-specialist. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `163b9dd0`.
+Mode: static documentation/source mismatch review. Only this assigned artifact was written; no source, plan, deploy, DB, service, or container state was changed.
 
 ## Inventory
 
-I read the canonical documentation first, then built a repository inventory and checked documentation claims against the current implementation:
-
-- Canonical instructions and project docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `apps/web/__test_fixtures__/color/README.md`.
-- Docs and context corpus: `docs/**`, `.context/plans/**`, `.context/reviews/**`, and `plan/**` were inventoried and searched for review-relevant claims. Current high-signal plan/review artifacts and the latest aggregate files were read directly; archived historical artifacts were included in repo-wide drift searches.
-- Full file inventory: 6,677 filesystem entries enumerated with review conclusions focused on source/docs/config while excluding vendor, build, upload, runtime data, and `.git` internals from source-of-truth analysis.
-- Source/config inventory: 1,266 relevant files under `apps/web` source, scripts, migrations, e2e, tests, messages, config, deploy, and package areas were covered by targeted reads and repo-wide searches.
-- Domains checked: setup, deploy, environment variables, security, migrations, semantic search, CLIP operator runbooks, image/color/HDR pipeline, storage, e2e, quality gates, and current unsupported-product boundaries.
-
-Validation was static/read-only. I did not run the app or test suites because this review lane is documentation/source consistency only and the user explicitly requested no application-code changes. Evidence below comes from direct source and documentation inspection.
+- Canonical docs: `README.md`, `CLAUDE.md`, `AGENTS.md`, `apps/web/README.md`.
+- Runbooks and planning records: `docs/superpowers/**`, `.context/plans/**`, `.context/reviews/**`, and ignored `.omc/wiki/**` because cycle-10 review/deferred records reference it as still operationally visible local documentation.
+- Executable/source truth: root and app `package.json`, `scripts/deploy-remote.sh`, `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/deploy.sh`, Dockerfile/Compose/nginx config, `apps/web/scripts/migrate.js`, migration journal/SQL, semantic-search routes/config, SEO/site-config source, and security lint scripts.
+- Final sweep terms: deploy/prune/env, migration/journal/baseline/reconcile/DML, CLIP/semantic/production/model_version, `site-config`, nginx/body limits, `TRUST_PROXY`, Stripe/payment, Lightroom plugin, S3/MinIO/storage, smart collections, editing/culling/scoring, quality-gate script names.
 
 ## Findings
 
-### DOC-C9-01 - Semantic-search docs claim per-model embedding rows, but storage still overwrites one row per image
+### DOC-C11-01 - Ignored wiki still says new migrations do not execute on existing DBs
 
 - Severity: Medium
 - Confidence: High
-- Classification: confirmed documentation/code mismatch
-- Files/regions: `apps/web/README.md:64-75`, `CLAUDE.md:156-160`, `apps/web/drizzle/0012_image_embeddings.sql:5-11`, `apps/web/src/db/schema.ts:286-301`, `apps/web/scripts/backfill-clip-embeddings.ts:24-42,210-223`, `apps/web/src/app/actions/embeddings.ts:170-186`, `apps/web/src/lib/image-queue.ts:500-524`, `apps/web/src/app/api/search/semantic/route.ts:263-279`, `apps/web/src/app/api/search/similar/[id]/route.ts:137-190`
+- Validation label: confirmed-static
+- File/line region: `.omc/wiki/schema-derived-list-drift-migration-reconcile-lesson.md:19-27`; authoritative source/docs: `apps/web/scripts/migrate.js:889-947`, `apps/web/scripts/migrate.js:949-974`, `CLAUDE.md:449-450`, `apps/web/src/__tests__/migrate-pending-migrations.test.ts:1-16`, `apps/web/src/__tests__/migrate-pending-migrations.test.ts:97-111`.
+- Mismatch/failure scenario: the wiki says a new `apps/web/drizzle/NNNN_*.sql` migration is baselined without executing on already-provisioned DBs. Current `migrate.js` leaves above-cursor pending migrations unbaselined so Drizzle applies their SQL, and only true drift is reconciled/baselined. A maintainer following the wiki can put DML into `reconcileLegacySchema`, manually baseline a pending migration, or debug a deploy under the false assumption that committed SQL is dead, recreating the silent-SQL-loss class the current guard prevents.
+- Concrete fix: either remove/export-retire this ignored wiki as non-authoritative, or rewrite Lesson 1 to match the current pending-vs-drift split: pending above-cursor entries run through Drizzle, true at/below-cursor drift is reconciled and guarded, mixed tails are left unbaselined, and DML must ride the Drizzle apply path unless deliberately mirrored and allowlisted.
 
-Why this is a mismatch:
+### DOC-C11-02 - Ignored CLIP wiki overclaims production live state
 
-- The current docs say `image_embeddings` stores one row per `(image_id, model_version)` and that queries filter by active `model_version` (`apps/web/README.md:72`; `CLAUDE.md:160`).
-- The actual SQL and Drizzle schema still key the table only by `image_id`; `model_version` is a regular column plus a secondary scan index (`apps/web/drizzle/0012_image_embeddings.sql:5-11`; `apps/web/src/db/schema.ts:286-301`).
-- Every current embedding writer inserts/upserts by that single-image primary key and replaces both `embedding` and `modelVersion` in place (`apps/web/scripts/backfill-clip-embeddings.ts:210-223`; `apps/web/src/app/actions/embeddings.ts:175-186`; `apps/web/src/lib/image-queue.ts:512-523`).
-- Read paths then filter by active or production model version (`apps/web/src/app/api/search/semantic/route.ts:263-279`; `apps/web/src/app/api/search/similar/[id]/route.ts:137-190`). The code therefore cannot retain side-by-side embeddings for multiple model versions even though the docs now describe that as the storage contract.
+- Severity: Low
+- Confidence: High
+- Validation label: confirmed-static
+- File/line region: `.omc/wiki/clip-semantic-search-us-p51.md:15-17`, `.omc/wiki/gallerykit-architecture-overview.md:30-33`; authoritative source/docs: `apps/web/README.md:65-90`, `CLAUDE.md:160`, `apps/web/src/lib/gallery-config-shared.ts:119-120`, `apps/web/src/lib/gallery-config-shared.ts:176-228`, `apps/web/src/lib/gallery-config.ts:123-126`.
+- Mismatch/failure scenario: the wiki labels CLIP semantic search as "LIVE in production." The canonical docs and resolver say production is operator-enabled, default-disabled for fresh installs, and healed to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` is present with seeded weights and matching embeddings. A future operator/agent can skip the activation proof or misdiagnose expected 503s as regressions.
+- Concrete fix: replace "LIVE in production" with "operator-enabled; verify deployed host state before claiming active." Link to `apps/web/README.md` "Going live" and `CLAUDE.md`'s `image_embeddings` runbook. If `.omc/wiki` is intentionally ignored, add a tracked note that ignored wiki pages are not current operator runbooks.
 
-Concrete failure scenario:
+### DOC-C11-03 - Carry-forward still treats the site-config ambiguity as open after the doc contract shipped
 
-An operator trusts the runbook language and runs a stub or next-model backfill against the same database, expecting old and new model rows to coexist. Processed images have their previous production vector overwritten with the new model tag, while unprocessed images remain on the previous tag. If the operator flips back to production or rolls back model settings, model-version filters omit the overwritten images until a full production re-embed is run. This presents as partial semantic-search recall and missing similar-photo results, not as an obvious migration/setup error.
-
-Suggested fix:
-
-Choose one contract and make docs/code agree. The smaller documentation fix is to update `apps/web/README.md` and `CLAUDE.md` to say there is exactly one embedding row per image; changing semantic mode or model version rewrites the prior vector for that image; rollback to a prior model requires re-running a backfill for that target model. If side-by-side model storage is the intended product behavior, add a migration and code changes for a composite key or unique constraint on `(image_id, model_version)`, then update writers, cleanup, tests, and operator rollback language.
+- Severity: Low
+- Confidence: Medium-High
+- Validation label: confirmed-static for stale ledger wording; manual for product decision
+- File/line region: `.context/plans/deferred-carry-forward.md:24-26`, `.context/plans/deferred-carry-forward.md:57-58`, `.context/plans/deferred-carry-forward.md:74`, `.context/plans/cycle-80-2026-07-01-deferred.md:8-13`; resolving/current evidence: `CLAUDE.md:148`, `README.md:56-58`, `apps/web/README.md:49-57`, `apps/web/docker-compose.yml:28-32`, `.context/plans/cycle-2-2026-07-07-plan.md:219-227`, `.context/reviews/cycle10-2026-07-07/document-specialist.md:72`.
+- Mismatch/failure scenario: active carry-forward still re-justifies `C80-06` as a site-config runtime/build contract ambiguity, while current canonical docs and Compose comments explicitly state `site-config.json` is build-time inlined and runtime edits require rebuild/deploy. Future planning cycles can keep spending age-budget attention on a resolved documentation ambiguity instead of tracking the remaining, different product question: whether operators need runtime-editable config fields.
+- Concrete fix: close or reword the `C80-06` carry-forward row as resolved-by-docs. If runtime editability remains desired, keep it as a separate product-decision row with current wording such as "decide whether to implement runtime-editable site config," not "runtime/build contract is ambiguous." Update `deferred-carry-forward.md` and the plan index so the active backlog matches the canonical contract.
 
 ## Verified Aligned Areas
 
-- Setup and environment docs match current examples and source for required app secrets, MySQL connection variables, `DB_SSL_CA`/`DB_SSL=false`, upload limits, admin credentials, rate-limit trust proxy, semantic mode controls, and deploy env-file fallback behavior.
-- Deploy docs match `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, Compose mounts, health checks, and post-health Docker pruning. I found no hardcoded deploy host/key drift in docs or scripts.
-- Security docs match current auth/session/origin/rate-limit lint gates, public API rate-limit policy, admin API wrapping expectations, public data omission guards, CSP/GA request path, and no-editing/no-culling product boundary.
-- Migration docs match the current journal/file parity, strictly increasing `when` warning, post-condition hash assertion, DML-baseline guard, and `reconcileLegacySchema` coverage.
-- Semantic-search docs now correctly separate stub text-search behavior from production-only similar-photo recommendations, except for the embedding-row cardinality issue above.
-- Image/color/HDR docs match the current derivative-impacting keys, pipeline version, hash length, AVIF/JPEG quality defaults, HDR ingest default, wide-gamut guardrails, and color-chip fixture intent.
-- Storage docs match the current quarantine: local filesystem paths remain the live pipeline; `src/lib/storage` is not integrated outside storage tests.
-- E2E docs match the current Playwright/server safety gates: Chromium-only project, local safe DB assertion before init/seed/build, and remote-admin e2e blocking unless explicitly enabled.
-- Quality gate docs match current package scripts for ESLint, API auth lint, action-origin lint, public-route rate-limit lint, typecheck, build, Vitest, and Playwright e2e.
+- Current root/app READMEs and `CLAUDE.md` align with package scripts for lint, API-auth lint, action-origin lint, public-route rate-limit lint, typecheck, build, Vitest, and Playwright e2e.
+- Deploy docs align with `scripts/deploy-remote.sh` and `apps/web/deploy.sh`: env-file fallback, permission refusal, config-driven SSH, health gate, and post-health Docker pruning without `volume prune -a`.
+- Migration runbook and source align for monotonic `when`, hash postconditions, guarded DML baselining, pending-tail apply behavior, and `reconcileLegacySchema` authoring expectations.
+- Active tracked semantic-search docs now correctly describe one active embedding row per `image_id`, model-version overwrite semantics, default-disabled production, offline weights, env opt-in, and preflight requirements.
+- Product boundary docs remain aligned with source/package truth: no Stripe/payment surface, no bundled Lightroom Classic plugin, local filesystem storage only, and no editing/culling/scoring feature claim.
 
 ## Final Sweep
 
-I performed final drift searches for commonly missed mismatches: stale Stripe/payment language, Lightroom plugin bundling, S3/MinIO support, smart-collection admin UI, editing/culling/scoring claims, `image_embeddings` cardinality, model-version filtering, DB SSL handling, deploy env fallback, nginx/body-limit behavior, GA/CSP placement, migration journal rules, color/HDR settings, privacy-sensitive fields, e2e safety, and quality-gate script names.
-
-Confirmed finding count: 1. No additional confirmed documentation/code mismatches were found in the required domains. Residual risk is limited to live external state that a repo-only static review cannot prove: actual production DB rows, seeded CLIP model files, production nginx/host config, secret values, and real semantic-search quality on deployed data.
+No source or test commands were run; this was a read-only static review. The two `.omc/wiki` mismatches are persistent from cycle 10 and still present locally; cycle-10 deferred records already note they are ignored/untracked. The new cycle-11 issue is the stale active carry-forward wording around the now-documented site-config contract. Residual risk: live deployed state was not inspected, including production DB rows, nginx host config, seeded CLIP model files, and runtime environment variables.

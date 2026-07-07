@@ -21,10 +21,12 @@ one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an e
 product-decision row whose only High attachment was a doc issue already fixed — reworded
 below so it no longer reads as an open High finding, C4-34). No open row is at or past the
 8-cycle High budget in a way that requires scheduling. **MED 16-cycle checkpoint (new,
-C4-45):** `C80-06` (~15) is the only MED row approaching/crossing the 16-cycle re-justify
-window — re-justified below as a genuine product/operator decision (site-config
-runtime/build contract), not an un-triaged carry. Next mandatory re-check: every cycle, in
-the WP that updates this file.
+C4-45; refreshed C11):** `C80-06` (~15) is the only MED row approaching/crossing
+the 16-cycle re-justify window. The build-time contract is now documented in
+`CLAUDE.md` (`site-config.json` imports are inlined by Next and the compose bind
+mount is inert at runtime). The remaining row is only the product/operator
+decision of whether runtime-editable file config is desired. Next mandatory
+re-check: every cycle, in the WP that updates this file.
 
 **Provenance note:** an UNTRACKED, stale `.context/plans/run10-cycle2/` directory
 (mtime 2026-06-25, from an abandoned earlier session that also used the "run10" name)
@@ -55,7 +57,7 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C94-07/C93-10 | MED/High | cycle-96-2026-07-01 | ≤c93 | ~9+ | Mobile admin nav redesign (product decision) |
 | C94-08/C93-11 | MED/High | cycle-96-2026-07-01 | ≤c93 | ~9+ | Mobile-first admin image management (product decision) |
 | C94-10/C88-03 | MED/High | cycle-96-2026-07-01 | c88 | ~11 | Multi-model-version embedding schema migration (next schema cycle) |
-| C80-06 | MED/Med | cycle-96-2026-07-01 (via c80) | c80 | ~15 | site-config runtime/build contract decision (same as C2-24b below). **C4-45 re-justify:** genuine product/operator decision, not an un-triaged carry — deliberately blocked pending the config-precedence call |
+| C80-06 | MED/Med | cycle-96-2026-07-01 (via c80) | c80 | ~15 | Product/operator decision: add runtime-editable file config despite the documented build-time `site-config.json` contract, or close as not needed |
 | C76-04, C76-05, C75-08 | LOW..MED | cycle-96-2026-07-01 (via c76/c75) | c75/76 | ~13 | See home register (behavior-test hardening / validation UX) |
 | C1-31 | LOW/Med | cycle-1-2026-07-06 | r10c1 | 3 | mysql2 version bump OR DB-backed test infra |
 | C1-32 (broad) | LOW-MED/High | cycle-1-2026-07-06 | r10c1 | 3 | Incremental drainage policy (per-cycle, ongoing) |
@@ -71,7 +73,7 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C2-16 | MED/Med | cycle-2-2026-07-07 | r10c2 | 2 | Measured home latency OR next schema cycle folds the index |
 | C2-20 | MED/High | cycle-2-2026-07-07 | r10c2 | 2 | C1-33 RSS trace OR OOM incident during GPS-stripped uploads |
 | C2-21 | MED/High | cycle-2-2026-07-07 | r10c2 | 2 | Next migration-authoring cycle folds the `(processed, updated_at, id)` index |
-| C2-24b | MED/High | cycle-2-2026-07-07 | r10c2 | 2 | Operator needs runtime site-config edits OR config-precedence product decision |
+| C2-24b | MED/High | cycle-2-2026-07-07 | r10c2 | 2 | Operator needs runtime site-config edits despite documented build-time import semantics OR config-precedence product decision |
 | C2-27 | MED/High | cycle-2-2026-07-07 | r10c2 | 2 | Product decision: wire or delete the storage abstraction |
 | C2-28 | MED-LOW/Med-High | cycle-2-2026-07-07 | r10c2 | 2 | Admin perceived-lag report OR next admin-table cycle (now folds C4-24) |
 | C2-30 | LOW/High | cycle-2-2026-07-07 | r10c2 | 2 | Real spurious restore-abort OR next barrier-touching cycle |

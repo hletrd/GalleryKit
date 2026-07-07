@@ -1,104 +1,105 @@
-# Debugger Review - Cycle 9
+# Debugger Review - Cycle 11
 
 Date: 2026-07-07 KST
 Reviewer lane: debugger
-HEAD reviewed: `ff0c79d60720`
-Scope: latent bug surface, root-cause/failure-mode review, async flows, DB migration edge cases, auth/session edge cases, image processing, restore/backup, semantic search, cache invalidation, UI state, and deployment scripts.
-Execution constraints honored: review-only; no application code changes; no commit, push, deploy, service stop, file deletion, or database mutation. The only written file is this review artifact.
+HEAD reviewed: `18b2a0c3`
+Scope: latent bug surface, failure modes, regressions, edge cases, exception/error handling, and cross-file behavior across the Gallery repo.
+Execution constraints honored: review-only; no application source or plan edits; no commit, push, deploy, service stop, file deletion, or database mutation. The only written file is this review artifact.
 
 ## Result Summary
 
-- Confirmed defects: 1 High
-- Likely/risk findings: 0
-- Tests run: none. This was a source-review lane and the requested deliverable was the review artifact.
+- Active confirmed defects: 0
+- Active likely/manual findings: 0
+- Prior finding rechecked: 1 previously confirmed migration-path defect is now covered by current source and tests.
+- Validation run:
+  - `npm run lint:api-auth --workspace=apps/web` passed.
+  - `npm run lint:action-origin --workspace=apps/web` passed.
+  - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+  - `npm run test --workspace=apps/web -- migrate-pending-migrations` passed: 1 file, 20 tests.
 
-The confirmed issue is a migration-path break: runtime/schema/reconcile know about `images.processing_error` and `images.failed_at`, but there is no journaled migration that adds them. Worse, migration `0025_processing_settings_snapshot` places `processing_settings_json` `AFTER failed_at`, so a clean incremental DB at the 0024 cursor fails before any later migration could repair it.
+No new severity-rated debugger finding met the reporting bar after inventory, cross-file inspection, and final missed-issue sweep.
 
-## Inventory Built First
+## Inventory
 
 Read first:
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- code-review skill instructions at `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+- AGENTS instructions supplied for `/Users/hletrd/flash-shared/gallery`.
+- `CLAUDE.md`.
+- Code review skill instructions at `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
 
-Repository inventory:
+Repository surfaces inventoried:
 
-- Counted 906 review-relevant files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, `apps/web/public`, and `apps/web/nginx`.
-- Counted 44 app route/page/layout/action entry files under `apps/web/src/app`.
-- Inventoried migrations from `apps/web/drizzle/0000_*.sql` through `0029_*.sql`, plus `apps/web/drizzle/meta/_journal.json`.
-- Inventoried high-risk scripts: `apps/web/scripts/migrate.js`, restore maintenance recovery, CLIP/color/alt-text backfills, PWA build, deploy scripts, and MySQL connection helpers.
-- Inventoried static/generated surfaces: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, PWA icons, resources, `next.config.ts`, and `nginx/default.conf`.
-- Inventoried tests covering relevant classes: migration/reconcile, restore scanner, API/auth/action-origin lint gates, service-worker contract tests, upload route tests, image queue/backfill tests, privacy-field tests, and Playwright flows.
+- App routes/pages/actions under `apps/web/src/app`, including public gallery routes, admin pages, admin DB restore/backup actions, public API routes, admin API routes, upload serving routes, and root/locale feeds.
+- Core library files under `apps/web/src/lib`, including auth/session/origin/rate-limit helpers, image queue, image processing, upload path handling, restore maintenance, mutation barrier, gallery config, semantic search, data reads, revalidation, service-worker cache, storage, and migration-adjacent helpers.
+- DB schema and migrations under `apps/web/src/db`, `apps/web/drizzle`, and `apps/web/scripts/migrate.js`.
+- Focused tests and source-contract tests around migration tail handling, auth/origin/rate-limit enforcement, failed-image retry, image queue settings, privacy fields, semantic search gating, restore/upload locking, and service-worker/cache behavior.
 
-Detailed areas inspected:
+High-risk paths inspected in detail:
 
-- Auth/session and admin auth: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/proxy.ts`, `apps/web/src/lib/auth-rate-limit.ts`.
-- Restore/backup/fencing: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/sql-restore-scan.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`.
-- DB schema/migrations: `apps/web/src/db/schema.ts`, every SQL migration, `_journal.json`, `apps/web/scripts/migrate.js`.
-- Image processing/upload queue: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, upload route twins, and serving fallback.
-- Semantic search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-inference.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/app/actions/embeddings.ts`.
-- Cache/UI state: service worker template/output, `apps/web/src/lib/sw-cache.ts`, `apps/web/src/components/register-service-worker.tsx`, public data/actions, load-more/search/similar-photo client state, `apps/web/src/lib/revalidation.ts`, `apps/web/src/lib/serve-upload.ts`.
-- Deployment/runtime: root and app deploy helpers, Docker/NGINX config, instrumentation startup/shutdown, single-writer guard.
+- Admin authentication and origin controls: `apps/web/src/lib/api-auth.ts:72`, `apps/web/src/lib/api-auth.ts:114`, `apps/web/src/lib/action-guards.ts:20`, `apps/web/src/app/actions/auth.ts:132`, `apps/web/src/lib/session.ts:45`, `apps/web/src/lib/request-origin.ts:1`, `apps/web/src/lib/rate-limit.ts:1`.
+- Mutating server actions and admin barriers: `apps/web/src/app/actions/images.ts:129`, `apps/web/src/app/actions/images.ts:687`, `apps/web/src/app/actions/images.ts:959`, `apps/web/src/app/actions/images.ts:1163`, `apps/web/src/app/actions/settings.ts:73`, `apps/web/src/app/actions/topics.ts:65`, `apps/web/src/app/actions/sharing.ts:30`, `apps/web/src/lib/admin-mutation-barrier.ts:76`.
+- Upload and processing pipeline: `apps/web/src/app/actions/images.ts:198`, `apps/web/src/app/actions/images.ts:478`, `apps/web/src/app/actions/images.ts:527`, `apps/web/src/app/api/admin/lr/upload/route.ts:272`, `apps/web/src/app/api/admin/lr/upload/route.ts:500`, `apps/web/src/app/api/admin/lr/upload/route.ts:528`, `apps/web/src/lib/image-queue.ts:690`, `apps/web/src/lib/image-queue.ts:714`, `apps/web/src/lib/image-queue.ts:965`, `apps/web/src/lib/image-queue.ts:1105`, `apps/web/src/lib/process-image.ts:889`, `apps/web/src/lib/upload-paths.ts:103`.
+- Restore, migration, and fencing behavior: `apps/web/src/app/[locale]/admin/db-actions.ts:430`, `apps/web/src/app/[locale]/admin/db-actions.ts:447`, `apps/web/src/app/[locale]/admin/db-actions.ts:550`, `apps/web/src/lib/restore-maintenance.ts:1`, `apps/web/src/lib/restore-maintenance-durable.ts:48`, `apps/web/src/lib/upload-processing-contract-lock.ts:1`, `apps/web/scripts/migrate.js:460`, `apps/web/scripts/migrate.js:843`, `apps/web/scripts/migrate.js:858`, `apps/web/scripts/migrate.js:901`.
+- Public read and search surfaces: `apps/web/src/lib/data.ts:610`, `apps/web/src/lib/data.ts:925`, `apps/web/src/lib/data.ts:1289`, `apps/web/src/lib/data.ts:1454`, `apps/web/src/lib/data.ts:1574`, `apps/web/src/lib/data.ts:1759`, `apps/web/src/app/actions/public.ts:72`, `apps/web/src/app/api/search/semantic/route.ts:192`, `apps/web/src/app/api/search/similar/[id]/route.ts:122`.
+- Download/serving/cache paths: `apps/web/src/app/api/admin/db/download/route.ts:1`, `apps/web/src/lib/serve-upload.ts:1`, `apps/web/src/app/uploads/[...path]/route.ts:1`, `apps/web/src/lib/sw-cache.ts:1`, `apps/web/src/components/register-service-worker.tsx:1`.
 
 ## Findings
 
-### DBG-C9-01 - High - Failed-image columns are missing from journaled migrations, breaking incremental deploys
+No active findings.
 
-Severity: High
+All candidate defects either had current source-level mitigation, existing regression coverage, or remained below the confidence threshold for a debugger finding. No issue is reported without a concrete failure scenario, root-cause hypothesis, fix, severity, confidence, and validation label.
+
+## Rechecked Prior Defect
+
+### DBG-C9-01 migration tail failure - no longer active
+
+Severity if absent: High
 Confidence: High
-Validation: confirmed from source
-Status: confirmed
+Validation label: confirmed fixed by source inspection plus targeted test
 
-Evidence:
+Relevant file regions:
 
-- The canonical Drizzle schema declares `images.processing_error` and `images.failed_at` at `apps/web/src/db/schema.ts:104-111`.
-- Runtime code writes and reads those columns:
-  - permanent queue failures update `processing_error` and `failed_at` at `apps/web/src/lib/image-queue.ts:1020-1031`
-  - bootstrap excludes failed rows with `isNull(images.processing_error)` at `apps/web/src/lib/image-queue.ts:1118-1120`
-  - bootstrap also selects `processing_settings_json` at `apps/web/src/lib/image-queue.ts:1130-1147`
-  - uploads insert `processing_settings_json` at `apps/web/src/app/actions/images.ts:478-490`
-  - retry failed image reads `processing_error` at `apps/web/src/app/actions/images.ts:1261-1281` and clears `processing_error`, `failed_at`, and `processing_settings_json` at `apps/web/src/app/actions/images.ts:1300-1303`
-- `reconcileLegacySchema()` can add these columns for drift/baseline cases at `apps/web/scripts/migrate.js:477-483`.
-- The normal pending-tail migration path explicitly does not run reconcile when all missing migrations are above the recorded cursor; it returns so Drizzle applies the SQL files directly at `apps/web/scripts/migrate.js:886-895`.
-- There is no journaled SQL migration adding `processing_error` or `failed_at`. `rg` over `apps/web/drizzle` shows no `processing_error` / `failed_at` migration entry.
-- `apps/web/drizzle/0025_processing_settings_snapshot.sql:1-2` adds only `processing_settings_json` and specifies `AFTER failed_at`.
-- `_journal.json` records `0025_processing_settings_snapshot` at `apps/web/drizzle/meta/_journal.json:180-186`, after `0024_drop_reactions` and before later migrations.
+- Historical migration still references `failed_at`: `apps/web/drizzle/0025_processing_settings_snapshot.sql:1`.
+- Current preflight creates the prerequisite columns before Drizzle applies pending 0025: `apps/web/scripts/migrate.js:843-856`.
+- Pending-tail path invokes that preflight before returning to Drizzle: `apps/web/scripts/migrate.js:901-910`.
+- Reconcile still mirrors the final schema for fresh/baseline cases: `apps/web/scripts/migrate.js:478-481`.
+- Regression coverage exists: `apps/web/src/__tests__/migrate-pending-migrations.test.ts:113`.
 
-Why this is a bug:
+Reproduction/failure scenario rechecked:
 
-The repo currently has two separate schema-evolution mechanisms with different coverage. The reconcile path knows about `processing_error` and `failed_at`, but the journaled migration path does not. The migration script deliberately bypasses reconcile for a healthy DB with only newer pending migrations, which is the right general behavior for DML-preserving migrations. That means a production DB whose `__drizzle_migrations` cursor is at 0024 and whose physical schema accurately reflects migrations through 0024 will run the raw SQL in 0025. That SQL references `failed_at` in an `AFTER failed_at` clause before any journaled migration has created `failed_at`.
+1. A healthy DB cursor sits at 0024 and lacks `images.processing_error` / `images.failed_at`.
+2. 0025 is pending and still adds `processing_settings_json` `AFTER failed_at`.
+3. Current `prepareLegacyDatabaseIfNeeded()` computes the pending tail, calls `ensureHistoricalPendingMigrationPrerequisites()`, idempotently creates `processing_error` and `failed_at`, then lets Drizzle apply 0025.
+4. Targeted test `migrate-pending-migrations` passed and includes the historical 0025 pre-create case.
 
-Concrete failure scenario:
+Root-cause hypothesis of the old bug:
 
-1. A deployed gallery has `__drizzle_migrations.created_at` at `0024_drop_reactions` and no drift-reconcile path is triggered.
-2. The next deploy runs `apps/web/scripts/migrate.js`.
-3. `prepareLegacyDatabaseIfNeeded()` sees all missing entries are strictly above the cursor and returns at `apps/web/scripts/migrate.js:891-894`.
-4. Drizzle applies `0025_processing_settings_snapshot.sql`.
-5. MySQL rejects `ALTER TABLE images ADD COLUMN processing_settings_json ... AFTER failed_at` because `failed_at` does not exist.
-6. Deployment fails before app startup. If a DB ever bypassed that exact failure but still lacked the columns, image queue failure persistence, failed-image dashboard queries, retry actions, and pending-row bootstrap would then fail at runtime on unknown columns.
+- `processing_error` and `failed_at` originally existed only in the reconcile path, while 0025 assumed `failed_at` already existed.
 
-Suggested fix:
+Concrete current status:
 
-- Repair the migration path before relying on a later migration. A later `0030_*` migration alone cannot help the clean 0024 -> 0025 path, because 0025 fails before later migrations run.
-- If 0025 has not been applied in production, update `apps/web/drizzle/0025_processing_settings_snapshot.sql` so it adds `processing_error`, `failed_at`, and `processing_settings_json` together, with `processing_settings_json` placed only after the newly-created `failed_at`.
-- If 0025 may already be recorded anywhere, use an explicit repair plan: preserve the hash/journal expectations for already-applied DBs, add an idempotent preflight or replacement migration path that creates `processing_error` and `failed_at` before any SQL references them, and document the operator path for DBs stuck after a failed 0025 attempt.
-- Add migration-source coverage that asserts every runtime-used schema column introduced after the baseline is backed by a journaled migration, and specifically pins that `0025_processing_settings_snapshot.sql` cannot reference `failed_at` unless the same migration creates it first or an earlier journal entry does.
+- No source fix is currently required. The preflight path is the concrete fix and is covered by the targeted migration test.
 
-## Final Sweep
+## Rejected Candidates
 
-No additional confirmed debugger findings after the final sweep:
+- Upload accepted while restore starts: rejected. Restore takes `LOCK_UPLOAD_PROCESSING_CONTRACT` before durable maintenance and admin mutation drain (`db-actions.ts:430-574`), while browser and Lightroom uploads hold the same lock through insert/enqueue (`images.ts:198-650`, `route.ts:272-574`).
+- Ignored `enqueueImageProcessing()` return in normal uploads: below finding bar. The queue rejects during shutdown/maintenance/invalid metadata/permanent failure (`image-queue.ts:690-705`); uploads are blocked by restore maintenance and the upload contract lock, generated filenames satisfy queue metadata validation, and unprocessed rows are bootstrapped on startup (`image-queue.ts:1105-1173`).
+- Public API origin/rate-limit drift: rejected by source inspection and lint gates. Admin API wrapping, mutating server-action origin guards, and public route rate-limit scanners all passed.
+- Public privacy leakage through data select sets: rejected by current omit blocks and symmetric privacy fixtures inspected around `data.ts` plus existing privacy-field test coverage.
+- Semantic search accidentally enabling production mode: rejected. Runtime config resolves production only behind `SEMANTIC_SEARCH_ALLOW_PRODUCTION`, routes recheck `semanticSearchMode`, and queue embedding writes apply the same runtime gate.
+- Shared group view count overcount on selected image navigation: rejected. `getSharedGroup()` skips increments for valid selected-photo navigation and buffers only group-view lookups (`data.ts:1402-1407`).
 
-- Async/background flows: image queue claim/retry/permanent failure paths, bootstrap resume, upload tracker settlement, detached config cache invalidation, background analytics writes, shutdown drains, single-writer warning guard, and view-count flushing were inspected.
-- DB migration edge cases: journal cursor handling, drift baselining, postcondition hash checks, schema reconcile, DML-baseline refusal, and restore post-migration flow were inspected. DBG-C9-01 is the only confirmed migration defect found.
-- Auth/session: login, logout, password change, PAT/admin API wrapper, same-origin enforcement, cookie attributes, HMAC token validation, and rate-limit rollback/no-rollback paths were inspected with no new confirmed issue.
-- Restore/backup: dump header/trailer validation, SQL scanner, child-process watchdogs, durable maintenance marker handling, queue/background write drains, advisory locks, and failure-retains-maintenance behavior were inspected with no new confirmed issue.
-- Image processing: original save cleanup, RAW rejection, EXIF/GPS parsing and stripping, color/HDR detection, atomic derivative writes, backup/rollback cleanup, sidecar write guards, and non-empty output verification were inspected with no new confirmed issue.
-- Semantic search: mode gating, same-origin checks, body-size/content-type limits, rate-limit pre-increment, embedding dimension checks, scan caps, enrichment privacy, and CLIP model queueing were inspected with no new confirmed issue.
-- Cache invalidation/UI state: service-worker template/output parity, image cache HEAD revalidation, HTML offline fallback exclusions, upload ETags/settings hash, load-more stale request guards, search abort handling, and similar-photo request state were inspected with no new confirmed issue.
-- Deployment scripts: root deploy helper, app deploy script, Docker/NGINX cache/body-size policies, migration-on-entrypoint behavior, and post-deploy pruning contract were inspected with no new confirmed issue.
+## Final Missed-Issue Sweep
 
-Residual risks:
+- Searched exception and swallow patterns: `catch {}`, `.catch(() => {})`, `throw new Error`, `console.error`, `TODO`, and `FIXME` across `apps/web/src` and `apps/web/scripts`; inspected the high-risk hits rather than treating cleanup/file-delete/test helpers as findings.
+- Rechecked migration and schema drift paths: journal cursor handling, fresh DB baseline, current-schema reconcile, historical 0025 preflight, postcondition hash checks, and migration tests.
+- Rechecked admin mutation controls: `withAdminAuth`, same-origin server-action guards, admin mutation barrier, restore maintenance marker, upload processing contract lock, and Lightroom token path.
+- Rechecked image failure handling: per-image advisory lock retries, claim exhaustion persistence, permanent failure persistence, retry clearing, bootstrap resume, settings snapshot capture, and shutdown drain.
+- Rechecked public read/search paths: list pagination, smart collections, search/semantic/similar routes, share/group access, map GPS guard, sitemap caps, and public analytics side effects.
+- Rechecked cache/download paths: upload serving, original/private path fallback, backup download route, service-worker cache policy, and ETag/settings hash behavior.
 
-- This lane did not execute the full test suite, browser E2E, or a real migration against a MySQL fixture; it was a source-level deep review.
-- The review intentionally did not mutate application code or create a fix branch; the cycle leader owns fixes, commits, pushes, and deploys.
+## Residual Risk
+
+- This was a source-review/debugger lane, not a full release verification run.
+- I did not run the full Vitest suite, full typecheck, Next build, Playwright E2E, or a real MySQL migration fixture.
+- Unrelated source files were already modified in the worktree during review (`apps/web/src/components/ui/sonner.tsx`, `apps/web/src/components/ui/table.tsx`); they were not edited or evaluated as part of this assigned artifact.

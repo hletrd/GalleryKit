@@ -1,248 +1,186 @@
-# Cycle 9 Critic Review
+# Cycle 11 Critic Review
 
 Date: 2026-07-07 KST
 Reviewer: critic
 Repository: `/Users/hletrd/flash-shared/gallery`
-Mode: PROMPT 1 skeptical multi-perspective review. Application code was not modified.
+Mode: whole-repository skeptical review. I did not edit source or plans; this file is the only assigned write.
 
 ## Inventory And Method
 
-I read `AGENTS.md` and `CLAUDE.md` first. I then inventoried the review surface from the tracked repository and current working tree:
+Read first: `AGENTS.md`, `CLAUDE.md`, latest root/cycle review artifacts, latest deferred register, and current git history through `b965e3bf`.
 
-- Tracked source/docs: 3,392 tracked files; 372 non-test `apps/web` files, 347 app unit-test files, 2,473 committed `.context` review/plan artifacts, and 200 root/other files.
-- Current dirty tree before my write: `.context/reviews/code-reviewer.md`, `.context/reviews/security-reviewer.md`, and `.context/reviews/test-engineer.md` were already modified by other lanes. I did not edit them.
-- First-party review scope: app routes/actions, data layer, DB schema/migrations, image processing/queue/backfill, semantic search, service worker, deploy/Docker/nginx, lint/test harnesses, root/app package manifests, and current cycle reports.
-- Exclusions as non-authoritative source: `node_modules`, `.next`, runtime upload/data directories, binary fixtures, screenshots, generated logs, and historical `.context` artifacts except where they claimed current behavior or unresolved risk.
+Inspected broadly:
 
-Validation evidence:
+- Product/public routes: home, timeline/year, map, photo/share pages, search/semantic/similar, feed/OG/upload routes.
+- Admin/security/ops surfaces: server actions, admin APIs, auth/origin/rate-limit lint gates, restore, deploy script, nginx template, Dockerfile, CI.
+- Data/architecture surfaces: `data.ts`, `data-timeline.ts`, Drizzle schema/migrations, `migrate.js`, queue/backfill, CLIP embeddings, maintenance scheduler, single-writer guard.
+- UX/test surfaces: Playwright specs, touch-target audit, bottom sheet/dropdown tests, visual screenshot checks.
+- Prior drift: compared Cycle 10 findings against the follow-up commits now on `master`.
 
-- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate` failed with the production Next/PostCSS advisory.
-- `npm audit --workspace=apps/web --audit-level=moderate` failed with production PostCSS plus dev-only esbuild/`@esbuild-kit` advisories.
-- Static searches checked skipped/focused tests, deferred markers, TODO/FIXME/HACK, route/auth/rate-limit comments, privacy select shapes, migration/schema/runbook claims, and large-result public paths.
-- I did not run full lint/typecheck/build/test/e2e because this was a report-only review and no app code changed.
+Validation evidence collected:
+
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm run typecheck --workspace=apps/web` passed.
+- Focused Vitest passed: `data-timeline`, `semantic-embedding-storage-contract`, `maintenance-scheduler-source`, `background-db-writes`, `topics-actions`, `touch-target-audit` = 6 files / 64 tests.
+- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate --json` failed with 2 moderate vulnerabilities via Next's nested PostCSS.
+- `npm view next version` returned `16.2.10`; `npm view postcss version` returned `8.5.16`; `npm ls postcss next --workspace=apps/web` shows top-level `postcss@8.5.16` plus `next/node_modules/postcss@8.4.31`.
 
 ## Findings Summary
 
 - Critical: 0
-- High: 2
-- Medium: 6
-- Low: 0
+- High: 0
+- Medium: 8
+- Low: 1
+
+Confirmed issues are source- or command-proven. Risks needing validation are real repository risk shapes whose production impact depends on live scale/topology/operator state.
 
 ## Findings
 
-### C9-CRIT-01 - Semantic embedding version ownership contradicts the schema
+### C11-CRIT-01 - Production audit remains red on Next's nested PostCSS
 
 Severity: Medium
 Confidence: High
-Status: Confirmed
+Status: Confirmed issue
 
-Code/doc regions:
+Locations: `apps/web/package.json:59`, `package.json:7-9`, `package-lock.json:9194`, `package-lock.json:9204`, `package-lock.json:9334`, `package-lock.json:9850`.
 
-- `apps/web/src/db/schema.ts:286-300`
-- `apps/web/drizzle/0012_image_embeddings.sql:5-11`
-- `apps/web/scripts/backfill-clip-embeddings.ts:212-223`
-- `apps/web/src/app/actions/embeddings.ts:175-186`
-- `apps/web/src/lib/image-queue.ts:512-523`
-- `apps/web/README.md:70-82`
-- `CLAUDE.md:160`
+Why: the repo pins/overrides top-level PostCSS to `8.5.16`, but `next@16.2.10` still declares and installs nested `postcss@8.4.31`. `npm audit --omit=dev` reports GHSA-qx2v-qp2m-jg93 through `node_modules/next/node_modules/postcss`.
 
-Why this matters:
+Failure scenario: if any current or future path feeds attacker-influenced CSS through Next's bundled PostCSS stringify path and embeds it into a page, the known `</style>` escaping bug can become XSS. I did not confirm an arbitrary-CSS input today, so exposure is conditional, but the production dependency gate is failing now.
 
-The physical table has `PRIMARY KEY (image_id)`, and every writer uses `onDuplicateKeyUpdate` on that key while replacing `modelVersion`. The docs say embedding writes store one row per `(image_id, model_version)`. Those are different product contracts: one supports side-by-side model versions; the other destructively rewrites the active row.
+Fix: upgrade to a stable Next release that removes the vulnerable nested dependency, or prove a targeted npm override/resolution replaces `next/node_modules/postcss` without breaking the full gate suite. Do not take `npm audit fix --force`; audit suggests a bad major downgrade.
 
-Concrete failure scenario:
-
-Production rows exist for `jina-clip-v2-d512-q8`. An operator runs a stub or future-model backfill against the same DB, overwriting rows image by image. Rolling back the active model can then only see images not overwritten yet, so public semantic search silently loses coverage until a full production re-embed finishes.
-
-Suggested fix:
-
-Choose and encode one invariant. If rollback/side-by-side evaluation is required, migrate to a composite key such as `(image_id, model_version)` and update writers, cleanup, scans, and tests. If only one active embedding is intended, update `README.md`/`CLAUDE.md` to say model changes destructively replace rows, and guard production DBs against accidental stub overwrites.
-
-### C9-CRIT-02 - Public privacy guards can be bypassed by aliasing sensitive columns
+### C11-CRIT-02 - Date-function scans remain on dynamic public archive/home paths
 
 Severity: Medium
 Confidence: High
-Status: Risk, confirmed guard-shape gap
+Status: Confirmed issue
 
-Code regions:
+Locations: `apps/web/src/lib/data-timeline.ts:111`, `apps/web/src/lib/data-timeline.ts:124`, `apps/web/src/lib/data-timeline.ts:125`, `apps/web/src/lib/data-timeline.ts:143`, `apps/web/src/lib/data-timeline.ts:146`, `apps/web/src/lib/data-timeline.ts:155`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:19`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:77`, `apps/web/src/app/[locale]/(public)/page.tsx:232`, `apps/web/src/app/[locale]/(public)/page.tsx:234`, `apps/web/src/components/on-this-day-widget.tsx:15`, `apps/web/src/components/on-this-day-widget.tsx:21`.
 
-- `apps/web/src/lib/data.ts:368-475`
-- `apps/web/src/lib/data.ts:409-488`
-- `apps/web/src/lib/search-enrichment-fields.ts:29-47`
-- `apps/web/src/lib/data-timeline.ts:35-67`
-- `apps/web/src/lib/data.ts:1599-1617`
+Why: Cycle 10 fixed `getTimelineImages()` to use sargable date ranges, but `getTimelineYears()` still uses `YEAR(capture_date)` for `SELECT DISTINCT` and ordering, while `getOnThisDayImages()` still uses `MONTH()` and `DAY()`. Both feed `revalidate = 0` public SSR paths.
 
-Why this matters:
+Failure scenario: as the gallery grows, homepage and `/timeline` requests from visitors or crawlers repeatedly force MySQL to scan/evaluate the processed dated image set instead of seeking fully through the `(processed, capture_date, created_at)` index. That competes with uploads, admin work, and normal public gallery reads on the single writer.
 
-The project’s privacy boundary is key-name based. Guards check whether selected result object keys overlap `PrivacySensitiveKeys`; they do not prove that the underlying Drizzle columns are public-safe. A future public select can expose `images.latitude` as `lat`, `images.user_filename` as `displayName`, or `images.pipeline_version` as `version`, and the current type guard will pass because the alias key is not sensitive.
+Fix: for the year list, maintain a generated/indexed capture year or cached year rollup invalidated on image metadata changes. For On This Day, add generated/indexed `capture_mmdd` or `(capture_month, capture_day)` columns, or cache the daily result. Update `data-timeline.test.ts:50` so tests stop locking the non-sargable `MONTH()`/`DAY()` shape as expected behavior.
 
-Concrete failure scenario:
+### C11-CRIT-03 - Public map still ships a 10k-marker corpus and duplicate list
 
-A contributor adds a public map/search/filter feature and selects `{ cameraPlace: images.latitude }` or `{ sourceName: images.user_filename }` to avoid a TypeScript error. Unit privacy tests that compare public keys still pass, but GPS or original filenames reach unauthenticated JSON.
+Severity: Medium
+Confidence: Medium-High
+Status: Risk needing scale validation
 
-Suggested fix:
+Locations: `apps/web/src/lib/data.ts:1750`, `apps/web/src/lib/data.ts:1759`, `apps/web/src/lib/data.ts:1768`, `apps/web/src/lib/data.ts:1776`, `apps/web/src/lib/data.ts:1777`, `apps/web/src/app/[locale]/(public)/map/page.tsx:14`, `apps/web/src/app/[locale]/(public)/map/page.tsx:42`, `apps/web/src/app/[locale]/(public)/map/page.tsx:45`, `apps/web/src/app/[locale]/(public)/map/page.tsx:98`, `apps/web/src/app/[locale]/(public)/map/page.tsx:99`, `apps/web/src/components/map/map-client.tsx:87`, `apps/web/src/components/map/map-client.tsx:90`, `apps/web/src/components/map/map-client.tsx:120`.
 
-Move public selects behind source-column allowlists, not result-key denylists. Add a lint/source-contract test that rejects direct `images.<sensitiveColumn>` use in public select modules unless the call site is the audited map-visible latitude/longitude path.
+Why: `/map` is dynamic and `getMapImages()` can return `MAP_MAX_MARKERS + 1` rows. The server serializes up to 10,000 markers to the client, renders a fallback `<ul>` for each marker, and Leaflet renders one `<Marker>` per image. `FitBounds` allocates two full coordinate arrays and spreads them into `Math.min/max`.
 
-### C9-CRIT-03 - Authenticated admin/security e2e coverage is optional in the default gate
+Failure scenario: a GPS-heavy archive or crawler traffic loads `/map` on mobile. The server emits a huge RSC/client payload, React hydrates thousands of links, Leaflet instantiates thousands of markers, and the main thread stalls before the map is usable.
 
-Severity: High
-Confidence: High
-Status: Confirmed verification gap
+Fix: validate with `EXPLAIN ANALYZE` on sparse/dense GPS data. Add a map-oriented access path, then switch to viewport/bounds loading with clustering or a canvas/WebGL marker layer. Virtualize or paginate the accessible list and compute bounds in one pass.
 
-Code regions:
-
-- `apps/web/e2e/admin.spec.ts:6-13`
-- `apps/web/e2e/origin-guard.spec.ts:27-73`
-- `apps/web/e2e/helpers.ts:28-45`
-- `apps/web/playwright.config.ts:48-87`
-
-Why this matters:
-
-Admin Playwright coverage only runs when `adminE2EEnabled` is true. Local `npm run test:e2e` can skip authenticated admin workflows, and the strongest origin-guard e2e assertion skips without credentials. The unauthenticated origin smoke allows `401`, which proves the route exists but does not prove the authenticated CSRF branch rejects spoofed origins.
-
-Concrete failure scenario:
-
-A refactor breaks authenticated admin navigation, the token/admin wrapper, or the same-origin rejection branch after a valid session cookie. A standard local e2e run without plaintext e2e credentials passes because all authenticated admin specs are skipped.
-
-Suggested fix:
-
-Seed a disposable local admin account/password inside the e2e harness and fail the default local e2e command if authenticated admin coverage cannot run. Keep remote admin testing opt-in, but make local authenticated origin-guard coverage deterministic.
-
-### C9-CRIT-04 - Production CLIP activation relies on skipped manual real-model tests
-
-Severity: High
-Confidence: High
-Status: Confirmed release/activation proof gap
-
-Code/doc regions:
-
-- `CLAUDE.md:587-596`
-- `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`
-- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`
-- `apps/web/src/lib/gallery-config.ts:123-126`
-- `apps/web/src/app/api/search/semantic/route.ts:247-289`
-
-Why this matters:
-
-The docs correctly say the real CLIP pre-activation suites are skipped in default CI and are the only verification that offline model loading and ranking work. Runtime production activation remains possible with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` plus the DB row. Default route tests mock the encoder, so they do not prove the native ONNX/model-weight path.
-
-Concrete failure scenario:
-
-A package, model layout, CPU runtime, or seeded path change breaks `embedTextReal`. Default gates stay green. The operator enables production semantic search and public semantic queries return `503` from the real inference catch path.
-
-Suggested fix:
-
-Turn the CLIP activation proof into an executable gate: for example, add `npm run test:clip:preflight` and require a recent preflight marker/artifact before production mode can be enabled, or run the real-model tests in a seeded CI job. Keep fast route tests mocked, but make production activation fail closed without real-model proof.
-
-### C9-CRIT-05 - Public map can hydrate 10,000 markers plus a duplicate list
+### C11-CRIT-04 - Legacy reconcile is still a second schema authority with mostly source-only coverage
 
 Severity: Medium
 Confidence: High
-Status: Confirmed scale/product risk
+Status: Confirmed maintainability risk
 
-Code regions:
+Locations: `apps/web/scripts/migrate.js:348`, `apps/web/scripts/migrate.js:397`, `apps/web/scripts/migrate.js:684`, `apps/web/scripts/migrate.js:702`, `apps/web/scripts/migrate.js:717`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:15`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:100`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:157`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:175`.
 
-- `apps/web/src/lib/data.ts:1732-1782`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:13-14`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`
-- `apps/web/src/components/map/map-client.tsx:77-140`
+Why: `reconcileLegacySchema()` hand-writes the current schema. The tests explicitly say they are source tripwires and cannot verify types/defaults, then mostly assert table/column/index/FK name presence. A small binary/vector structural pin was added, but most schema attributes remain unchecked.
 
-Why this matters:
+Failure scenario: a future migration changes a column type/default/nullability, index column order, uniqueness, or FK action while keeping the same names. CI passes because the names appear in `migrate.js`; a DB repaired through reconcile diverges from one built through normal migrations.
 
-The `/map` page is dynamic (`revalidate = 0`) and fetches up to `MAP_MAX_MARKERS + 1`, where `MAP_MAX_MARKERS` is 10,000. It then serializes all markers into a client component, renders one Leaflet marker per image, computes bounds with spread arrays, and renders a second accessible `<ul>` over the same marker set.
+Fix: add an integration parity gate using two disposable MySQL schemas: one built by committed migrations and one through reconcile/baseline, then diff `information_schema.columns`, `statistics`, and FK rules. If that is too heavy for every PR, run it in scheduled CI and require it for migration changes.
 
-Concrete failure scenario:
-
-A travel gallery makes thousands of GPS photos map-visible. A mobile visitor loads `/map`; the server ships a huge RSC/client payload, React hydrates thousands of Leaflet markers and links, and the main thread stalls before the map is usable.
-
-Suggested fix:
-
-Use viewport/bounds loading plus clustering or a canvas/WebGL marker layer. Lower the initial SSR marker cap and virtualize/paginate the accessible list. Compute bounds in one pass without allocating and spreading two full coordinate arrays.
-
-### C9-CRIT-06 - Hourly maintenance sweeps can overlap with themselves
+### C11-CRIT-05 - Real CLIP activation proof is manual and skipped by default CI
 
 Severity: Medium
 Confidence: High
-Status: Confirmed concurrency risk
+Status: Confirmed release-risk gap
 
-Code regions:
+Locations: `apps/web/src/__tests__/clip-offline-load.test.ts:15`, `apps/web/src/__tests__/clip-offline-load.test.ts:41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30`, `apps/web/package.json:21`, `apps/web/package.json:23`, `.github/workflows/quality.yml:66`, `.github/workflows/quality.yml:76`, `.github/workflows/quality.yml:79`.
 
-- `apps/web/src/lib/maintenance-scheduler.ts:32-45`
-- `apps/web/src/lib/maintenance-scheduler.ts:61-69`
-- `apps/web/src/lib/view-retention.ts:64-87`
+Why: the real model suites only run when seeded weights and env vars are present. The normal CI workflow runs unit/e2e/build gates but not `test:clip:preflight`. Route tests can pass with mocks/stubs while the offline ONNX/model-weight path is broken.
 
-Why this matters:
+Failure scenario: a dependency upgrade, model layout change, `CLIP_MODELS_ROOT` mismatch, or native runtime change breaks `embedTextReal`/`embedImageReal`. Default CI stays green; an operator enables production semantic search and public queries return 503 or bad rankings.
 
-`runMaintenanceSweep()` tracks active promises for restore draining, but it does not single-flight the sweep body. `startMaintenanceScheduler()` runs one sweep at startup and another every hour. `purgeOldViewEvents()` can execute up to 200 delete batches per table across three view tables.
+Fix: add a scheduled or opt-in CI job that seeds/caches the pinned weights and runs `npm run test:clip:preflight --workspace=apps/web`, especially on CLIP/dependency changes. Alternatively make production activation require a recent preflight marker produced by the exact sidecar/runbook path.
 
-Concrete failure scenario:
-
-After a traffic spike or long retention gap, the first retention purge runs longer than an hour. The interval starts a second sweep before the first finishes, doubling DELETE pressure and index churn on the single MySQL writer while public page views and analytics writes continue.
-
-Suggested fix:
-
-Add a module-level in-flight guard or promise reuse. If a sweep is already running, skip/log the interval tick while preserving `activeMaintenanceSweeps` for restore draining.
-
-### C9-CRIT-07 - Production dependency audit still fails despite the PostCSS override
+### C11-CRIT-06 - Nginx security/performance controls remain outside deploy visibility
 
 Severity: Medium
 Confidence: High
-Status: Confirmed dependency advisory / future exploit risk
+Status: Risk needing live-host validation
 
-Code/package regions:
+Locations: `CLAUDE.md:485`, `apps/web/deploy.sh:51`, `apps/web/deploy.sh:55`, `apps/web/nginx/default.conf:1`, `apps/web/nginx/default.conf:10`, `apps/web/nginx/default.conf:19`, `apps/web/nginx/default.conf:46`, `apps/web/nginx/default.conf:59`, `apps/web/nginx/default.conf:69`.
 
-- `package.json:7-9`
-- `apps/web/package.json:57`
-- `apps/web/package.json:80`
-- `package-lock.json:9194-9205`
+Why: docs correctly state that deploys rebuild/restart Docker only; the committed nginx template is operator-applied. That template contains important public/admin rate limits, connection limits, body-size caps, HSTS, and proxy IP attribution caveats.
 
-Why this matters:
+Failure scenario: a future edge-rate-limit/body-size/proxy-header fix lands, all repo gates pass, and `npm run deploy` succeeds. Production keeps running the old host nginx config, so the issue is marked closed in source while live traffic remains exposed.
 
-The root override pins top-level PostCSS to `8.5.16`, but `package-lock.json` still installs `next@16.2.10` with nested `postcss@8.4.31`. `npm audit --workspace=apps/web --omit=dev --audit-level=moderate` fails on GHSA-qx2v-qp2m-jg93 through `node_modules/next/node_modules/postcss`.
+Fix: make nginx drift visible. Add a deployed-template hash/version check to deploy output, or make nginx apply/reload an explicit gated deploy step with `nginx -t`, reload, and live limiter/body-size smoke evidence recorded in the cycle ledger.
 
-Concrete failure scenario:
-
-Today I did not find a public arbitrary-CSS input. The risk becomes exploitable if a future theme/custom-CSS feature or build/runtime style generator stringifies attacker-controlled CSS into an HTML `<style>` context through the vulnerable nested PostCSS.
-
-Suggested fix:
-
-Upgrade to a stable Next release that removes the vulnerable nested PostCSS, or validate a lockfile/package-manager override that actually replaces `node_modules/next/node_modules/postcss`. Add an audit/lockfile contract so the nested vulnerable copy cannot silently reappear.
-
-### C9-CRIT-08 - Upload derivative route claims range handling it does not implement
+### C11-CRIT-07 - Single-writer correctness remains warn-only
 
 Severity: Medium
 Confidence: High
-Status: Confirmed docs/code drift
+Status: Confirmed operational risk
 
-Code regions:
+Locations: `CLAUDE.md:236`, `CLAUDE.md:237`, `apps/web/src/instrumentation.ts:22`, `apps/web/src/instrumentation.ts:27`, `apps/web/src/lib/single-writer-guard.ts:7`, `apps/web/src/lib/single-writer-guard.ts:12`, `apps/web/src/lib/single-writer-guard.ts:218`, `apps/web/src/lib/single-writer-guard.ts:234`.
 
-- `apps/web/src/app/uploads/[...path]/route.ts:4-15`
-- `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts:4-15`
-- `apps/web/src/lib/serve-upload.ts:287-369`
+Why: the app has correctness-relevant process-local state and a documented single-web-instance topology, but lock contention only logs a loud warning and startup continues.
 
-Why this matters:
+Failure scenario: a deploy system or manual operator starts two `gallerykit-web` containers against one DB. Both serve traffic. Upload quota tracking, restore fences, image queue state, in-memory fast-path rate limits, and status surfaces split across processes; users see inconsistent behavior before anyone notices logs.
 
-Both public upload route twins exempt derivative serving from rate-limit lint partly because it is bounded by "range handling". The route never forwards `Range`, and `serveUploadFile()` always returns full `200` bodies for GET with full `Content-Length`; there is no `206 Partial Content`, `Content-Range`, `Accept-Ranges`, or `416` path.
+Fix: add an opt-in production enforcement mode, for example `GALLERYKIT_ENFORCE_SINGLE_WRITER=true`, that fails readiness or exits after persistent advisory-lock contention. Longer term, move correctness-critical coordination to DB/advisory-lock-backed state.
 
-Concrete failure scenario:
+### C11-CRIT-08 - Mobile bottom-sheet dropdown regression lock is source-string only
 
-A client/CDN/browser retrying a large derivative with `Range: bytes=...` hits the route-handler fallback instead of Next static serving. It receives a full-body `200`, breaking resume semantics and wasting bandwidth. Reviewers may also continue to treat "range handling" as a mitigation that does not exist.
+Severity: Medium
+Confidence: High
+Status: Confirmed test-oracle gap
 
-Suggested fix:
+Locations: `apps/web/src/components/info-bottom-sheet.tsx:562`, `apps/web/src/components/info-bottom-sheet.tsx:570`, `apps/web/src/components/info-bottom-sheet.tsx:573`, `apps/web/src/components/info-bottom-sheet.tsx:575`, `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:14`, `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:20`, `apps/web/e2e/test-fixes.spec.ts:56`, `apps/web/e2e/test-fixes.spec.ts:64`, `apps/web/e2e/focus-restore.spec.ts:49`, `apps/web/e2e/focus-restore.spec.ts:52`.
 
-Either implement single-range support and pass `request.headers.get('range')` from both routes, or remove the range claim from the lint exemption and docs. If implemented, add tests for satisfiable, suffix, invalid/multiple range, HEAD+range, conditional precedence, and abort cleanup.
+Why: the unit test asserts that source strings contain the portal container/ref wiring. Existing Playwright coverage opens/closes the sheet, but does not open the dropdown, assert it is visible inside the dialog stacking context, or verify focus/escape behavior.
 
-## Final Sweep
+Failure scenario: a Radix, portal, ref, CSS, or focus-trap change leaves `container={sheetElement ?? undefined}` in source but renders the menu behind the overlay, outside the focus trap, clipped by the sheet, or unfocusable on mobile. Tests still pass.
 
-Checked commonly missed areas:
+Fix: add a Playwright mobile behavior test that opens a photo, opens the info sheet, opens the download dropdown on a seeded wide-gamut/P3 photo, verifies menu visibility and dialog containment, selects/closes it, and checks focus return.
 
-- Auth/session/origin boundaries: current source uses centralized `withAdminAuth`, same-origin action gates, token scopes, no-store admin responses, and restore mutation barriers. I did not find a current app-code auth bypass in this critic pass.
-- Upload/storage privacy: private original storage, derivative realpath/symlink containment, GPS strip fail-closed paths, public derivative ETag/HEAD handling, and Lightroom upload constraints were inspected. The remaining derivative-serving issue is range drift, not path traversal.
-- Backup/restore/migration: restore locking, durable maintenance, child-process restore scanner, migration post-condition checks, DML-baseline guards, and deploy/runbook constraints were reviewed. I did not identify a new destructive restore or migration skip path beyond maintenance-overlap pressure.
-- Public privacy/data: field omit lists are broad and tested, but alias-based sensitive-column selection remains the key structural gap.
-- Performance/product constraints: map hydration, smart collections/listing aggregation, maintenance sweeps, and backfill/index surfaces remain scale-sensitive. I elevated the map and maintenance cases because they are concrete and user-visible.
-- Test harness: no focused `.only(` usage found in app tests/e2e/config. Skips are intentional but leave admin e2e and real CLIP activation under-proven.
-- Dependency surface: production audit fails on nested PostCSS; full audit also reports dev-only esbuild through deprecated `@esbuild-kit`/Drizzle tooling. I reported the production advisory as the cross-cutting critic finding; the dev advisory is lower priority and already covered by the security lane.
+### C11-CRIT-09 - Touch-target gate intentionally lets bare text links pass
 
-Skipped intentionally: local secret contents, production deployment commands, destructive DB/service operations, generated/vendor source, and full gate execution. No application code was modified.
+Severity: Low
+Confidence: High
+Status: Confirmed test-oracle gap
+
+Locations: `apps/web/src/__tests__/touch-target-audit.test.ts:457`, `apps/web/src/__tests__/touch-target-audit.test.ts:464`, `apps/web/src/__tests__/touch-target-audit.test.ts:1053`, `apps/web/src/__tests__/touch-target-audit.test.ts:1059`.
+
+Why: the repo policy says every interactive element should meet 44 px, but the source scanner explicitly lets plain text links with no sizing token pass. This is intentional for inline prose links, but it also allows future control-like links to bypass the gate.
+
+Failure scenario: a developer implements a mobile control as `<Link className="text-sm hover:underline">Delete</Link>` or a small nav/action link. The regex audit stays green while the rendered target is below the 44 px floor.
+
+Fix: add a DOM-level Playwright touch-target audit over representative pages, or require an explicit inline-text allowlist for bare links while keeping control-like links under the 44 px scanner.
+
+## Prior Drift Disposition
+
+Closed since Cycle 10:
+
+- Docker native pins now match the lockfile: `apps/web/Dockerfile:55-60` aligns with `package-lock.json:9216-9219` and `package-lock.json:9304-9310`.
+- Binary CLIP embedding schema is now `mediumblob`: `apps/web/src/db/schema.ts:292-295`.
+- `getTimelineImages()` now uses range predicates: `apps/web/src/lib/data-timeline.ts:195-215`.
+- Maintenance scheduler shutdown/drain is now wired: `apps/web/src/lib/maintenance-scheduler.ts:41-75`, `apps/web/src/instrumentation.ts:53-60`.
+- Analytics view params and rate-limit admission are captured before queueing: `apps/web/src/app/actions/public.ts:446-455`, `apps/web/src/app/actions/public.ts:486-495`, `apps/web/src/app/actions/public.ts:523-532`.
+- Topic deletion now fails closed on malformed smart collection predicates: `apps/web/src/app/actions/topics.ts:475-482`.
+- Search result labels now use title/tag/description fallback: `apps/web/src/components/search.tsx:71`, `apps/web/src/lib/photo-title.ts:85-105`.
+
+Still open or partially open:
+
+- PostCSS audit risk, map scale, reconcile structural parity, CLIP preflight, bottom-sheet behavior coverage, touch-target bare links, nginx deploy visibility, and single-writer enforcement remain valid.
+- The Cycle 10 date-query finding is partially closed only: `getTimelineImages()` is fixed, but `getTimelineYears()` and On This Day still use date functions on dynamic public paths.
+
+## Final Missed-Issue Sweep
+
+I re-scanned route/action exemptions, skipped tests, TODO/FIXME/HACK/manual markers, dependency/version drift, sensitive-field projection tests, migration/reconcile coverage, and generated-vs-source claims after drafting. I did not find a current admin auth bypass, public original-file exposure, focused `.only` test, migration journal omission, or failed type/lint gate. Remaining blind spots are production cardinality, live host nginx state, real CLIP weights, and real mobile/browser interaction behavior for the bottom-sheet dropdown and touch targets.

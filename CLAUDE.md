@@ -122,6 +122,14 @@ git values must be treated as compromised and must not be reused.
 
 ## Key Files & Patterns
 
+Ignored local notes under `.omc/wiki/` are agent memory/cache, not an
+authoritative source for this repo. If those notes disagree with tracked
+source, `CLAUDE.md`, committed docs, or `plan/` / `.context/plans/` records,
+trust the tracked source. In particular, the current schema-migration contract
+is the `apps/web/drizzle/*.sql` + `apps/web/scripts/migrate.js`
+`reconcileLegacySchema` dual-update rule below, and CLIP semantic search is
+operator-enabled rather than assumed live in production.
+
 | File | Purpose |
 |------|---------|
 | `apps/web/src/app/actions/` | Server actions for uploads, image CRUD, topics, settings, and admin mutations |

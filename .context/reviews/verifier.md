@@ -1,118 +1,88 @@
-# Verifier Review - Cycle 9
+# Verifier Review - Cycle 11
 
 Date: 2026-07-07
 Reviewer: verifier
-HEAD reviewed: `ff0c79d607208bae9487be8152fa648f4161674f`
-Mode: PROMPT 1 deep review from evidence-based correctness against stated behavior. Application code was not modified. No commit, push, deploy, service action, database mutation, or destructive runtime action was performed.
+HEAD reviewed: `b965e3bf` (`docs(review): preserve cycle 6 review artifacts`)
+Mode: evidence-based correctness review against stated behavior in docs, tests, plans, scripts, and code.
+
+Application source and plans were not edited. Only this assigned review file was written.
 
 ## Inventory
 
-Read first:
+Read/inspected:
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
-
-Repository inventory reviewed, not sampled:
-
-- Docs and policies: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`, current root `.context/reviews/*.md`, prior run9 review aggregates, `.context/plans/`, `plan/`, deploy/runbook docs.
-- App source: 81 files under `apps/web/src/app`, 111 under `apps/web/src/lib`, 61 under `apps/web/src/components`, plus `src/db`, `src/i18n`, config, generated-public contracts, and route/action surfaces.
-- Tests and gates: 342 unit test files under `apps/web/src/__tests__`, 12 Playwright/e2e files under `apps/web/e2e`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, root/app `package.json`, and custom lint scanners.
-- Operations and schema: 30 scripts under `apps/web/scripts` + root `scripts`, 33 Drizzle migration/meta files, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, migration/reconcile code, CLIP/backfill scripts, and service-worker/PWA generation.
+- `AGENTS.md` instructions supplied in prompt, `CLAUDE.md`, and `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
+- Current review/plan evidence: `.context/reviews/_aggregate.md`, `.context/reviews/cycle-6-2026-07-07/*`, `.context/plans/cycle-10-2026-07-07-plan.md`, `.context/plans/cycle-10-2026-07-07-deferred.md`, `.context/plans/run10-cycle7/implementation-plan.md`.
+- Recent implementation scope from `git show --stat --name-only HEAD~10..HEAD`: Docker native pins, timeline ranges, embedding storage, maintenance shutdown, public analytics actions, topic deletion, search/archive labels, tracked secret scan, and review artifact commits.
+- Cross-file source surfaces: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/instrumentation.ts`, `apps/web/src/lib/settings-hash.ts`, `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/photo-title.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/0029_feed_updated_indexes.sql`, package manifests/lockfile, and focused tests.
 
 Fresh validation evidence:
 
-- `npm run lint:api-auth --workspace=apps/web`: pass; both admin API route files OK.
-- `npm run lint:action-origin --workspace=apps/web`: pass; scanner reports every mutating server action guarded or explicitly exempt.
-- `npm run lint:public-route-rate-limit --workspace=apps/web`: pass; 10 public route files classified OK.
-- `npm run lint --workspace=apps/web`: pass.
-- `npx vitest run src/__tests__/auth-mutation-barrier-source.test.ts src/__tests__/shared-link-runtime-contracts.test.ts src/__tests__/public-actions.test.ts src/__tests__/smart-collection-pagination.test.ts --config vitest.config.ts`: pass; 4 files, 43 tests.
-- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: fail; Next's nested PostCSS remains vulnerable.
-- Test-surface sweep: no `.only(` focus marker found in `apps/web/src/__tests__`, `apps/web/e2e`, or test configs. Intentional skip surface remains in admin/origin Playwright and CLIP env-gated suites.
+- `npm run lint:api-auth --workspace=apps/web`: pass; 2 admin API routes OK.
+- `npm run lint:action-origin --workspace=apps/web`: pass; public analytics actions classified as rate-limited, admin mutations guarded.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: pass; 10 public route files OK.
+- `npm test --workspace=apps/web -- --run src/__tests__/data-timeline.test.ts src/__tests__/public-actions.test.ts src/__tests__/topics-actions.test.ts src/__tests__/semantic-embedding-storage-contract.test.ts src/__tests__/maintenance-scheduler-source.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/cycle-10-source-contracts.test.ts`: pass; 7 files / 93 tests.
+- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: fail on nested `next/node_modules/postcss@8.4.31`.
+- Focus-marker sweep: no `.only(` found under `apps/web/src/__tests__`, `apps/web/e2e`, or test configs.
 
 Not run:
 
-- `npm run typecheck --workspace=apps/web`: skipped because `typecheck:app` runs `next typegen`, which writes generated framework artifacts.
-- `npm run build --workspace=apps/web`: skipped because `prebuild` writes generated PWA icons and `sw.js`.
-- Full `npm test --workspace=apps/web`: targeted tests were run instead; the full suite was not necessary to establish the findings below.
-- `npm run test:e2e --workspace=apps/web`: skipped because the local harness initializes/builds/seeds and `seed-e2e.ts` deletes/recreates disposable DB rows/files.
+- Full lint/typecheck/build/unit/e2e, because this was a review-only pass and focused checks already covered the changed contracts. Build/typegen/e2e can write generated artifacts or disposable DB state.
 
 ## Findings
 
-### VER-C9-01 - Production dependency audit still fails despite the root PostCSS override
+### VER-C11-01 - Restore can hang indefinitely while draining background DB writes
 
 Severity: Medium
 Confidence: High
-Status: Confirmed
-File/region: `package.json:7-9`, `apps/web/package.json:57,80`, `package-lock.json:9194-9205`, `package-lock.json:9334-9355`
+Validation: Confirmed by static cross-file inspection; focused tests do not cover a never-settling background write.
+File/line: `apps/web/src/lib/background-db-writes.ts:77`, `apps/web/src/app/[locale]/admin/db-actions.ts:545`
 
-Why: the root package declares an override to `postcss@8.5.16`, and the workspace also has top-level `postcss@^8.5.16`, but the production lockfile still contains `node_modules/next/node_modules/postcss@8.4.31` through `next@16.2.10`. `npm audit --workspace=apps/web --omit=dev --audit-level=moderate` fails with GHSA-qx2v-qp2m-jg93. The override gives false confidence because it does not remove the nested production copy.
+Failure scenario: `restoreDatabase()` enters the maintenance window, holds restore-related locks/markers, then awaits `drainBackgroundDbWritesForRestore()`. That alias loops until tracked background/analytics promises settle and has no timeout. A stalled analytics DB promise can wedge restore preparation indefinitely before import starts, leaving maintenance active and uploads/admin mutations blocked without reaching the existing bounded maintenance/admin-mutation drains.
 
-Concrete failure scenario: a future feature accepts user/admin-controlled CSS or theme snippets and stringifies them through the vulnerable nested PostCSS path into an HTML style context. The production audit gate would already have caught this dependency risk, but no repo quality gate currently runs it, so the issue can remain hidden behind passing lint/type/test gates.
+Concrete fix: give the restore caller a bounded drain, e.g. `drainBackgroundDbWritesForRestore({ timeoutMs })` returning `false` on timeout, mirror the `drainMaintenanceSweepsForRestore()` / `drainAdminMutationsForRestore()` abort behavior, and add a regression test with a deliberately never-resolving tracked write.
 
-Suggested fix: upgrade Next to a stable release that no longer vendors vulnerable PostCSS, or add a tested package-manager override that actually removes `node_modules/next/node_modules/postcss@8.4.31`. Add a CI/package-lock contract check for the nested path after remediation.
-
-### VER-C9-02 - Production CLIP activation depends on manual skipped suites, not an enforced gate
-
-Severity: High
-Confidence: High
-Status: Confirmed evidence gap
-File/region: `CLAUDE.md:587-596`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31,72-80`, `apps/web/src/__tests__/semantic-route-production.test.ts:3-5,33-41`, `apps/web/src/lib/gallery-config.ts:123-126`, `apps/web/src/app/api/search/semantic/route.ts:247-289`
-
-Why: the docs label CLIP's real offline-load/ranking checks as the pre-activation test gate, but also state they are permanently skipped in CI and are the only verification before flipping production mode. The default production route test mocks `embedTextReal`; it proves the route's no-embedding response, not that the real model loads or ranks. Runtime production mode is still enabled by env plus DB setting, and the public route then calls `embedTextReal` and returns 503 if inference fails.
-
-Concrete failure scenario: a model-cache layout, pinned revision, ONNX runtime binding, container mount, or Transformers.js behavior changes. Unit/CI gates stay green because real CLIP suites skip or mock the encoder. An operator follows the activation runbook, flips `semantic_search_mode='production'`, and public semantic search returns 503 for real users.
-
-Suggested fix: make CLIP activation proof executable and enforceable. For example, add `npm run test:clip:preflight` and require a recent preflight marker/artifact before allowing production mode, or run the real-model suites in CI with a seeded cache artifact. Keep fast route tests mocked, but do not let production activation rely only on a manual doc step.
-
-### VER-C9-03 - Load-more action tests duplicate a looser cursor normalizer
+### VER-C11-02 - Settings-hash tests/comments overstate invalid-value normalization and leave a mapper drift gap
 
 Severity: Medium
 Confidence: High
-Status: Confirmed
-File/region: `apps/web/src/lib/data.ts:701-759`, `apps/web/src/app/actions/public.ts:132-245`, `apps/web/src/__tests__/public-actions.test.ts:39-56`, `apps/web/src/__tests__/smart-collection-pagination.test.ts:56-75`, `apps/web/src/__tests__/load-more-rate-limit.test.ts:30-45`
+Validation: Confirmed by source/test inspection.
+File/line: `apps/web/src/lib/settings-hash.ts:79`, `apps/web/src/lib/settings-hash.ts:82`, `apps/web/src/lib/settings-hash.ts:103`, `apps/web/src/__tests__/settings-hash.test.ts:162`, `CLAUDE.md:317`
 
-Why: production `normalizeImageListCursor` strictly accepts MySQL datetime strings or ISO UTC strings, length-caps values, rejects invalid `Date`s, and requires a positive integer id. The public action tests mock `@/lib/data` and reimplement a simpler normalizer; two mocks accept any parseable date string and do not preserve all regex/length/invalid-date checks. These tests prove the mocked contract, not the real cursor validation used by `loadMoreImages` and `loadMoreSmartCollectionImages`.
+Failure scenario: the R8-H1 comment says the hash is built from resolved config values so invalid DB values such as `image_quality_avif=150` do not misalign with encoder defaults, but the no-arg DB path hashes raw strings and only normalizes `image_sizes`. The test title says invalid DB value produces the same hash as the validated default, while the assertion correctly expects the raw invalid hash to differ. Separately, `buildHashFromConfig()` hand-maps the same 9 keys that `COLOR_IMPACTING_KEYS` iterates, so a future byte-impacting key can be added to the authoritative list and still be missed by the config-arg hot path used by serving.
 
-Concrete failure scenario: a client emits a slash-formatted date or fractional timestamp shape that the mock accepts but production rejects, causing load-more to return `invalid` or restart pagination. Conversely, a future production normalizer regression can relax unsafe cursor data while action tests still pass because the duplicate mock did not change.
+Concrete fix: normalize the no-arg DB path through the same settings validator/config resolver, make the config mapper exhaustive over `COLOR_IMPACTING_KEYS`, and update the test to exercise both the DB/no-arg normalization and per-key config hash flips.
 
-Suggested fix: add direct unit tests for `normalizeImageListCursor` covering accepted ISO/MySQL forms, null capture dates, invalid dates, slash-formatted dates, overlong strings, non-integer ids, and non-object values. In action tests, import the actual normalizer with `vi.importActual('@/lib/data')` while mocking only DB-fetching functions.
+### VER-C11-03 - Canonical index documentation omits the feed/sitemap updated_at indexes
 
-### VER-C9-04 - Authenticated admin/browser e2e proof remains conditional
+Severity: Low
+Confidence: High
+Validation: Confirmed static docs/schema/migration mismatch.
+File/line: `CLAUDE.md:242`, `CLAUDE.md:244`, `apps/web/src/db/schema.ts:126`, `apps/web/src/db/schema.ts:128`, `apps/web/drizzle/0029_feed_updated_indexes.sql:1`
+
+Failure scenario: `CLAUDE.md` is the canonical short-form operational reference for schema/query reasoning, but its `images` index list does not mention `idx_images_processed_updated_at` or `idx_images_topic_updated_at`, both present in schema, reconcile, and migration 0029. A future reviewer or migration author can reason from the docs and miss the feed/sitemap access paths, duplicating indexes or failing to preserve them during schema work.
+
+Concrete fix: add the two `updated_at` composite indexes to the `Database Indexes` section and note their feed/sitemap use.
+
+### VER-C11-04 - Production dependency audit remains red on Next's nested PostCSS
 
 Severity: Medium
 Confidence: High
-Status: Confirmed risk
-File/region: `apps/web/playwright.config.ts:48-87`, `apps/web/e2e/helpers.ts:28-45`, `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/origin-guard.spec.ts:27-73`, `apps/web/scripts/run-e2e-server.mjs:80-90`, `apps/web/scripts/seed-e2e.ts:169-183,217-233`
+Validation: Confirmed by `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`.
+File/line: `package.json:7`, `apps/web/package.json:82`, `package-lock.json:9204`, `package-lock.json:9334`, `package-lock.json:9850`
 
-Why: Playwright runs one desktop Chromium project. Admin tests are skipped unless `adminE2EEnabled` resolves true; that auto-enables only for local non-production origins with plaintext `E2E_ADMIN_PASSWORD` or plaintext `ADMIN_PASSWORD`, and remote admin remains opt-in. CI includes a guard that expects admin coverage, which is good, but ordinary `npm run test:e2e` can still pass without proving authenticated admin navigation or the authenticated same-origin rejection branch. The local server path also builds and seeds a disposable DB, so verifier/review lanes often cannot run it without mutating local test state.
+Failure scenario: the root override and top-level workspace dependency resolve `postcss@8.5.16`, but `next@16.2.10` still brings `next/node_modules/postcss@8.4.31`, so the production audit fails for GHSA-qx2v-qp2m-jg93. The current deferred register records the upstream/tooling blocker, but the repository still has a red production dependency audit.
 
-Concrete failure scenario: an authenticated admin route, login-cookie behavior, hydrated settings/dashboard UI, or same-origin branch after a valid session regresses. A local e2e smoke without plaintext e2e credentials skips the authenticated specs and still reports green on public/unauthenticated flows.
-
-Suggested fix: split e2e into explicit projects: a required local disposable admin project that seeds a known admin account, and a separate remote-admin project that remains opt-in. Make the default e2e command fail with a clear message when browser-flow coverage is requested but authenticated admin proof was skipped.
-
-### VER-C9-05 - The unit gate has no coverage threshold or changed-file ratchet
-
-Severity: Medium
-Confidence: High
-Status: Confirmed risk
-File/region: `apps/web/package.json:13`, `apps/web/vitest.config.ts:16-39`, broad source-contract surface under `apps/web/src/__tests__`
-
-Why: the unit gate is plain `vitest run`, and the Vitest config only defines include/exclude and timeout. There is no coverage provider, branch threshold, critical-directory threshold, or changed-file ratchet. A repo-wide sweep found 154 test files using source-contract patterns (`readFileSync`, `source-contract`, or `extractFnBody`), which are useful tripwires but can pass while behavior branches remain unexecuted.
-
-Concrete failure scenario: a new public API route, server action branch, migration reconcile branch, upload queue failure path, or security helper lands with no behavior test. Existing source-contract and unrelated unit tests stay green, and no gate reports that the new file or branch has zero executed coverage.
-
-Suggested fix: add a non-blocking coverage report first, then ratchet changed files and critical directories such as `src/app/actions`, `src/app/api`, `src/lib`, and migration scripts. Keep explicit exemptions for source-contract-only invariants, but require behavior coverage for user/security/data paths.
+Concrete fix: upgrade to a stable Next release that removes the vulnerable nested dependency, or prove a non-destructive npm override/lockfile regeneration path that replaces the nested copy without downgrading Next. Keep `npm audit --omit=dev --audit-level=moderate` as the verification.
 
 ## Verified Non-Findings
 
-- Restore barrier regression from earlier cycle-9 lane reports is fixed in the current tree: `updatePassword` checks `if (!mutationSlot.acquired)` before rate-limit, Argon2, transaction, or cookie work (`apps/web/src/app/actions/auth.ts:309-312`), and the source contract asserts that shape (`apps/web/src/__tests__/auth-mutation-barrier-source.test.ts:17-25`).
-- Admin CSV export no longer uses MySQL-invalid `SEPARATOR CHAR(1)`: it defines `CSV_TAG_SEPARATOR` and uses a quoted `sql.raw` separator (`apps/web/src/app/[locale]/admin/db-actions.ts:42,116,139-144`), and the shared-link runtime contract checks both the public and admin export source (`apps/web/src/__tests__/shared-link-runtime-contracts.test.ts:21-40`).
-- Custom auth/origin/rate-limit scanners execute and passed in this review. They prove the current source matches scanner contracts, though they do not replace the behavior/e2e gaps listed above.
-- No focused `.only(` test marker was found in the reviewed test surfaces.
+- The run-10 scheduled fixes for timeline/year archive sargable ranges, mediumblob embedding typing, maintenance scheduler shutdown wiring, topic deletion fail-closed behavior, public analytics request-context capture, Docker native SWC pin alignment, and search/archive label improvements are present in current source and their focused tests passed.
+- Public analytics queued callbacks no longer call `headers()` or rate-limit helpers inside the queued body; rate-limit admission occurs before queueing, matching the newer cycle-10 plan.
+- No focused `.only(` test marker was found. Intentional skips remain limited to admin e2e credential gating and CLIP model-weight suites.
 
-## Final Sweep
+## Final Sweep Notes
 
-Commonly missed areas checked: repo docs vs source claims, root/app quality gates, intentional skips, source-contract test concentration, custom scanner pass evidence, production dependency audit, CLIP activation, load-more cursor validation, admin e2e proof, restore-barrier claims, CSV separator claims, migration/schema docs, privacy guards, deploy/test write behavior, and generated artifact gates.
+Existing unowned worktree state before this verifier write: `.context/plans/deferred-carry-forward.md` modified, plus untracked `.context/reviews/cycle-6-2026-07-07/_aggregate.md` and `code-reviewer.md`. I did not edit those files.
 
-I did not inspect live production host state, real environment secrets, deployed DB rows, real CLIP weights, or browser/CDN cache state. The findings above are limited to current repository evidence.
+Commonly missed areas checked: docs vs schema indexes, settings-hash comments/tests vs code, restore drain symmetry, recent run-10 plan claims vs implementation, dependency audit, action/rate-limit scanners, focused regression tests, test focus markers, and skipped test surfaces.

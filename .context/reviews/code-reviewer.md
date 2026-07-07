@@ -1,145 +1,126 @@
-# Cycle 9 - Code-Reviewer Lane
+# Cycle 11 Code-Reviewer Report
 
 Date: 2026-07-07
 Reviewer: code-reviewer
-HEAD reviewed: `ff0c79d607208bae9487be8152fa648f4161674f`
-Mode: read-only code-quality, logic, SOLID, and maintainability review except this report artifact. I did not modify application code, deploy, stop services, delete files, change schema/data, or touch production state.
+Repository: `/Users/hletrd/flash-shared/gallery`
+HEAD reviewed: `b965e3bf7621b1fa1892f199ba79a808665457e5`
 
-## Inventory
+## Scope And Method
 
-I read `AGENTS.md` and `CLAUDE.md` first, then inventoried the repository before narrowing findings.
+I reviewed the repository from code quality, logic, SOLID, maintainability, and cross-file interaction perspectives. I did not edit source files or plans; this report is the only intended write from this lane.
 
-- Source/docs reviewed: root instructions, `CLAUDE.md`, root/app READMEs, current `.context/reviews/*` lane context, package/config files, deploy/nginx/Docker assets, migrations, app routes/actions, data layer, queue/backfill scripts, image/color pipeline, semantic search, auth/origin/rate-limit guards, privacy selectors, and maintenance/restore helpers.
-- Tracked surface: 3,392 files total; `apps/web/src` has 608 tracked files, including 81 App Router/action/API files, 111 `lib` files, and 61 component files.
-- Code/test surface: 600 tracked TS/TSX files under `apps/web/src`, 29 app scripts, 33 Drizzle SQL/meta files, and 12 Playwright e2e files.
-- Final sweep searches covered TODO/FIXME/HACK markers, unsafe casts/ignores, route exports, auth/origin/rate-limit exemptions, raw SQL/update/delete paths, process-local state, storage abstractions, privacy selects, semantic embedding ownership, queue/backfill locks, and docs/code drift.
+Inventory built before review:
 
-Concurrent review artifacts changed while this lane was running (`architect.md`, then `security-reviewer.md`); I treated them as peer/user work and did not edit or revert them.
+- Repository rules: `AGENTS.md`, `CLAUDE.md`, current peer review files under `.context/reviews/`.
+- Application code: 605 TypeScript/TSX files under `apps/web/src`, including 80 app route/action files and 111 library files.
+- Tests: 346 TypeScript/TSX files under `apps/web/src/__tests__`, plus Playwright e2e coverage under `apps/web/e2e`.
+- Operational surfaces: `apps/web/scripts`, `apps/web/drizzle`, deploy scripts, Drizzle config, migration journal, custom lint scripts.
 
-## Validation
+Areas inspected:
 
-- `npm run lint --workspace=apps/web` passed.
+- Public pages, route handlers, metadata paths, JSON-LD injection, upload proxy routes, feed/OG routes.
+- Server actions for auth, public views/search/load-more, images, topics, tags, sharing, settings, SEO, smart collections, admin users, embeddings, and DB backup/restore.
+- Data layer, cursor pagination, public privacy selectors, shared links/groups, topic alias resolution, map/search/smart collection queries.
+- Auth/session/origin/rate-limit/API-admin wrappers and custom lint enforcement.
+- Image upload, processing queue, color/HDR pipeline, semantic search/backfill/embedding paths, restore maintenance locks.
+- Migration tooling, DB TLS configuration, Drizzle journal conventions, schema reconciliation surfaces.
+- Tests around topics, pagination/load-more, image queue locks, restore locks, privacy guards, and source-contract checks.
+
+Validation run:
+
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm run typecheck --workspace=apps/web` passed.
-- `npm test --workspace=apps/web` passed: 340 files passed, 2 skipped; 3,151 tests passed, 4 skipped.
-- `npm run build --workspace=apps/web` passed. It logged the known homepage-only sitemap fallback because local MySQL at `127.0.0.1:3306` was unavailable during static generation.
 
-I did not run Playwright e2e because this was a static/deep review lane and no browser-flow change was made.
+I did not run full `lint`, `typecheck`, `build`, unit, or e2e suites because this is a review-only lane with unrelated active worktree changes from other lanes, and some of those commands may generate framework artifacts or require broader runtime state. The targeted read-only guard checks were enough to validate the auth/origin/rate-limit contracts relevant to this review.
 
-## Findings Summary
+## Confirmed Issues
 
-- Critical: 0
-- High: 0
-- Medium: 2
-- Low: 2
-
-## Findings
-
-### CR-C9-01 - Semantic embedding writes overwrite alternate model versions
+### CR-C11-01 - Topic route advisory lock release failure can leak a pooled MySQL lock
 
 Severity: Medium
 Confidence: High
-Status: Confirmed
+Exact file:line region: `apps/web/src/app/actions/topics.ts:69-89`; related safer pattern/comment at `apps/web/src/lib/image-queue.ts:1045-1051`; tests currently only cover successful unlock at `apps/web/src/__tests__/topics-actions.test.ts:170-192`.
 
-Evidence:
+Why it is a problem:
 
-- The schema makes `image_embeddings.image_id` the sole primary key while `model_version` is a normal column (`apps/web/src/db/schema.ts:286-300`).
-- The physical migration matches that shape with `PRIMARY KEY (image_id)` (`apps/web/drizzle/0012_image_embeddings.sql:5-11`).
-- Every writer uses `onDuplicateKeyUpdate` on `image_id` and rewrites `modelVersion`: admin backfill (`apps/web/src/app/actions/embeddings.ts:175-186`), upload queue (`apps/web/src/lib/image-queue.ts:512-523`), and sidecar backfill (`apps/web/scripts/backfill-clip-embeddings.ts:212-223`).
-- Public semantic/similar routes filter by `model_version` (`apps/web/src/app/api/search/semantic/route.ts:271-278`, `apps/web/src/app/api/search/similar/[id]/route.ts:141-149`, `apps/web/src/app/api/search/similar/[id]/route.ts:182-189`).
-- The docs say embedding writes are one row per `(image_id, model_version)` and retries upsert that composite row (`apps/web/README.md:70-82`, `CLAUDE.md:160`).
+`withTopicRouteMutationLock` acquires a MySQL advisory lock on a dedicated pooled connection, then swallows any `RELEASE_LOCK` error and always returns the connection to the pool:
 
-Why this matters:
+```ts
+await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_TOPIC_ROUTE_SEGMENTS]).catch(() => {});
+conn.release();
+```
 
-The code implements one active embedding per image, but the docs and query model imply versioned embeddings. The mismatch is not just documentation drift: switching modes or model versions can destroy the previous version's row.
+MySQL advisory locks are session-bound. If the unlock query fails while the session remains alive, returning that same connection to the pool can preserve the lock on an idle pooled session. The image queue already documents this exact failure class and logs unlock failures loudly because a leaked advisory lock can wedge all future claims for the same lock name.
 
 Concrete failure scenario:
 
-An image has a production `jina-clip-v2-d512-q8` embedding. An admin or operator switches to stub mode for smoke testing, or runs the stub backfill on the same DB. The upsert hits the `image_id` primary key and overwrites the production row with `stub-sha256-v1`. When production mode is restored, semantic and similar search filter for the production model and now omit that image until it is re-embedded.
+A transient network/protocol error occurs while releasing `gallerykit_topic_route_segments` after `createTopic`, `updateTopic`, or alias mutation. The catch block hides it, `conn.release()` returns the still-alive session to the pool, and subsequent topic route mutations block until the 5 second `GET_LOCK` timeout. Admin users then see repeated `topicRouteBusy` failures even though no visible mutation is running.
 
 Suggested fix:
 
-Choose and enforce one ownership model. If multiple model versions are supported, migrate the key to `(image_id, model_version)` and update writers, scans, cleanup, and tests around that composite invariant. If only one active embedding is intended, update the docs/runbooks, make mode/model switches explicit destructive operations, and block stub writes from replacing production rows unless the operator opts into that loss.
+Treat unlock failure on this pooled advisory-lock connection as unhealthy state. At minimum log at error level and do not silently return the session as clean. Prefer a small helper that attempts `RELEASE_LOCK`, records whether it succeeded, and calls `conn.destroy()` or the mysql2 equivalent on release failure; only call `conn.release()` when unlock succeeded or no lock was acquired. Add a focused test where `RELEASE_LOCK` rejects and assert the connection is not returned silently.
 
-### CR-C9-02 - Public privacy guards can be bypassed by aliasing sensitive columns
+### CR-C11-02 - Shared-group read path still owns a hidden view-count side effect
+
+Severity: Low
+Confidence: High
+Exact file:line region: `apps/web/src/lib/data.ts:1322-1407`, cached wrapper warning at `apps/web/src/lib/data.ts:1805-1809`.
+
+Why it is a problem:
+
+`getSharedGroup` is a public data reader but also buffers a view-count write unless callers opt out with `incrementViewCount:false` or pass a valid selected photo id. The cached wrapper documents that the read can carry count semantics. This keeps a mutable analytics side effect inside a function that otherwise looks like a pure fetch and makes cache/call-order semantics part of correctness.
+
+Concrete failure scenario:
+
+A future metadata, preview, admin moderation, or API path calls `getSharedGroupCached(key)` just to inspect the group and forgets `incrementViewCount:false`. That code silently increments public analytics. If another render path in the same request calls the cached wrapper with different count semantics, React `cache()` deduplication can also make the side effect depend on which call happened first.
+
+Suggested fix:
+
+Split the pure read from the analytics mutation. Keep `getSharedGroup` side-effect-free and move group-view accounting into an explicit public action or route-level helper, similar to the existing `recordSharedGroupView` shape. If the buffered write is retained temporarily, remove cached access to the counting variant and export separate names such as `getSharedGroupForReadCached` and `recordSharedGroupViewLookup`.
+
+### CR-C11-03 - Drizzle Kit DB TLS config diverges from runtime and script TLS CA handling
+
+Severity: Low
+Confidence: High
+Exact file:line region: `apps/web/drizzle.config.ts:6-22`; runtime contrast at `apps/web/src/db/index.ts:7-19`; script helper contrast at `apps/web/scripts/mysql-connection-options.js:13-29`.
+
+Why it is a problem:
+
+Runtime DB connections and shared script helpers require `DB_SSL_CA` for non-local DB hosts unless `DB_SSL=false`. `drizzle.config.ts` enables TLS for non-local hosts with only `{ rejectUnauthorized: true }` and never reads the configured CA file. That means migration/introspection tooling does not share the same trust configuration as the app and scripts.
+
+Concrete failure scenario:
+
+An operator points Drizzle Kit at the same remote MySQL service used by runtime with a private CA. The app and migration scripts connect successfully because they load `DB_SSL_CA`; `drizzle-kit` fails certificate validation because the CA is omitted. Under pressure, the operator may set `DB_SSL=false` for tooling, creating a weaker and different path than production runtime.
+
+Suggested fix:
+
+Centralize connection-option construction or mirror `DB_SSL_CA` handling in `drizzle.config.ts`. For non-local hosts, fail fast when `DB_SSL_CA` is missing unless `DB_SSL=false`, and pass `ssl: { ca: readFileSync(caPath, 'utf8'), rejectUnauthorized: true }`.
+
+## Likely Issues
+
+No additional likely production issues were strong enough to report after the final sweep. Several older review concerns have either been addressed by comments/tests or were better classified as validation risks rather than confirmed runtime defects.
+
+## Validation Risks
+
+### CR-C11-VR-01 - Load-more action tests duplicate a looser cursor normalizer instead of exercising the real one
 
 Severity: Medium
 Confidence: High
-Status: Risk, confirmed guard-shape gap
+Exact file:line region: real helper at `apps/web/src/lib/data.ts:701-759`; duplicated test normalizers at `apps/web/src/__tests__/public-actions.test.ts:39-56`, `apps/web/src/__tests__/smart-collection-pagination.test.ts:56-75`, and `apps/web/src/__tests__/load-more-rate-limit.test.ts:30-45`.
 
-Evidence:
+Why it is a problem:
 
-- `publicSelectFields` omits sensitive keys from `adminSelectFields` and guards only `keyof typeof publicSelectFields` against `PrivacySensitiveKeys` (`apps/web/src/lib/data.ts:368-475`).
-- Public mirrors use the same result-key guard pattern: search enrichment (`apps/web/src/lib/search-enrichment-fields.ts:29-47`), timeline fields (`apps/web/src/lib/data-timeline.ts:35-67`), and `searchImages` (`apps/web/src/lib/data.ts:1599-1617`).
-- The privacy tests pin public result keys and sensitive key names (`apps/web/src/__tests__/privacy-fields.test.ts:19-57`, `apps/web/src/__tests__/privacy-fields.test.ts:103-164`), but they do not detect a sensitive Drizzle column selected under a safe alias.
-
-Why this matters:
-
-The public/admin data boundary depends on field names rather than selected source columns. That is brittle in a codebase with several hand-maintained public select shapes.
+The real `normalizeImageListCursor` is intentionally strict: it accepts only bounded MySQL datetime strings, bounded ISO strings, valid `Date` objects, positive integer ids, and nullable capture dates. Several action tests mock `@/lib/data` and reimplement a simplified normalizer inline. Two of those mocks accept arbitrary string dates that `new Date(...)` can parse; they do not enforce the real MySQL/ISO regex contract or all length checks.
 
 Concrete failure scenario:
 
-A future public search or share optimization adds `gpsLat: images.latitude`, `originalName: images.user_filename`, or `sourceFile: images.filename_original`. The compile-time guard passes because the aliases are not in `PrivacySensitiveKeys`, and unauthenticated data can leak through page props or JSON responses.
+A future edit accidentally loosens or tightens the production cursor contract, or changes accepted date formats. The action tests keep passing because they test the inline copy, not the real helper. Pagination then regresses only in browser/manual paths, for example by accepting locale date strings in tests while production rejects them and falls back to offset-based loading.
 
 Suggested fix:
 
-Move public selectors to a column-level allowlist helper instead of a key-name denylist. Route-specific selects should derive from that helper. Add an AST/source-contract test that rejects direct references to sensitive `images` columns in public modules, even when the result key is aliased.
+Add direct unit coverage for `normalizeImageListCursor` edge cases and make action tests import the real helper via `vi.importActual` while mocking only DB-backed exports. Avoid inline "mirrors the real contract" copies for parsing logic that is part of the user-visible pagination contract.
 
-### CR-C9-03 - `getSharedGroup` mixes data reads with view-count side effects
+## Final Missed-Issue Sweep
 
-Severity: Low
-Confidence: High
-Status: Confirmed
-
-Evidence:
-
-- `getSharedGroup()` loads a group and its public images, then calls `bufferGroupViewCount(group.id)` unless `incrementViewCount:false` or a valid selected photo is present (`apps/web/src/lib/data.ts:1322-1407`).
-- The same helper is exported through React `cache()` with a warning not to call it twice with different count semantics in one render path (`apps/web/src/lib/data.ts:1796-1800`).
-- The public group page separately records durable analytics after resolving the selected image (`apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:137-142`).
-
-Why this matters:
-
-A data-access helper has a hidden write side effect and its cached wrapper has argument-sensitive semantics. That weakens separation of concerns and makes future reuse risky.
-
-Concrete failure scenario:
-
-A metadata route, admin preview, or share-management view calls `getSharedGroupCached(key)` only to inspect the group. The denormalized `view_count` increments even though no public group view occurred. If another call in the same render path uses different options, cache deduplication can make the side effect depend on call order.
-
-Suggested fix:
-
-Make shared-group reads pure. Move denormalized counter buffering into an explicit `recordSharedGroupView`/`recordSharedGroupLookup` service owned by the public route, and cache only the pure read helper.
-
-### CR-C9-04 - Drizzle Kit TLS config does not share the runtime DB CA contract
-
-Severity: Low
-Confidence: High
-Status: Confirmed
-
-Evidence:
-
-- Runtime DB setup requires `DB_SSL_CA` for non-local DB hosts unless `DB_SSL=false`, then reads that CA into `ssl.ca` (`apps/web/src/db/index.ts:7-19`).
-- Operational MySQL scripts use the same fail-closed CA behavior (`apps/web/scripts/mysql-connection-options.js:13-29`).
-- `drizzle.config.ts` independently enables TLS for non-local hosts with only `{ rejectUnauthorized: true }` and never reads `DB_SSL_CA` (`apps/web/drizzle.config.ts:6-22`).
-
-Why this matters:
-
-The same database environment has two TLS implementations. Runtime/backup/restore can work with a private CA while Drizzle Kit fails or pushes operators toward local TLS workarounds.
-
-Concrete failure scenario:
-
-An operator runs a Drizzle Kit command against a non-local private-CA MySQL host. The app and migration scripts connect because `DB_SSL_CA` is configured, but Drizzle Kit rejects the certificate because the CA was not loaded. The workaround pressure is to disable TLS verification for tooling, which drifts from the runtime safety contract.
-
-Suggested fix:
-
-Centralize MySQL connection-option construction or duplicate the same CA-loading rule in `drizzle.config.ts`. Alternatively, make Drizzle Kit explicitly local-only unless a supported CA path is present, matching the project guidance that production schema changes go through committed migrations.
-
-## Final Sweep
-
-No Critical or High code-quality/logic findings were found in this pass. Commonly missed areas checked included server-action origin order, admin API wrappers, public route rate-limit pre-increments, analytics charging order, semantic/similar search scan bounds, upload/delete/retry cleanup, queue/backfill lock interaction, migration journal/reconcile drift, public privacy selectors, smart-collection compiler constraints, service-worker cache boundaries, restore-maintenance fences, and storage path containment.
-
-Not re-filed as defects after verification:
-
-- Public analytics view-record rate limiting charges before public target lookup, but that order is intentional and source-locked by `apps/web/src/__tests__/cycle-10-source-contracts.test.ts:10-19`.
-- The color sidecar and retry path do not have the suspected processed-row race: `retryFailedImage()` only re-enqueues `processed=false` failed rows (`apps/web/src/app/actions/images.ts:1261-1321`), while the color backfill selects `processed = TRUE` rows (`apps/web/scripts/backfill-color-pipeline.ts:372-381`).
+The final sweep specifically checked advisory locks, swallowed errors, route/action auth gates, public route rate limiting, DB TLS configuration, cached data readers with side effects, cursor pagination, and duplicated test logic. No Critical or High production defects were found in this pass. The custom guard lints passed, supporting that admin APIs, mutating server actions, and public expensive/mutating routes still satisfy the repository's enforced auth/origin/rate-limit contracts.
