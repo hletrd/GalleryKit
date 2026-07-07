@@ -43,6 +43,10 @@ import { escapeCsvField } from "@/lib/csv-escape";
 
 const CSV_TAG_SEPARATOR = '\u0001';
 
+// @mutation-barrier-exempt: read-only CSV export — no application-table
+// writes (the fire-and-forget audit log self-catches and is covered by the
+// restore drain's background-writes stage), and the restore-maintenance gate
+// below already refuses it during a restore window (AGG9B-12).
 export async function exportImagesCsv(): Promise<{ data?: string; error?: string; warning?: string }> {
     // C3-F01: Memory profile — materializes up to 50K rows as a CSV string
     // (~15-25MB peak heap). The DB results array is released before the final
@@ -126,6 +130,10 @@ export async function exportImagesCsv(): Promise<{ data?: string; error?: string
     return { data: csvContent, warning };
 }
 
+// @mutation-barrier-exempt: backup is read-only w.r.t. application tables
+// (mysqldump child + dump-file write under data/backups); the
+// restore-maintenance gate below refuses it during a restore window, so it
+// cannot race the import the barrier exists to fence (AGG9B-12).
 export async function dumpDatabase() {
     const t = await getTranslations('serverActions');
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
@@ -383,6 +391,12 @@ export async function dumpDatabase() {
 // DB advisory lock: prevents concurrent 250MB uploads filling /tmp.
 // GET_LOCK is released automatically on connection close (crash-safe).
 
+// @mutation-barrier-exempt: restoreDatabase IS the exclusive side of the
+// admin-mutation barrier — it sets the durable maintenance marker, flips the
+// exclusive flag, and DRAINS slot holders (drainAdminMutationsForRestore);
+// acquiring a shared slot here would deadlock against its own drain.
+// Concurrent restores are serialized by the gallerykit_db_restore advisory
+// lock instead (AGG9B-12).
 export async function restoreDatabase(formData: FormData) {
     const t = await getTranslations('serverActions');
     // C2R-02: defense-in-depth same-origin check for mutating server actions.

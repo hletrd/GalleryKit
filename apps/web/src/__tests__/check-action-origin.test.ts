@@ -598,6 +598,70 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed).toEqual([]);
         expect(report.passed).toContain('OK: actions/fixture.ts::createToken');
     });
+
+    it('fails real mutating admin actions that omit the admin-mutation barrier slot', () => {
+        const src = withApprovedActionGuard(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+        expect(report.failed[0]).toContain('updateSettings');
+    });
+
+    it('passes real mutating admin actions that acquire the admin-mutation barrier slot', () => {
+        const src = withApprovedActionGuard(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                using mutationSlot = acquireAdminMutationSlot();
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual(['OK: src/app/actions/settings.ts::updateSettings']);
+    });
+
+    it('passes reasoned mutation-barrier exemptions for equivalent restore fences', () => {
+        const src = withApprovedActionGuard(`
+            /** @mutation-barrier-exempt: restore owns the exclusive barrier side and drains shared slots */
+            export async function restoreDatabase(formData) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await runRestore(formData);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/[locale]/admin/db-actions.ts');
+        expect(report.failed).toEqual([]);
+        expect(report.passed).toEqual([
+            'OK (barrier-exempt with reason): src/app/[locale]/admin/db-actions.ts::restoreDatabase',
+        ]);
+    });
+
+    it('fails malformed mutation-barrier exemptions without a reason', () => {
+        const src = withApprovedActionGuard(`
+            /** @mutation-barrier-exempt: */
+            export async function restoreDatabase(formData) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                await runRestore(formData);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/[locale]/admin/db-actions.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MALFORMED MUTATION-BARRIER EXEMPTION');
+    });
 });
 
 describe('checkActionSource — arrow-function exports (C5R-RPL-03 / AGG5R-01)', () => {

@@ -127,6 +127,49 @@ function hasReasonedExemptComment(node: ts.Node, source: string): boolean {
     return /@action-origin-exempt:[^\S\r\n]*(?=[^\s*/])/.test(getLeadingText(node, source));
 }
 
+// ARCH9-03 / AGG9B-12 (loop-B cycle 9b): the restore-window mutation fence
+// (`using ... = acquireAdminMutationSlot()`, C1-03/C77-ARCH-01) is a
+// documented universal requirement on every mutating admin action, but only
+// manual review enforced it — a new mutating export could omit the slot and
+// reopen the drain-race window with no CI signal. The same-origin scanner
+// already classifies every export, so it now also requires the barrier
+// acquisition (or a reasoned `@mutation-barrier-exempt: <reason>` comment,
+// reserved for exports fenced by an equivalent mechanism — e.g. the restore
+// flow, which IS the exclusive side of this barrier and is serialized by the
+// `gallerykit_db_restore` advisory lock instead).
+function hasMutationBarrierExemptTag(node: ts.Node, source: string): boolean {
+    return /@mutation-barrier-exempt/.test(getLeadingText(node, source));
+}
+
+function hasReasonedMutationBarrierExemptComment(node: ts.Node, source: string): boolean {
+    return /@mutation-barrier-exempt:[^\S\r\n]*(?=[^\s*/])/.test(getLeadingText(node, source));
+}
+
+function bodyAcquiresAdminMutationSlot(body: ts.Node, sourceFile: ts.SourceFile): boolean {
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        if (
+            ts.isCallExpression(node)
+            && ts.isIdentifier(node.expression)
+            && node.expression.text === 'acquireAdminMutationSlot'
+        ) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(body);
+    void sourceFile;
+    return found;
+}
+
+function requiresAdminMutationBarrier(relative: string): boolean {
+    const normalized = relative.replaceAll(path.sep, '/');
+    return normalized.startsWith('src/app/actions/')
+        || normalized === 'src/app/[locale]/admin/db-actions.ts';
+}
+
 function collectApprovedRequireSameOriginImports(sourceFile: ts.SourceFile): Set<string> {
     const approved = new Set<string>();
     for (const statement of sourceFile.statements) {
@@ -1321,6 +1364,32 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
         if (!hasStandardGuard && !hasAuthGuard) {
             report.failed.push(
                 `MISSING requireSameOriginAdmin: ${relative}:${lineOf(owner)} ${name} must return early on requireSameOriginAdmin() or carry '@action-origin-exempt: <reason>' comment`,
+            );
+            return;
+        }
+
+        // ARCH9-03 / AGG9B-12: every export that needs the origin guard is a
+        // mutating admin action, and every mutating admin action must also
+        // hold the restore-fence barrier slot for its body (CLAUDE.md "Race
+        // Condition Protections", C1-03/C77-ARCH-01) — or carry a reasoned
+        // exemption naming the equivalent fence it relies on instead.
+        if (!requiresAdminMutationBarrier(relative)) {
+            report.passed.push(`OK: ${relative}::${name}`);
+            return;
+        }
+        if (hasMutationBarrierExemptTag(owner, content) && !hasReasonedMutationBarrierExemptComment(owner, content)) {
+            report.failed.push(
+                `MALFORMED MUTATION-BARRIER EXEMPTION: ${relative}:${lineOf(owner)} ${name} carries '@mutation-barrier-exempt' without a non-empty ': <reason>'; name the equivalent restore fence the export relies on`,
+            );
+            return;
+        }
+        if (!bodyAcquiresAdminMutationSlot(body, sourceFile)) {
+            if (hasReasonedMutationBarrierExemptComment(owner, content)) {
+                report.passed.push(`OK (barrier-exempt with reason): ${relative}::${name}`);
+                return;
+            }
+            report.failed.push(
+                `MISSING acquireAdminMutationSlot: ${relative}:${lineOf(owner)} ${name} must hold the admin-mutation barrier slot for its body (using ... = acquireAdminMutationSlot()) or carry '@mutation-barrier-exempt: <reason>' naming its equivalent restore fence`,
             );
             return;
         }
