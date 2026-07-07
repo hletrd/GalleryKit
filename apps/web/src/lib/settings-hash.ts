@@ -39,7 +39,7 @@ import { db } from '@/db';
 import { adminSettings } from '@/db/schema';
 import { inArray } from 'drizzle-orm';
 import type { GalleryConfig } from './gallery-config';
-import { DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS, type GallerySettingKey } from './gallery-config-shared';
+import { DERIVATIVE_BYTE_IMPACTING_SETTING_KEYS, parseImageSizes, type GallerySettingKey } from './gallery-config-shared';
 
 // R16C16 TE-16-04: exported so a unit test can pin the exhaustive membership
 // (the compile-time guard below only validates each entry IS a setting key, not
@@ -102,6 +102,17 @@ async function fetchHashFromDb(): Promise<string> {
             .where(inArray(adminSettings.key, [...COLOR_IMPACTING_KEYS]));
         const map: Record<string, string> = {};
         for (const r of rows) map[r.key] = r.value;
+        // C4-19 (run-10 c4): normalize a stored image_sizes value to the SAME
+        // sorted CSV the config-arg path hashes (buildHashFromConfig sorts
+        // ascending). The admin UI persists the array in display order, so a
+        // stored "1536,640" would otherwise hash differently on this no-arg DB
+        // path than on the resolved-config path — flipping the ETag (spurious
+        // 304 → 200) whenever serve-upload briefly falls back to this form.
+        // parseImageSizes sorts + de-dupes and coerces empty/invalid input to
+        // DEFAULT_IMAGE_SIZES, exactly matching the config-arg resolution.
+        if (map.image_sizes !== undefined) {
+            map.image_sizes = parseImageSizes(map.image_sizes).join(',');
+        }
         return buildHash(map);
     } catch {
         // DB not reachable / settings table missing — fall back to a
