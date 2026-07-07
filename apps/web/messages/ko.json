@@ -503,7 +503,7 @@
     "invalidTitle": "잘못된 제목입니다",
     "invalidDescription": "잘못된 설명입니다",
     "cannotDeleteCategoryWithImages": "이미지가 포함된 카테고리는 삭제할 수 없습니다. 이미지를 먼저 삭제하세요.",
-    "cannotDeleteCategoryReferencedByCollection": "이 카테고리를 참조하는 스마트 컬렉션을 먼저 수정해 주세요.",
+    "cannotDeleteCategoryReferencedByCollection": "이 카테고리를 참조하는 스마트 컬렉션이 있습니다. 컬렉션 쿼리를 직접 수정한 뒤 삭제해 주세요.",
     "failedToDeleteTopic": "카테고리 삭제에 실패했습니다.",
     "invalidTopicSlug": "잘못된 카테고리 슬러그입니다",
     "invalidAliasFormat": "별칭 형식이 올바르지 않습니다.",

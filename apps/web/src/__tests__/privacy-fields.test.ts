@@ -7,6 +7,8 @@ import { timelineSelectFieldKeys } from '@/lib/data-timeline';
 import { searchEnrichmentSelectFields } from '@/lib/search-enrichment-fields';
 
 const dataSource = readFileSync(resolve(__dirname, '../lib/data.ts'), 'utf8');
+const timelineSource = readFileSync(resolve(__dirname, '../lib/data-timeline.ts'), 'utf8');
+const searchEnrichmentSource = readFileSync(resolve(__dirname, '../lib/search-enrichment-fields.ts'), 'utf8');
 
 function sourceBetween(source: string, startNeedle: string, endNeedle: string): string {
     const start = source.indexOf(startNeedle);
@@ -199,5 +201,36 @@ describe('Privacy field separation', () => {
             leaked,
             `Public searchFields must not alias safe keys to sensitive images.* columns: ${leaked.join(', ')}`,
         ).toEqual([]);
+    });
+
+    it('standalone public select modules do not alias sensitive image columns', () => {
+        const publicSelectBlocks = [
+            {
+                label: 'timelineSelectFields',
+                source: sourceBetween(
+                    timelineSource,
+                    'const timelineSelectFields = {',
+                    '} as const;',
+                ),
+            },
+            {
+                label: 'searchEnrichmentSelectFields',
+                source: sourceBetween(
+                    searchEnrichmentSource,
+                    'export const searchEnrichmentSelectFields = {',
+                    '};',
+                ),
+            },
+        ];
+
+        for (const { label, source } of publicSelectBlocks) {
+            const leaked = SENSITIVE_KEYS.filter((key) =>
+                new RegExp(`\\b[A-Za-z0-9_]+\\s*:\\s*images\\.${key}\\b`).test(source),
+            );
+            expect(
+                leaked,
+                `${label} must not alias public keys to sensitive images.* columns: ${leaked.join(', ')}`,
+            ).toEqual([]);
+        }
     });
 });

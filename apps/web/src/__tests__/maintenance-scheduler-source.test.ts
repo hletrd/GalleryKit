@@ -31,4 +31,11 @@ describe('maintenance scheduler ownership (run-10 cycle 5)', () => {
         expect(MAINTENANCE_SRC).toContain('activeMaintenanceSweeps');
         expect(MAINTENANCE_SRC).toContain('drainMaintenanceSweepsForRestore');
     });
+
+    it('single-flights maintenance sweeps so hourly ticks cannot overlap (C9-PERF-02)', () => {
+        expect(MAINTENANCE_SRC).toContain('maintenanceSweepInFlight');
+        expect(MAINTENANCE_SRC).toContain('if (maintenanceSweepInFlight) return;');
+        expect(MAINTENANCE_SRC).toContain('maintenanceSweepInFlight = sweep;');
+        expect(MAINTENANCE_SRC).toContain('maintenanceSweepInFlight = undefined;');
+    });
 });

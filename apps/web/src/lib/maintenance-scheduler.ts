@@ -10,6 +10,7 @@ const MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000;
 
 let startupSweepRun = false;
 let maintenanceInterval: ReturnType<typeof setInterval> | undefined;
+let maintenanceSweepInFlight: Promise<void> | undefined;
 const activeMaintenanceSweeps = new Set<Promise<void>>();
 
 export async function purgeExpiredSessions() {
@@ -38,9 +39,16 @@ async function runMaintenanceSweepOnce(): Promise<void> {
 }
 
 export function runMaintenanceSweep(): void {
+    if (maintenanceSweepInFlight) return;
     const sweep = runMaintenanceSweepOnce();
+    maintenanceSweepInFlight = sweep;
     activeMaintenanceSweeps.add(sweep);
-    sweep.finally(() => activeMaintenanceSweeps.delete(sweep)).catch(err => {
+    sweep.finally(() => {
+        activeMaintenanceSweeps.delete(sweep);
+        if (maintenanceSweepInFlight === sweep) {
+            maintenanceSweepInFlight = undefined;
+        }
+    }).catch(err => {
         console.debug('runMaintenanceSweep failed:', err);
     });
 }
@@ -75,5 +83,6 @@ export function stopMaintenanceSchedulerForTests(): void {
         maintenanceInterval = undefined;
     }
     startupSweepRun = false;
+    maintenanceSweepInFlight = undefined;
     activeMaintenanceSweeps.clear();
 }

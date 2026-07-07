@@ -19,6 +19,8 @@
     "init": "tsx scripts/init-db.ts",
     "restore:maintenance": "node scripts/restore-maintenance-recovery.mjs",
     "test:e2e": "env -u NO_COLOR npx playwright test",
+    "test:e2e:admin": "env -u NO_COLOR E2E_ADMIN_ENABLED=true npx playwright test e2e/admin.spec.ts e2e/origin-guard.spec.ts",
+    "test:clip:preflight": "node -e \"if(!process.env.CLIP_MODELS_ROOT){console.error('Set CLIP_MODELS_ROOT to the seeded CLIP model directory');process.exit(1)}\" && CLIP_OFFLINE_LOAD=1 CLIP_INTEGRATION=1 vitest run src/__tests__/clip-offline-load.test.ts src/__tests__/clip-semantic-integration.test.ts",
     "e2e:seed": "tsx scripts/seed-e2e.ts",
     "lint:api-auth": "tsx scripts/check-api-auth.ts",
     "lint:action-origin": "tsx scripts/check-action-origin.ts",

@@ -37,6 +37,8 @@ After the dev server starts, log in at `/en/admin`, review Settings before any r
 | `npm test` | Vitest unit suite |
 | `npm run typecheck` | Type gate (app + scripts) |
 | `npm run test:e2e` | Playwright end-to-end tests |
+| `npm run test:e2e:admin` | Authenticated admin Playwright proof; requires local/remote e2e admin credentials as described below |
+| `CLIP_MODELS_ROOT=<abs-models-root> npm run test:clip:preflight` | Real CLIP offline-load + ranking preflight before production semantic-search activation |
 | `npx tsx scripts/download-clip-models.ts` | Local/dev CLIP weight seed helper; production sidecars must use the full mounted command in `CLAUDE.md` so `CLIP_MODELS_ROOT` points at persistent storage |
 | `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true npx tsx scripts/backfill-clip-embeddings.ts --production --force` | Local/dev production-CLIP backfill helper; production sidecars must use the full mounted command in `CLAUDE.md` |
 | `npx tsx scripts/backfill-color-pipeline.ts` | Local/dev stale-derivative re-encode helper; production sidecars must use the full mounted command in `CLAUDE.md` with `UPLOAD_ORIGINAL_ROOT` and persisted upload/resource mounts |
@@ -57,6 +59,7 @@ After the dev server starts, log in at `/en/admin`, review Settings before any r
 - Admin database backups are plaintext SQL dumps in `data/backups/` until you move or encrypt them. The app keeps them non-public and authenticated, but host/storage encryption is an operator responsibility.
 - Database backups cover rows only. They do not include private originals in `data/uploads/original`, public derivatives in `public/uploads`, or topic/resource files in `public/resources`; use host-level filesystem backups for complete rollback.
 - If `ADMIN_PASSWORD` is stored as an Argon2 hash, set a separate plaintext `E2E_ADMIN_PASSWORD` and `E2E_ADMIN_ENABLED=true` for local Playwright admin login flows.
+- Use `npm run test:e2e:admin` when a change needs authenticated admin browser proof; it forces the admin specs on and fails clearly if credentials are missing.
 - Remote admin Playwright runs are blocked by default; set both `E2E_ADMIN_ENABLED=true` and `E2E_ALLOW_REMOTE_ADMIN=true` only when you intentionally want to exercise a non-local target with a dedicated `E2E_ADMIN_PASSWORD`.
 
 ## Semantic search (CLIP — US-P51)
@@ -69,7 +72,7 @@ GalleryKit ships a fully self-hosted, multilingual **natural-language photo sear
 - **Concurrency:** `CLIP_INFERENCE_CONCURRENCY` defaults to `1` and is capped in code. Raise it only after measuring CPU/RSS headroom because each concurrent request runs an ONNX forward pass.
 - **Honesty gate:** `production` serves results only from rows matching the active `model_version`; if no real embeddings exist yet it returns 503 rather than serving stub or empty results under the production label.
 - **Scan scope:** searches the newest embeddings first (bounded scan); large galleries may not surface relevant older photos unless they are re-uploaded or re-embedded after a backfill.
-- **Embedding writes:** the `image_embeddings` table stores one row per `(image_id, model_version)`; upload and backfill paths use idempotent upsert/overwrite writes rather than appending duplicate embedding history.
+- **Embedding writes:** the `image_embeddings` table stores one active row per `image_id`. `model_version` labels the current vector, and upload/backfill paths use idempotent upsert/overwrite writes rather than appending embedding history. Re-running a different mode/model for the same image replaces the prior vector.
 - **Public route posture:** same-origin guard on the query endpoints plus bounded per-IP rate limiting. The semantic/similar limiter is process-local; use the shipped reverse-proxy limits or an edge limiter for stronger cross-restart abuse resistance.
 
 Activation requires all three conditions: model files present under `CLIP_MODELS_ROOT`, matching `image_embeddings.model_version` rows from a production backfill, and `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in the running container environment. Changing only the database setting is not enough; the resolver heals unauthorized `production` mode back to `disabled`.
@@ -79,10 +82,11 @@ Activation requires all three conditions: model files present under `CLIP_MODELS
 The resolver heals a stored `semantic_search_mode='production'` back to `disabled` **unless** the env opt-in is set — there is intentionally no one-click production toggle in the admin UI (it offers only Disabled/Stub). To activate:
 
 1. **Seed weights** (sidecar `--rm`): `scripts/download-clip-models.ts` with `CLIP_MODELS_ROOT` set to the bind-mount path.
-2. **Backfill embeddings** for existing photos: run `scripts/backfill-clip-embeddings.ts --production --force` in a sidecar with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and `CLIP_MODELS_ROOT=/app/data/models/clip`. The `--force` flag skips the DB mode gate so you can pre-populate embeddings before flipping the admin setting, but the script still requires the explicit production env opt-in. If the script logs that it reached `SEMANTIC_SCAN_LIMIT`, repeat the same command until it completes without that message; each run upserts the same `(image_id, model_version)` row, so retries converge instead of duplicating embeddings.
-3. Set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in `.env.local`.
-4. Apply that env change to the live web container before flipping the DB mode: run the normal root `npm run deploy` from the deploy checkout, or recreate the stack with `docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build` for a local/manual Docker smoke. The running Node process reads `SEMANTIC_SEARCH_ALLOW_PRODUCTION` from its container environment; editing `.env.local` alone does not update an already-running container.
-5. Set the DB row `admin_settings.semantic_search_mode='production'`.
+2. **Backfill embeddings** for existing photos: run `scripts/backfill-clip-embeddings.ts --production --force` in a sidecar with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and `CLIP_MODELS_ROOT=/app/data/models/clip`. The `--force` flag skips the DB mode gate so you can pre-populate embeddings before flipping the admin setting, but the script still requires the explicit production env opt-in. If the script logs that it reached `SEMANTIC_SCAN_LIMIT`, repeat the same command until it completes without that message; each run upserts the same `image_id` row with the active `model_version`, so retries converge instead of duplicating embeddings.
+3. **Run the activation proof:** `CLIP_MODELS_ROOT=<abs-models-root> npm run test:clip:preflight`.
+4. Set `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` in `.env.local`.
+5. Apply that env change to the live web container before flipping the DB mode: run the normal root `npm run deploy` from the deploy checkout, or recreate the stack with `docker compose --env-file apps/web/.env.local -f apps/web/docker-compose.yml up -d --build` for a local/manual Docker smoke. The running Node process reads `SEMANTIC_SEARCH_ALLOW_PRODUCTION` from its container environment; editing `.env.local` alone does not update an already-running container.
+6. Set the DB row `admin_settings.semantic_search_mode='production'`.
 
 New uploads are embedded automatically (fire-and-forget, lower priority than derivative generation). See `CLAUDE.md` → **"CLIP semantic search — seeding model weights on the deploy host"** for the exact `--rm` sidecar commands (the prod runtime container has no `tsx`/source, so model ops run from a sidecar off `web-web:latest` with read-only source mounts).
 
