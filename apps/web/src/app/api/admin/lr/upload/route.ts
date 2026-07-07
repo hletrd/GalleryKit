@@ -173,8 +173,6 @@ export const POST = withAdminAuth(
 
         let formData: FormData;
         try {
-            await markAdminAuthTokenUsed(request);
-
             tracker.count += 1;
             tracker.bytes += declaredUploadBytes;
             uploadTracker.set(trackerKey, tracker);
@@ -537,6 +535,17 @@ export const POST = withAdminAuth(
         // the claim/settle pairing is symmetric with the browser path and the
         // reject branches above.
         settleTrackerToActual(true, fileSize);
+
+        // AGG9B-01 / CR9-01 / CRIT9-01 (loop-B cycle 9b): mark the PAT used
+        // only for a COMMITTED upload. Marking earlier (pre-parse) bumped
+        // last_used_at for every content-validation rejection — unknown
+        // topic 404, oversized file, GPS-strip failure, and the C61-02
+        // restore-begins-mid-parse race — so a 100%-failing publish profile
+        // looked "recently used" to operators. Living inside this
+        // post-commit try (after the settle, which must always run), a mark
+        // failure logs loudly but never converts a committed upload into an
+        // error response.
+        await markAdminAuthTokenUsed(request);
 
         enqueueImageProcessing({
             id: imageId,

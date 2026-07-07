@@ -265,6 +265,9 @@ export default function InfoBottomSheet({ image, isOpen, onClose, isAdmin = fals
                 ref={setSheetNode}
                 role="dialog"
                 aria-modal="true"
+                // DES9-01 / AGG9B-15: referenced by the mobile Info trigger's
+                // aria-controls in photo-viewer.tsx.
+                id="photo-info-bottom-sheet"
                 aria-label={t('viewer.bottomSheet')}
                 className="fixed inset-x-0 bottom-0 z-50 bg-card border-t rounded-t-xl shadow-2xl transition-transform duration-300 ease-out"
                 // C2-18 (run-10 c2): transform/transition are applied

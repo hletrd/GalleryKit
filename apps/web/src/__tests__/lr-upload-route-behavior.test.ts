@@ -20,6 +20,7 @@ const {
     saveOriginalAndGetMetadataMock,
     settleUploadTrackerClaimMock,
     statfsMock,
+    stripGpsFromOriginalMock,
     uploadTracker,
 } = vi.hoisted(() => {
     const tracker = new Map<string, { count: number; bytes: number; windowStart: number }>();
@@ -41,6 +42,7 @@ const {
         saveOriginalAndGetMetadataMock: vi.fn(),
         settleUploadTrackerClaimMock: vi.fn(),
         statfsMock: vi.fn(),
+        stripGpsFromOriginalMock: vi.fn(async () => true),
         uploadTracker: tracker,
     };
 });
@@ -71,7 +73,7 @@ vi.mock('@/lib/process-image', async (importOriginal) => {
         ...actual,
         extractExifForDb: vi.fn(() => ({})),
         saveOriginalAndGetMetadata: saveOriginalAndGetMetadataMock,
-        stripGpsFromOriginal: vi.fn(async () => true),
+        stripGpsFromOriginal: stripGpsFromOriginalMock,
     };
 });
 
@@ -166,6 +168,7 @@ describe('Lightroom upload route behavior', () => {
             wideGamutMaxSourcePixels: 50_000_000,
         });
         statfsMock.mockResolvedValue({ bavail: 2_000_000, bsize: 1024 });
+        stripGpsFromOriginalMock.mockResolvedValue(true);
         saveOriginalAndGetMetadataMock.mockResolvedValue({
             bitDepth: 8,
             blurDataUrl: 'data:image/jpeg;base64,abcd',
@@ -287,29 +290,168 @@ describe('Lightroom upload route behavior', () => {
         expect(lockReleaseMock).toHaveBeenCalledOnce();
     });
 
-    it('releases the multipart parse slot when token finalization fails after acquisition', async () => {
+    it('keeps a committed upload successful when the token-usage mark fails post-commit (AGG9B-01)', async () => {
+        // The mark now lives in the post-commit bookkeeping block: a
+        // last_used_at write failure must log, not convert a committed row
+        // into an error response (and can no longer leak the parse slot —
+        // it runs long after the slot's release).
         markAdminAuthTokenUsedMock.mockRejectedValueOnce(new Error('token finalization failed'));
+        saveOriginalAndGetMetadataMock.mockResolvedValueOnce({
+            bitDepth: 8,
+            blurDataUrl: 'data:image/jpeg;base64,abcd',
+            colorPipelineDecision: 'srgb',
+            colorSignals: { isHdr: false, colorPrimaries: 'srgb' },
+            exifData: {},
+            filenameAvif: 'img.avif',
+            filenameJpeg: 'img.jpg',
+            filenameOriginal: 'orig.jpg',
+            filenameWebp: 'img.webp',
+            height: 10,
+            iccProfileName: null,
+            originalHeight: 10,
+            originalWidth: 10,
+            width: 10,
+        });
 
         const { POST } = await import('@/app/api/admin/lr/upload/route');
-        const makeRequest = (filename: string) => {
-            const form = new FormData();
-            form.set('file', new File([new Uint8Array([1, 2, 3])], filename, { type: 'image/jpeg' }));
-            form.set('topic', 'seoul');
-            return new NextRequest('https://gallery.test/api/admin/lr/upload', {
-                method: 'POST',
-                headers: { 'content-length': '1024' },
-                body: form,
-            });
-        };
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'first.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
 
-        await expect(POST(makeRequest('first.jpg'))).rejects.toThrow('token finalization failed');
-        expect(settleUploadTrackerClaimMock).not.toHaveBeenCalled();
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
 
-        const response = await POST(makeRequest('second.jpg'));
+        expect(response.status).toBe(201);
+        await expect(response.json()).resolves.toEqual({ success: true, id: 9 });
+        expect(markAdminAuthTokenUsedMock).toHaveBeenCalledOnce();
+        // The tracker settle runs BEFORE the mark and must have completed.
+        expect(settleUploadTrackerClaimMock).toHaveBeenCalledWith(
+            uploadTracker,
+            'lr:42',
+            1,
+            1024,
+            1,
+            3,
+        );
+    });
+
+    it('fails closed when GPS cannot be stripped: rejects, deletes the original, no DB row (AGG9B-08)', async () => {
+        // TEST9-02: previously pinned only by source-regex. Drive the real
+        // handler: strip_gps_on_upload enabled + stripGpsFromOriginal -> false
+        // must reject the upload, delete the saved original, roll back the
+        // quota claim, and never insert a row or mark the PAT used.
+        getGalleryConfigStrictMock.mockResolvedValueOnce({
+            allowHdrIngest: false,
+            autoAltTextEnabled: false,
+            avifEffort: 6,
+            forceSrgbDerivatives: false,
+            imageQualityAvif: 85,
+            imageQualityJpeg: 90,
+            imageQualityWebp: 90,
+            imageSizes: [640],
+            sdrJpegChroma: '4:2:0',
+            semanticSearchMode: 'disabled',
+            stripGpsOnUpload: true,
+            wideGamutJpegChroma: '4:4:4',
+            wideGamutMaxSourcePixels: 50_000_000,
+        });
+        saveOriginalAndGetMetadataMock.mockResolvedValueOnce({
+            bitDepth: 8,
+            blurDataUrl: 'data:image/jpeg;base64,abcd',
+            colorPipelineDecision: 'srgb',
+            colorSignals: { isHdr: false, colorPrimaries: 'srgb' },
+            exifData: { latitude: 37.5, longitude: 127.0 },
+            filenameAvif: 'img.avif',
+            filenameJpeg: 'img.jpg',
+            filenameOriginal: 'orig.jpg',
+            filenameWebp: 'img.webp',
+            height: 10,
+            iccProfileName: null,
+            originalHeight: 10,
+            originalWidth: 10,
+            width: 10,
+        });
+        stripGpsFromOriginalMock.mockResolvedValueOnce(false);
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'geo.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
 
         expect(response.status).toBe(422);
-        await expect(response.json()).resolves.toEqual({ error: 'HDR ingest is disabled' });
-        expect(markAdminAuthTokenUsedMock).toHaveBeenCalledTimes(2);
+        await expect(response.json()).resolves.toEqual({
+            error: 'GPS metadata could not be stripped from the original',
+        });
+        expect(deleteOriginalUploadFileMock).toHaveBeenCalledWith('orig.jpg');
+        expect(settleUploadTrackerClaimMock).toHaveBeenCalledWith(
+            uploadTracker,
+            'lr:42',
+            1,
+            1024,
+            0,
+            0,
+        );
+        expect(dbInsertMock).not.toHaveBeenCalled();
+        expect(enqueueImageProcessingMock).not.toHaveBeenCalled();
+        expect(markAdminAuthTokenUsedMock).not.toHaveBeenCalled();
+    });
+
+    it('does not mark the PAT used when the topic slug is unknown (404 rejection, AGG9B-01)', async () => {
+        dbSelectMock.mockReturnValue({
+            from: vi.fn(() => ({
+                where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([]) })),
+            })),
+        });
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'x.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'renamed-away');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
+
+        expect(response.status).toBe(404);
+        await expect(response.json()).resolves.toEqual({ error: 'Topic not found' });
+        expect(markAdminAuthTokenUsedMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
+    });
+
+    it('does not mark the PAT used when a restore begins mid-request (C61-02 race, AGG9B-01)', async () => {
+        // Entry guard sees no restore; the post-parse re-check sees one —
+        // the exact race window the C61-02 comment documents. The static
+        // mockReturnValue(true) in the entry-guard test could never reach
+        // this branch.
+        isRestoreMaintenanceActiveMock.mockReturnValueOnce(false);
+        isRestoreMaintenanceActiveMock.mockReturnValue(true);
+
+        const { POST } = await import('@/app/api/admin/lr/upload/route');
+        const form = new FormData();
+        form.set('file', new File([new Uint8Array([1, 2, 3])], 'x.jpg', { type: 'image/jpeg' }));
+        form.set('topic', 'seoul');
+
+        const response = await POST(new NextRequest('https://gallery.test/api/admin/lr/upload', {
+            method: 'POST',
+            headers: { 'content-length': '1024' },
+            body: form,
+        }));
+
+        expect(response.status).toBe(503);
+        await expect(response.json()).resolves.toEqual({ error: 'Restore in progress; retry shortly' });
+        expect(markAdminAuthTokenUsedMock).not.toHaveBeenCalled();
+        expect(dbInsertMock).not.toHaveBeenCalled();
     });
 
     // C6-11 (run-10 cycle-6): drive the failure branches that were previously

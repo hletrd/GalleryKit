@@ -377,7 +377,11 @@ export function ImageZoom({ children, className, accessibleName }: ImageZoomProp
                 cursorClass,
                 className
             )}
-            style={{ touchAction: isZoomed ? 'none' : 'auto' }}
+            // AGG9B-24 / CR9-S4 (loop-B cycle 9b): 'manipulation' (not 'auto')
+            // while un-zoomed — it keeps scroll/pan but removes the browser's
+            // own double-tap-to-zoom gesture and its ~300 ms click delay, so
+            // the custom double-tap toggle no longer races native page zoom.
+            style={{ touchAction: isZoomed ? 'none' : 'manipulation' }}
             onClick={handleClick}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}

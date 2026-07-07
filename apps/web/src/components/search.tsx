@@ -325,7 +325,16 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
             // destroy the in-progress query.
             if (isImeComposingNativeEvent(e)) return;
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-                if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+                // AGG9B-28 / CR9-S8 (loop-B cycle 9b): keep the guard against
+                // hijacking Cmd/Ctrl+K while typing in unrelated inputs, but
+                // allow the toggle from the search dialog's OWN input — the
+                // dialog focuses it on open, so the blanket input guard made
+                // the standard close gesture (Cmd/Ctrl+K again) inert exactly
+                // while the dialog was open.
+                const isForeignInput =
+                    (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) &&
+                    e.target !== inputRef.current;
+                if (isForeignInput) return;
                 e.preventDefault();
                 setIsOpen(prev => !prev);
             }

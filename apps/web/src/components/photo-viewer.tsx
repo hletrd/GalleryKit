@@ -608,6 +608,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         // touch-primary on the `lg:hidden` breakpoint.
                         className="gap-2 lg:hidden h-11"
                         aria-keyshortcuts="I"
+                        // DES9-01 / AGG9B-15 (WCAG 4.1.2): disclosure trigger —
+                        // expose the sheet's open state programmatically, matching
+                        // nav-client's mobile expand toggle pattern.
+                        aria-expanded={showBottomSheet}
+                        aria-controls="photo-info-bottom-sheet"
                         title={`${t('viewer.info')} (I)`}
                     >
                         <Info className="h-4 w-4" />
@@ -660,6 +665,11 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                         }}
                         className="gap-2 transition-all hidden lg:flex h-11"
                         aria-keyshortcuts="I"
+                        // DES9-01 / AGG9B-15 (WCAG 4.1.2): two-state toggle —
+                        // the changing text label alone is not programmatically
+                        // determinable state; matches lightbox's slideshow
+                        // aria-pressed pattern.
+                        aria-pressed={isPinned}
                         title={`${isPinned ? t('viewer.infoPinned') : t('viewer.info')} (I)`}
                     >
                         {isPinned ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}

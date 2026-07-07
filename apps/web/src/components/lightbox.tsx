@@ -253,6 +253,18 @@ export function Lightbox({ image, prevId, nextId, onClose, onNavigate, onSlidesh
         const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
         const dt = Date.now() - touchStartRef.current.time;
         touchStartRef.current = null;
+        // AGG9B-23 / CR9-S3 (loop-B cycle 9b): a tap on an interactive
+        // control must not be treated as "touch input" that stops the
+        // slideshow. Touch events bubble from the control to this container
+        // BEFORE the control's click fires, so the old unconditional stop
+        // raced the Pause button's own toggle: touchend set active=false,
+        // then click toggled prev => !prev back to TRUE — on touch devices
+        // the Pause button silently re-started the slideshow instead of
+        // stopping it (Play worked by the same asymmetry). Let the control's
+        // own handler own the state change.
+        if (e.target instanceof Element && e.target.closest('button, a')) {
+            return;
+        }
         // Stop slideshow on touch input
         setIsSlideshowActive(false);
         // Only trigger on horizontal swipe (dx > dy) with enough distance or velocity

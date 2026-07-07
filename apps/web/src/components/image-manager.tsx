@@ -505,11 +505,27 @@ export function ImageManager({
                                             availableTags={availableTags}
                                             selectedTags={image.tag_names ? image.tag_names.split(',').filter(Boolean) : []}
                                             onTagsChange={async (newTags) => {
-                                                const oldTags = image.tag_names ? image.tag_names.split(',').filter(Boolean) : [];
+                                                const oldTagNames = image.tag_names ?? null;
+                                                const oldTags = oldTagNames ? oldTagNames.split(',').filter(Boolean) : [];
                                                 const added = newTags.filter(t => !oldTags.includes(t));
                                                 const removed = oldTags.filter(t => !newTags.includes(t));
 
                                                 if (added.length === 0 && removed.length === 0) return;
+
+                                                // AGG9B-27 / CR9-S7 (loop-B cycle 9b): update the row
+                                                // optimistically (same pattern as the edit dialog's
+                                                // setImages map below) so the chips reflect the edit
+                                                // immediately instead of appearing to ignore it for the
+                                                // whole server-action + router.refresh() round-trip;
+                                                // reverted on failure. The refresh reconciles canonical
+                                                // ordering/partial-warning outcomes.
+                                                const optimisticTagNames = newTags.length > 0 ? newTags.join(',') : null;
+                                                setImages(prev => prev.map(img => img.id === image.id
+                                                    ? { ...img, tag_names: optimisticTagNames }
+                                                    : img));
+                                                const revertOptimisticTags = () => setImages(prev => prev.map(img => img.id === image.id
+                                                    ? { ...img, tag_names: oldTagNames }
+                                                    : img));
 
                                                 try {
                                                     const res = await batchUpdateImageTags(image.id, added, removed);
@@ -522,10 +538,12 @@ export function ImageManager({
                                                         }
                                                         router.refresh();
                                                     } else {
+                                                        revertOptimisticTags();
                                                         toast.error(t('imageManager.batchAddFailed'));
                                                     }
                                                 } catch (err) {
                                                     console.error('Failed to batch add tags:', err);
+                                                    revertOptimisticTags();
                                                     toast.error(t('imageManager.batchAddFailed'));
                                                 }
                                             }}
