@@ -9,8 +9,9 @@ const readRoot = (rel: string) => readFileSync(resolve(__dirname, '..', '..', re
 describe('cycle 19 source contracts', () => {
     it('keeps DB child processes under a watchdog', () => {
         const src = readSrc('app/[locale]/admin/db-actions.ts');
-        expect(src).toContain('DB_CHILD_PROCESS_TIMEOUT_MS');
-        expect(src).toContain('armDbChildProcessWatchdog');
+        const watchdog = readSrc('lib/db-child-watchdog.ts');
+        expect(watchdog).toContain('DB_CHILD_PROCESS_TIMEOUT_MS');
+        expect(src).toContain("import { armDbChildProcessWatchdog } from \"@/lib/db-child-watchdog\"");
         expect(src).toContain("armDbChildProcessWatchdog(dump, 'mysqldump backup'");
         expect(src).toContain("armDbChildProcessWatchdog(restore, 'mysql restore import'");
         expect(src).toContain("armDbChildProcessWatchdog(migrate, 'post-restore migration'");

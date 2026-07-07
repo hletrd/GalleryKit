@@ -132,4 +132,15 @@ describe('purgeOldViewEvents retention sweep (AGG-H2)', () => {
         // 3 tables × (5000 + 10) = 15030.
         expect(total).toBe((5000 + 10) * 3);
     });
+
+    // C7-18 (run-10 cycle 7b): the MAX_BATCHES_PER_TABLE=200 safety cap keeps
+    // an unexpectedly huge backlog from spinning the hourly sweep forever —
+    // previously untested. Every batch returns full, so only the cap stops
+    // the loop: exactly 200 iterations per table.
+    it('stops at the per-table iteration cap when every batch is full', async () => {
+        limitMock.mockImplementation(async () => ({ affectedRows: 5000 }));
+        const total = await purgeOldViewEvents();
+        expect(limitMock).toHaveBeenCalledTimes(200 * 3);
+        expect(total).toBe(5000 * 200 * 3);
+    });
 });

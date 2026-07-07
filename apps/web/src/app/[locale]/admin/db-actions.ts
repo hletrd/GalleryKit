@@ -4,7 +4,7 @@ import { db, connection } from "@/db";
 import type { RowDataPacket } from "mysql2/promise";
 import { images, imageTags, tags } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
+import { spawn } from "child_process";
 import fs from "fs/promises";
 import { createWriteStream, createReadStream } from "fs";
 import { Readable } from "stream";
@@ -33,55 +33,14 @@ import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-con
 import { sanitizeStderr } from "@/lib/sanitize";
 import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE, LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from "@/lib/advisory-locks";
 import { createPooledAdvisoryLockReleaser, releasePooledAdvisoryLocks } from "@/lib/advisory-lock-release";
+import { armDbChildProcessWatchdog } from "@/lib/db-child-watchdog";
 
 // escapeCsvField moved to `@/lib/csv-escape` so it can be unit-tested
 // without the `'use server'` async-only constraint (C6R-RPL-06 / AGG6R-11).
 // Re-import here to keep the existing call site unchanged.
 import { escapeCsvField } from "@/lib/csv-escape";
 
-const DB_CHILD_PROCESS_TIMEOUT_MS = 30 * 60 * 1000;
-const DB_CHILD_PROCESS_KILL_GRACE_MS = 5000;
 const CSV_TAG_SEPARATOR = '\u0001';
-
-function armDbChildProcessWatchdog(
-    child: ChildProcessWithoutNullStreams,
-    label: string,
-    onTimeout: (err: Error) => void,
-): () => void {
-    let fired = false;
-    let childSettled = false;
-    let forceKill: ReturnType<typeof setTimeout> | null = null;
-    const markSettled = () => {
-        childSettled = true;
-        if (forceKill) {
-            clearTimeout(forceKill);
-            forceKill = null;
-        }
-    };
-    child.once('exit', markSettled);
-    child.once('close', markSettled);
-    const timeout = setTimeout(() => {
-        fired = true;
-        const err = new Error(`${label} timed out after ${DB_CHILD_PROCESS_TIMEOUT_MS}ms`);
-        child.stdin.destroy(err);
-        child.stdout.destroy(err);
-        child.stderr.destroy(err);
-        child.kill('SIGTERM');
-        forceKill = setTimeout(() => {
-            if (!childSettled) child.kill('SIGKILL');
-        }, DB_CHILD_PROCESS_KILL_GRACE_MS);
-        forceKill.unref?.();
-        onTimeout(err);
-    }, DB_CHILD_PROCESS_TIMEOUT_MS);
-    timeout.unref?.();
-
-    return () => {
-        if (!fired) clearTimeout(timeout);
-        if (!fired) markSettled();
-        child.off('exit', markSettled);
-        child.off('close', markSettled);
-    };
-}
 
 export async function exportImagesCsv(): Promise<{ data?: string; error?: string; warning?: string }> {
     // C3-F01: Memory profile — materializes up to 50K rows as a CSV string

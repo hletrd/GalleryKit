@@ -7,8 +7,8 @@ const readRoot = (rel: string) => readFileSync(resolve(__dirname, '..', '..', re
 
 describe('cycle 20 source contracts', () => {
     it('force-kills timed-out DB child processes based on observed settlement, not child.killed', () => {
-        const src = readSrc('app/[locale]/admin/db-actions.ts');
-        const watchdog = src.slice(src.indexOf('function armDbChildProcessWatchdog'), src.indexOf('export async function exportImagesCsv'));
+        const src = readSrc('lib/db-child-watchdog.ts');
+        const watchdog = src.slice(src.indexOf('export function armDbChildProcessWatchdog'));
         expect(watchdog).toContain('let childSettled = false');
         expect(watchdog).toContain("child.once('exit', markSettled)");
         expect(watchdog).toContain("child.once('close', markSettled)");

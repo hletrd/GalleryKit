@@ -69,8 +69,14 @@ interface CacheEntry {
 let cache: CacheEntry | null = null;
 let inflight: Promise<string> | null = null;
 
+function normalizeHashValue(key: (typeof COLOR_IMPACTING_KEYS)[number], value: string | undefined): string {
+    if (value === undefined) return '';
+    if (key === 'image_sizes') return parseImageSizes(value).join(',');
+    return value;
+}
+
 function buildHash(values: Record<string, string | undefined>): string {
-    const ordered = COLOR_IMPACTING_KEYS.map((k) => `${k}=${values[k] ?? ''}`).join('|');
+    const ordered = COLOR_IMPACTING_KEYS.map((k) => `${k}=${normalizeHashValue(k, values[k])}`).join('|');
     return createHash('sha256').update(ordered, 'utf8').digest('hex').slice(0, HASH_LENGTH);
 }
 

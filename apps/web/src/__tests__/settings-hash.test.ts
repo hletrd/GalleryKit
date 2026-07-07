@@ -122,6 +122,16 @@ describe('color settings hash (P4-E2)', () => {
         expect(a).not.toBe(b);
     });
 
+    // C7-17 (run-10 cycle 7b): AGG-R7C3-02 documents that image_sizes is
+    // normalized (sorted ascending) before hashing so display-order changes
+    // in the admin UI cannot spuriously invalidate cached variants — this
+    // invariant previously had no test on the raw-DB-string path.
+    it('image_sizes hash is order-independent (AGG-R7C3-02)', () => {
+        const ascending = _buildHashForTesting({ image_sizes: '640,1536' });
+        const descending = _buildHashForTesting({ image_sizes: '1536,640' });
+        expect(ascending).toBe(descending);
+    });
+
     it('ignores keys outside the canonical set', () => {
         const a = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4' });
         const b = _buildHashForTesting({ wide_gamut_jpeg_chroma: '4:4:4', irrelevant_key: 'x' });
