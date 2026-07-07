@@ -99,15 +99,35 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
     const lightboxTriggerRef = useRef<HTMLButtonElement>(null);
     const mobileInfoButtonRef = useRef<HTMLButtonElement>(null);
 
-    // Persist info sidebar pin state across photo navigation
-    const [isPinned, setIsPinned] = useState(() => {
+    // Persist info sidebar pin state across photo navigation.
+    // C4-03 / DES4-01 (run-10 c4): the first render MUST be deterministic and
+    // match SSR. The previous lazy initializer read sessionStorage/matchMedia
+    // directly — on the server that threw into the catch (always `false`),
+    // while desktop clients hydrated `true`, producing a React hydration
+    // mismatch (minified #418 in production) and a full subtree regeneration
+    // on EVERY desktop photo-page load. Render `false` first (matching the
+    // server), then restore the persisted / viewport-derived value in a mount
+    // effect — the same idiom lightbox.tsx uses for its media-query state.
+    const [isPinned, setIsPinned] = useState(false);
+    const pinRestoredRef = useRef(false);
+    useEffect(() => {
+        if (pinRestoredRef.current) return;
+        pinRestoredRef.current = true;
         try {
             const stored = sessionStorage.getItem('gallery_info_pinned');
-            if (stored !== null) return stored === 'true';
-            return typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
-        } catch { return false; }
-    });
+            if (stored !== null) {
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- post-hydration restore of client-only persisted state (SSR must render the deterministic default)
+                setIsPinned(stored === 'true');
+                return;
+            }
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- post-hydration viewport-derived default (matchMedia is client-only)
+            setIsPinned(window.matchMedia('(min-width: 1024px)').matches);
+        } catch { /* keep the deterministic default */ }
+    }, []);
     useEffect(() => {
+        // Skip persisting until the restore effect has run, so a transient
+        // pre-restore `false` never overwrites a stored `true`.
+        if (!pinRestoredRef.current) return;
         try {
             sessionStorage.setItem('gallery_info_pinned', String(isPinned));
         } catch { /* noop */ }
