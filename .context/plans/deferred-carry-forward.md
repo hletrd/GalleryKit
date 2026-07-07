@@ -101,7 +101,6 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C4-22 | LOW/Med-High | cycle-4-2026-07-07 | r10c4 | 0 | Hairpin-DNS/self-origin OG incident OR measured cold-OG latency (fs-read transport + containment) |
 | C4-24 | LOW/Med-High | cycle-4-2026-07-07 | r10c4 | 0 | Admin bulk-upload perceived-lag report OR next admin-surface perf cycle (fold with C2-28) |
 | C4-25 (code) | LOW/Med | cycle-4-2026-07-07 | r10c4 | 0 | `IMAGE_BASE_URL` actually configured in production → decide the SW cross-origin caching story (doc half shipped this cycle) |
-| C4-26 | LOW/Low-Med | cycle-4-2026-07-07 | r10c4 | 0 | **Fold DROPPED** (WP5 kept `evictExpiredCachedImage`'s bare meta read; wrapping it in `withMetaMutation` was non-trivial): re-open on a reproduced spurious eviction at the staleness boundary OR the next SW-touching cycle |
 | C4-09d | MED/High | cycle-4-2026-07-07 | r10c4 | 0 | Real permanently-un-embeddable backlog ≥ SEMANTIC_SCAN_LIMIT in prod (durable cursor + per-row failure marking) |
 | SEC4-03 | LOW/Med | cycle-4-2026-07-07 | r10c4 | 0 | Storage-backend multi-writer/non-local (C2-27) OR threat model adds hostile-local-writer (O_NOFOLLOW/fd-realpath re-check) |
 | C4-46 | INFO/Low | cycle-4-2026-07-07 | r10c4 | 0 | Operator/agent FIND-failure incident on an existing runbook entry OR CLAUDE.md crosses ~1000 lines |
@@ -113,4 +112,5 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 - `C2-31` concrete instance: scheduled + landed run-10 c3 (WP12, nginx-test block parser); remainder row above.
 - `C3-25`: same WP12 (api-csp-header count-pin relaxation) — closed, no row.
 - `C3-32` (JSON-LD dev-warning): exit criterion FIRED and CLOSED run-10 c4 — DES4-P3 reproduced against a production build (zero console output; the React 19 warning is dev-only). Removed from this register.
+- `C4-26` (SW eviction recency read): folded into WP5/run-10 c4 — `evictExpiredCachedImage` now reads LRU meta through `withMetaMutation` in both `apps/web/public/sw.template.js` and `apps/web/src/lib/sw-cache.ts`.
 - `C3-01 / C3-02 / C3-04 / C3-16` residuals: their sibling failure classes were scheduled + shipped run-10 c4 (WP1 DML-baseline guard, WP2 guard self-heal, WP3 config write-invalidation) — see the cycle-4 plan's forward-honesty ledger.
