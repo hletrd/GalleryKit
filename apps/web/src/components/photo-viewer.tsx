@@ -751,7 +751,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
                     // container was animating `lg:w-0` (layout-thrashing width
                     // tween); fade+slide instead — width snaps, the I toggle still
                     // reflows the grid correctly at the lg breakpoint.
-                    "space-y-6 transition-[opacity,transform] duration-500 ease-in-out overflow-hidden transform hidden lg:block",
+                    "space-y-6 transition-[opacity,transform] duration-200 ease-in-out overflow-hidden transform hidden lg:block",
                      showInfo ? "lg:opacity-100 lg:translate-x-0" : "lg:opacity-0 lg:translate-x-10 lg:w-0 lg:p-0"
                 )}>
                     {showInfo && (

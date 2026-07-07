@@ -76,15 +76,19 @@ describe('client component source contracts', () => {
     expect(code).toContain("{showSearchLabel && <span className=\"hidden lg:inline\">{t('aria.searchPhotos')}</span>}");
   });
 
-  it('names tag and category delete targets in destructive confirmations', () => {
+  it('names tag, category, and image delete targets in destructive confirmations', () => {
     const tags = source('app/[locale]/admin/(protected)/tags/tag-manager.tsx');
     const categories = source('app/[locale]/admin/(protected)/categories/topic-manager.tsx');
+    const imageManager = source('components/image-manager.tsx');
     expect(tags).toContain('const deleteTarget = initialTags.find');
     expect(tags).toContain("t('tags.deleteConfirmTitle', { name: deleteTarget?.name ?? '' })");
     expect(tags).toContain("t('tags.deleteConfirm', { name: deleteTarget?.name ?? '' })");
     expect(categories).toContain('const deleteTopicTarget = initialTopics.find');
     expect(categories).toContain("t('categories.deleteConfirmTitle', { label: deleteTopicTarget?.label ?? '' })");
     expect(categories).toContain("t('categories.deleteConfirm', { label: deleteTopicTarget?.label ?? '' })");
+    expect(imageManager).toContain('const deleteTargetTitle = image.title || image.user_filename || `#${image.id}`');
+    expect(imageManager).toContain("t('imageManager.deleteImageConfirmTitle', { title: deleteTargetTitle })");
+    expect(imageManager).toContain("t('imageManager.deleteImageConfirmDesc', { title: deleteTargetTitle })");
   });
 
   it('generates admin page metadata from localized admin-route helpers', () => {
@@ -176,9 +180,16 @@ describe('client component source contracts', () => {
       expect(code, `${path} should append stable ids to repeated archive link labels`).toContain('const accessibleTitle = `${displayTitle} #${photo.id}`');
       expect(code, `${path} should pass the stable id label to aria copy`).toContain("aria-label={tAria('viewPhoto', { title: accessibleTitle })}");
       expect(code, `${path} should use action-oriented photo link labels`).toContain("tAria('viewPhoto'");
+      expect(code, `${path} should avoid detail-page viewport prefetch on archive grids`).toContain('prefetch={false}');
       expect(code, `${path} should not hard-code English photo fallback for cards`).not.toContain("getPhotoDisplayTitleFromTagNames(photo, 'Photo')");
       expect(code, `${path} should not use bare title-only link labels`).not.toContain('aria-label={displayTitle}');
     }
+  });
+
+  it('keeps the desktop photo-viewer info sidebar transition short', () => {
+    const code = source('components/photo-viewer.tsx');
+    expect(code).toContain('transition-[opacity,transform] duration-200');
+    expect(code).not.toContain('transition-[opacity,transform] duration-500');
   });
 
   it('timeline and year metadata include social previews and localized invalid-year copy', () => {

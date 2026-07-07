@@ -249,6 +249,7 @@ export default async function TimelinePage({
                                             >
                                                 <Link
                                                     href={localizePath(locale, `/p/${photo.id}`)}
+                                                    prefetch={false}
                                                     aria-label={tAria('viewPhoto', { title: accessibleTitle })}
                                                 >
                                                     <div className="relative w-full">

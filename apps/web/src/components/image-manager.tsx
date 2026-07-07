@@ -455,6 +455,7 @@ export function ImageManager({
                         {images.map((image) => {
                             const isWideGamut = isWideGamutPrimary(image.color_primaries);
                             const knownSrgb = image.color_primaries === 'bt709' || image.color_primaries === 'srgb';
+                            const deleteTargetTitle = image.title || image.user_filename || `#${image.id}`;
 
                             return (
                             <TableRow key={image.id} data-state={selectedIds.has(image.id) ? "selected" : undefined}>
@@ -553,21 +554,21 @@ export function ImageManager({
                                 <TableCell suppressHydrationWarning>{formatStoredExifDate(image.capture_date, locale) || (image.created_at ? new Date(image.created_at).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' }) : '-')}</TableCell>
                                 <TableCell className="text-right">
                                     <div className="flex justify-end gap-2">
-                                        <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => startEdit(image)} aria-label={t('imageManager.editImageAria', { title: image.title || image.user_filename || image.id })}>
+                                        <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => startEdit(image)} aria-label={t('imageManager.editImageAria', { title: deleteTargetTitle })}>
                                             <Pencil className="h-4 w-4" />
                                         </Button>
                                         {/* COR-R4C16-01: settle-before-close (see bulk dialog above). */}
                                         <AlertDialog open={deleteConfirmId === image.id} onOpenChange={(open) => { if (open) setDeleteConfirmId(image.id); else if (deletingId !== image.id) setDeleteConfirmId(null); }}>
                                             <AlertDialogTrigger asChild>
-                                            <Button variant="destructive" size="icon" className="h-11 w-11" aria-label={t('imageManager.deleteImageAria', { title: image.title || image.user_filename || image.id })}>
+                                            <Button variant="destructive" size="icon" className="h-11 w-11" aria-label={t('imageManager.deleteImageAria', { title: deleteTargetTitle })}>
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                             <AlertDialogHeader>
-                                                <AlertDialogTitle>{t('imageManager.deleteImageConfirmTitle')}</AlertDialogTitle>
+                                                <AlertDialogTitle>{t('imageManager.deleteImageConfirmTitle', { title: deleteTargetTitle })}</AlertDialogTitle>
                                                 <AlertDialogDescription>
-                                                    {t('imageManager.deleteImageConfirmDesc')}
+                                                    {t('imageManager.deleteImageConfirmDesc', { title: deleteTargetTitle })}
                                                 </AlertDialogDescription>
                                             </AlertDialogHeader>
                                             <AlertDialogFooter>
