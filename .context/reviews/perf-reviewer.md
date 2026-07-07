@@ -1,383 +1,385 @@
-# Review-Plan-Fix Cycle 15 Performance / Concurrency Review
+# Review-Plan-Fix Cycle 16 Performance / Concurrency Review
 
 Role: perf-reviewer
-Date: 2026-07-07
+Date: 2026-07-08
 Repository: `/Users/hletrd/flash-shared/gallery`
 Output file: `.context/reviews/perf-reviewer.md`
 
 ## Scope And Method
 
-Required local instructions read before reviewing:
+I performed a repository-wide performance and concurrency review for GalleryKit. I first built an inventory of performance-relevant files, then read the selected files and their cross-file interactions directly. I focused on CPU and memory hotspots, Sharp/image processing, queue/backfill concurrency, DB query shape and indexes, large payloads and N+1 patterns, cache invalidation and revalidation, React rendering and hydration, UI responsiveness, public-route expensive work, rate limiter memory growth, streaming versus buffering, deployment/build performance, race conditions, shared process state, and single-writer assumptions.
 
-- `AGENTS.md`
-- `CLAUDE.md`, focused on architecture, runtime topology, image queue/backfill, Color/HDR pipeline, cache/ETag behavior, race-condition protections, testing gates, deploy helper, and disk hygiene
-- `.context/reviews/prompts/common_review_scope.md`
-- `.context/reviews/prompts/perf-reviewer.md`
-
-Mutation boundary: this review modifies only this file. No commits, pushes, deploys, destructive actions, or edits outside the assigned review artifact were performed.
-
-Inventory was built first from tracked repository files, then narrowed by performance/concurrency relevance. The review covered the source inventory by repo-wide marker scans plus direct reads of every file selected into the specialty surface. Tests and docs were used only as context; behavior was validated from source code.
+Mutation boundary: this review modifies only this report file. I did not edit application code, deploy, or run destructive commands.
 
 ## Inventory
 
-Tracked source/config inventory used for this review:
+Primary files and regions reviewed:
 
-- App routes, pages, server actions, API routes: `apps/web/src/app/**` (81 executable files)
-- Client/server UI components: `apps/web/src/components/**` (61 executable files)
-- Data, queues, image processing, auth, cache, analytics, rate limiting, gallery config, semantic search, upload, and utility libraries: `apps/web/src/lib/**` (114 executable files)
-- Database schema and pool setup: `apps/web/src/db/**` (3 executable files)
-- Operational scripts and backfills: `apps/web/scripts/**` (28 executable files)
-- Migrations and migration journal: `apps/web/drizzle/**` (33 files)
-- Runtime/config/deploy/cache surfaces: `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, root and workspace `package*.json`, `apps/web/instrumentation.ts`, `apps/web/proxy.ts`
-- Tests: `apps/web/src/__tests__/**`, `apps/web/e2e/**`, and script tests were inventoried for coverage context, not treated as proof of runtime behavior
+- Project guidance and operational constraints: `AGENTS.md`, `CLAUDE.md`, especially runtime topology, image queue/backfill, color pipeline, uploads, CLIP semantic search, deploy helper, and disk hygiene.
+- App routes, pages, server actions, API routes: `apps/web/src/app/**`, including public home/topic/photo/map/timeline/year/share/feed/sitemap/OG routes, admin actions, public actions, upload routes, semantic/similar APIs, health/live endpoints, and upload serving routes.
+- Client and server UI: `apps/web/src/components/**`, especially `home-client.tsx`, load-more/search components, `grid-picture*`, lightbox, map components, and timeline/year renderers.
+- Data and DB: `apps/web/src/lib/data.ts`, `data-timeline.ts`, `analytics-data.ts`, `smart-collections.ts`, `clip-embeddings.ts`, `clip-model.ts`, `gallery-config.ts`, `rate-limit.ts`, `bounded-map.ts`, `background-db-writes.ts`, `single-writer-guard.ts`, `maintenance-scheduler.ts`, `apps/web/src/db/index.ts`, and `apps/web/src/db/schema.ts`.
+- Image and upload pipeline: `process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, `upload-limits.ts`, `upload-tracker-state.ts`, `serve-upload.ts`, `og-photo-fetch.ts`, browser upload action, Lightroom upload API, DB restore/export actions, and `scripts/backfill-color-pipeline.ts`.
+- Runtime/deploy/build/cache: `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, service worker files, migration script, drizzle migrations and journal, package scripts.
+- Tests were inventoried for coverage context, but findings below are based on source review rather than assuming tests prove production behavior.
 
-Primary source files directly examined for hot paths and cross-file behavior:
-
-- Rendering/data paths: `apps/web/src/app/[locale]/(public)/page.tsx`, `[topic]/page.tsx`, `map/page.tsx`, `timeline/page.tsx`, photo/group/feed/sitemap/OG routes, `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/gallery-config.ts`
-- Browser responsiveness: `apps/web/src/components/home-client.tsx`, `photo-lightbox.tsx`, `masonry-grid.tsx`, `grid-picture*.tsx`, `components/map/*`, timeline/search/smart-collection client components, service worker files
-- Image processing and upload: `apps/web/src/lib/process-image.ts`, `image-queue.ts`, `admin-backfill-runner.ts`, `image-paths.ts`, `image-url.ts`, `serve-upload.ts`, `upload-limits.ts`, `app/actions/images.ts`, `app/api/admin/lr/upload/route.ts`, `scripts/backfill-color-pipeline.ts`
-- DB/query/analytics/search: `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `lib/analytics-data.ts`, `lib/smart-collections.ts`, `app/actions/public.ts`, `app/api/search/semantic/route.ts`, `app/api/search/similar/[id]/route.ts`, `lib/clip-embeddings.ts`, `lib/clip-model.ts`
-- Runtime guards and deployment: migration script, deploy scripts, nginx config, Docker config, Next config, cache headers, queue bootstrap and shutdown paths
-
-Explicit exclusions: `node_modules`, `.next`, build outputs, local env/secrets, binary/static assets without runtime code, generated screenshots, and unrelated untracked review scratch directories. No relevant file in the performance/concurrency specialty inventory was intentionally skipped.
+Skipped: `node_modules`, `.next`, build outputs, local env/secrets, binary screenshots/assets without runtime code, and unrelated historical review artifacts. I did not intentionally skip any file selected into this lane's performance/concurrency surface.
 
 ## Summary
 
-Findings:
+Confirmed issues: 6
+Likely issues: 4
+Manual-validation risks: 3
 
-- Confirmed Issues: 6
-- Likely Issues: 3
-- Risks Requiring Manual Validation: 3
-
-The highest-risk theme is shared-resource budgeting. The app has made substantial progress in bounding individual queues and avoiding obvious Sharp/DB runaway behavior, but the budgets are independent: queue, in-app backfill, sidecar backfill, analytics, and semantic scans can still combine into pool, CPU, disk, or Node main-process pressure.
+Highest-risk theme: individual subsystems are bounded, but several bounds are independent. Image queue, in-app backfill, sidecar backfill, semantic search, map rendering, and Server Action multipart parsing can still combine into DB pool pressure, CPU saturation, browser main-thread stalls, or Node RSS spikes.
 
 ## Confirmed Issues
 
-### PERF-C15-01: Image queue and in-app color backfill reserve DB headroom independently, so running both can still starve live requests
+### PERF-C16-01: Image queue and in-app backfill reserve DB pool headroom independently
 
-Confidence: High
 Severity: High
+Confidence: High
 
-Code regions:
+Code region:
 
-- `apps/web/src/db/index.ts:31-41` fixes the shared MySQL pool at `connectionLimit: 10` and `queueLimit: 20`.
-- `apps/web/src/lib/image-queue.ts:121-141` reserves roughly half the pool for live traffic and clamps queue concurrency, but only for the image queue itself.
-- `apps/web/src/lib/image-queue.ts:641-672` holds a per-image advisory-lock connection.
-- `apps/web/src/lib/image-queue.ts:719-875` processes an image while holding that claim and also performs transient DB reads/updates.
-- `apps/web/src/lib/admin-backfill-runner.ts:106-142` performs separate pool-budget arithmetic for backfill.
-- `apps/web/src/lib/admin-backfill-runner.ts:324-379` holds a whole-run advisory lock and per-image advisory-lock connections.
-- `apps/web/src/lib/admin-backfill-runner.ts:716-727` starts a separate `PQueue` with its own effective concurrency.
+- `apps/web/src/db/index.ts:31-41` fixes the MySQL pool at `connectionLimit: 10` and `queueLimit: 20`.
+- `apps/web/src/lib/image-queue.ts:121-141` clamps queue concurrency against the pool in isolation.
+- `apps/web/src/lib/image-queue.ts:441` creates a queue with that independent concurrency.
+- `apps/web/src/lib/image-queue.ts:868-883` runs the Sharp derivative pipeline inside queue jobs.
+- `apps/web/src/lib/admin-backfill-runner.ts:97-143` separately clamps in-app backfill concurrency.
+- `apps/web/src/lib/admin-backfill-runner.ts:393-431` scans stale candidates; `apps/web/src/lib/admin-backfill-runner.ts:550-565` runs the same derivative pipeline.
+- `apps/web/src/lib/process-image.ts:1433-1440` fans out WebP, AVIF, and JPEG generation in parallel per image.
 
 Why this is a problem:
 
-The queue and in-app backfill each protect the pool only when considered in isolation. There is no shared in-process budget or DB-backed semaphore that accounts for the other subsystem. At the default pool size, the queue can run at effective concurrency 2 and the in-app backfill can also run at effective concurrency 2. Each worker can hold an advisory-lock connection while needing transient DB work; the backfill also pins a whole-run lock connection. That can consume most of the 10-connection pool before normal page renders, metadata fetches, analytics writes, or admin actions enter the pool queue.
+The queue and backfill each reserve roughly half the pool for live traffic only when considered alone. They do not share a semaphore or token budget. At the default pool size, queue concurrency can be 2 and backfill concurrency can also be 2; each worker can hold an advisory-lock connection while doing transient DB work, and backfill also pins a whole-run lock. This can consume most of the 10 pool slots before normal SSR, analytics, or admin work enter the pool.
 
 Concrete failure scenario:
 
-An admin uploads new images while also starting an in-app color-pipeline backfill. Two queue workers and two backfill workers run Sharp encodes and hold per-image locks. The backfill global lock remains pinned. Public photo pages and home/topic SSR then enter `getImage`/listing fan-out while only a few pool slots remain. Concurrent requests can hit mysql2's pool queue, and bursts can reach `queueLimit: 20`, producing request failures or long tail latency even though each background subsystem individually obeyed its own cap.
+An admin starts a color-pipeline backfill while uploads are still processing. Two queue jobs and two backfill jobs run Sharp encodes and DB updates; the backfill run lock is also held. Public photo pages then execute multi-query data loads, but the pool has little headroom. Requests queue behind long-running background work and can hit the mysql2 `queueLimit: 20`, producing failures or long tail latency.
 
 Suggested fix:
 
-Introduce one shared background-work budget for DB-pinning image work inside the web process. The budget should cover queue workers, in-app backfill workers, and any other long-running image/DB maintenance task. A simple local semaphore is enough for single-process deployment; if multi-process deployments become supported, move the budget to a DB-backed lease table or advisory-lock token scheme. At minimum, pause or reduce `QUEUE_CONCURRENCY` while in-app backfill is active.
+Create one shared in-process background DB budget for image work. Queue jobs, in-app backfill jobs, and any future long-running image maintenance should acquire from the same semaphore before taking DB-pinning advisory locks. In the current single-process topology a local semaphore is sufficient; if horizontal support is added, move the budget to a DB-backed lease/advisory-token design. As a minimal mitigation, pause or reduce upload queue concurrency while in-app backfill is active.
 
-### PERF-C15-02: The sidecar color backfill bypasses the web pool budget and can compete with production traffic for DB, CPU, and disk
+### PERF-C16-02: Browser upload and DB restore stream after framework multipart buffering
 
-Confidence: High
 Severity: High
+Confidence: High
 
-Code regions:
+Code region:
 
-- `apps/web/scripts/backfill-color-pipeline.ts:378-387` builds the candidate predicate and starts a sidecar `PQueue` using `BACKFILL_CONCURRENCY`, capped at 8.
-- `apps/web/scripts/backfill-color-pipeline.ts:409-417` fetches candidate pages from `images`.
-- `apps/web/scripts/backfill-color-pipeline.ts:453-516` performs batched DB updates and cleanup after re-encoding.
-- `apps/web/scripts/backfill-color-pipeline.ts:523-570` queues concurrent `reprocessRow` tasks and flushes batches.
-- `apps/web/src/db/index.ts:31-41` shows the normal imported DB helper creates a 10-connection pool.
-- `apps/web/src/lib/process-image.ts:1109-1145` and `apps/web/src/lib/process-image.ts:1227-1440` show each reprocess can run metadata reads, optional wide-gamut downscale, and parallel WebP/AVIF/JPEG generation.
+- `apps/web/src/lib/upload-limits.ts:1-5` allows 200 MiB upload files, 250 MiB restore files, 100 files per window, and 2 GiB rolling upload budget.
+- `apps/web/src/lib/upload-limits.ts:19-35` sets the Server Action body limit from the largest action surface plus overhead.
+- `apps/web/next.config.ts:112-119` applies that Server Action body limit.
+- `apps/web/src/app/actions/images.ts:129-148` receives a `FormData` Server Action and reads all `files` entries.
+- `apps/web/src/app/actions/images.ts:184-249` validates file count and byte totals only after `FormData` exists.
+- `apps/web/src/lib/process-image.ts:905-910` streams the already-created `File` to disk.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:369-405` receives restore as a Server Action; `apps/web/src/app/[locale]/admin/db-actions.ts:610-631` streams the already-created restore `File` to disk.
+- Lightroom upload improves this with `LR_MULTIPART_PARSE_MAX_IN_FLIGHT = 1` at `apps/web/src/app/api/admin/lr/upload/route.ts:60-73`, but still calls `request.formData()` at `apps/web/src/app/api/admin/lr/upload/route.ts:178-185`.
 
 Why this is a problem:
 
-The web app's in-process queue/backfill code clamps itself against the web pool, but the sidecar script imports the same DB module in a separate Node process and therefore owns a separate mysql2 pool. `BACKFILL_CONCURRENCY` can be set up to 8, and each worker runs the same Sharp-heavy derivative pipeline. This can exceed the production host's real DB, CPU, and disk budgets even if the web process appears correctly configured.
+The code comments correctly stream `File.stream()` to disk, but in Server Actions and `request.formData()` route handlers the multipart payload has already been parsed into `File` objects before that stream begins. The disk stream limits a second heap copy; it does not prevent request-body buffering/RSS pressure at the framework parser boundary.
 
 Concrete failure scenario:
 
-An operator runs `BACKFILL_CONCURRENCY=8` on the production host during traffic. The sidecar opens its own DB pool, scans stale image rows, runs up to 8 re-encodes, and writes derivatives while the web process continues serving uploads, image queue jobs, public pages, and route handlers. MySQL sees more connections than the web pool arithmetic assumed, libvips/CPU saturates, and derivative directories receive heavy write/delete traffic, causing slow SSR and upload processing or pool wait failures.
+An admin uploads several 200 MiB images through the dashboard, or restores a 250 MiB SQL dump. Before app-level size checks run, Next has to parse the multipart body into `FormData`. Concurrent uploads or a restore during traffic can spike Node memory, causing GC stalls or OOM even though the subsequent application code streams to disk.
 
 Suggested fix:
 
-Make the sidecar participate in the same global maintenance budget. Options: a DB-backed semaphore, a required maintenance-mode lock that pauses live queues, or a hard default/max of 1 unless an explicit `--maintenance-window` flag is present. Also log the effective DB pool and host CPU budget at script startup and refuse high concurrency when the web queue/backfill lock is active.
+Move large browser upload and restore ingestion to route handlers that use a streaming multipart parser with backpressure and a hard byte counter before materialization. Keep dashboard Server Actions for metadata/control fields only. Add a process-wide ingress semaphore for large multipart parsing, similar to the Lightroom route's parse slot, and lower default Server Action body limits where possible.
 
-### PERF-C15-03: Public map rendering still materializes and hydrates up to 10,000 broad marker rows plus a duplicate accessible list
+### PERF-C16-03: Public semantic and similar search perform per-request brute-force BLOB scans and vector math
 
-Confidence: High
-Severity: High
-
-Code regions:
-
-- `apps/web/src/lib/data.ts:1766-1802` sets `MAP_MAX_MARKERS = 10000` and selects `publicMapSelectFields` for every map-visible GPS image.
-- `apps/web/src/lib/data.ts:409-444` defines the public map select from a broad public image field set rather than a minimal marker projection.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:42-66` fetches all map rows on every dynamic render and maps them into client marker props.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:89-110` passes all markers to the client map and also renders a full `<ul>` entry for every marker.
-- `apps/web/src/components/map/map-client.tsx:77-94` allocates latitude and longitude arrays and spreads them into `Math.min/Math.max`.
-- `apps/web/src/components/map/map-client.tsx:120-139` renders one React Leaflet `Marker` per marker.
-
-Why this is a problem:
-
-The route is bounded, but the bound is high for a browser and for RSC/HTML payload size. A GPS-heavy gallery can serialize thousands of marker objects, hydrate thousands of Leaflet markers, and render thousands of duplicate list links. The bounds calculation also makes extra arrays and uses spread calls over the whole marker set. This is a browser responsiveness problem even when the DB query succeeds.
-
-Concrete failure scenario:
-
-A photographer imports a travel archive with 8,000 GPS-bearing images and enables map visibility. Opening `/map` on a mid-range phone downloads a large server-rendered payload, hydrates thousands of markers, builds thousands of list items, runs fit-bounds over full arrays, and stalls the main thread. The user sees delayed input, slow scrolling, or tab termination despite the query being capped.
-
-Suggested fix:
-
-Use a lean SQL projection for map rows: `id`, coordinates, title/display title inputs, `filename_jpeg`, topic, and topic label only. Lower the first-paint cap substantially and switch to viewport/bounds-based fetching or marker clustering. Virtualize or paginate the accessible list. Compute bounds in a single pass without spread arrays.
-
-### PERF-C15-04: The home page runs a non-sargable On This Day query on every dynamic render
-
-Confidence: High
 Severity: Medium
-
-Code regions:
-
-- `apps/web/src/app/[locale]/(public)/page.tsx:155-177` renders the dynamic public home page and loads the first image page.
-- `apps/web/src/app/[locale]/(public)/page.tsx:232-234` always includes `OnThisDayWidget`.
-- `apps/web/src/components/on-this-day-widget.tsx:15-22` runs `getOnThisDayImages(month, day)` during the home SSR pass.
-- `apps/web/src/lib/data-timeline.ts:102-130` filters with `MONTH(images.capture_date)` and `DAY(images.capture_date)`, then joins tags, groups, orders, and limits.
-- `apps/web/src/db/schema.ts:123-130` has no generated month/day column or index; the relevant date index is on `(processed, capture_date, created_at)`.
-
-Why this is a problem:
-
-Wrapping `capture_date` in `MONTH()` and `DAY()` prevents use of the `capture_date` key parts for selective lookup. Because the home page is uncached/dynamic, every home request pays this scan/group/order cost even though the result changes only once per local day.
-
-Concrete failure scenario:
-
-With a large archive, repeated home page requests from crawlers or visitors each scan the processed dated image set to find today's month/day, then join and group tags for at most six displayed photos. The homepage latency increases and competes with the main listing query for DB connections.
-
-Suggested fix:
-
-Add generated columns such as `capture_month` and `capture_day` or a single `capture_month_day`, indexed with `processed`. Alternatively maintain a small daily summary/cache keyed by month/day. Keep the tag aggregation as a second phase over the six selected image IDs.
-
-### PERF-C15-05: Color-pipeline backfill candidate scans lack an index for `pipeline_version`
-
 Confidence: High
-Severity: Medium
 
-Code regions:
+Code region:
 
-- `apps/web/src/db/schema.ts:82-83` defines `pipeline_version`.
-- `apps/web/src/db/schema.ts:123-130` defines image indexes but none include `pipeline_version`.
-- `apps/web/src/lib/admin-backfill-runner.ts:393-431` counts and pages candidates with `processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < CURRENT)`.
-- `apps/web/scripts/backfill-color-pipeline.ts:378-417` uses the same stale-pipeline predicate in the sidecar.
+- `apps/web/src/lib/clip-embeddings.ts:36-48` permits `SEMANTIC_SCAN_LIMIT` default 2000 and hard max 25000.
+- `apps/web/src/app/api/search/semantic/route.ts:173-184` rate-limits per IP at 30/minute.
+- `apps/web/src/app/api/search/semantic/route.ts:250-311` embeds text, selects up to `SEMANTIC_SCAN_LIMIT` embedding BLOBs, decodes every row, scores every vector, and top-k filters.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:98-115` uses the same per-IP limiter.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:137-150` loads the target embedding.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:177-214` scans, decodes, scores, and ranks up to `SEMANTIC_SCAN_LIMIT` rows.
+- `apps/web/src/db/schema.ts:292-304` indexes `(modelVersion, updatedAt)` but stores the vectors as `MEDIUMBLOB`; there is no ANN/vector index.
 
 Why this is a problem:
 
-Backfill candidate discovery must repeatedly find the small stale subset among all processed images, but the schema has no index that starts with `processed` and includes `pipeline_version`. Once most rows are current, the query still has to inspect broad processed ranges to prove they are not candidates. The `OR` on `pipeline_version IS NULL OR pipeline_version < ...` can further reduce index efficiency unless supported by an appropriate composite index or split queries.
+Each successful request reads many BLOB rows from MySQL and does CPU vector math in Node. The route has useful per-IP limits, body caps, and abort checks, but many IPs or a single trusted same-origin client can still multiply DB read bandwidth and CPU. Increasing `SEMANTIC_SCAN_LIMIT` toward the hard max makes the public endpoint linearly more expensive.
 
 Concrete failure scenario:
 
-After a pipeline bump, the first run processes the stale rows. Later admin checks or resumptions still execute the count and page queries against a gallery where almost every row is already current. On a large archive, those "nothing to do" checks remain expensive and can coincide with public traffic.
+Several crawlers or abusive clients issue semantic/similar searches concurrently. With the default limit, each request reads and decodes roughly 2000 embeddings; with an operator-raised limit, it can read 25000. MySQL bandwidth, Node CPU, and CLIP inference slots compete with normal public pages and upload queue work.
 
 Suggested fix:
 
-Add and validate an index such as `(processed, pipeline_version, id)` or split the NULL and `< current` cases into index-friendly branches. Capture `EXPLAIN ANALYZE` for fresh, mostly-current, and force-reencode cases before committing the migration.
+Add a global semantic-search concurrency limiter and expose rejection/backoff when saturated. Consider a process-local embedding matrix cache with explicit invalidation on embedding updates, or a real ANN/vector index outside MySQL BLOB scans. Keep `SEMANTIC_SCAN_LIMIT` low by default, log the effective limit at boot, and document that the hard max is for offline/admin use unless a vector index exists.
 
-### PERF-C15-06: Batch deletion performs repeated full derivative-directory scans per image
+### PERF-C16-04: Color-pipeline backfill candidate scans lack a dedicated `pipeline_version` index
 
+Severity: Medium
 Confidence: High
-Severity: Medium
 
-Code regions:
+Code region:
 
-- `apps/web/src/app/actions/images.ts:860-884` processes batch image cleanup in chunks and calls `deleteImageVariantsStrict(..., [])` for WebP, AVIF, and JPEG for each image.
-- `apps/web/src/lib/process-image.ts:575-629` makes `sizes=[]` scan the whole target directory to catch historical variants.
-- `apps/web/src/lib/process-image.ts:644-663` exposes tolerant and strict deletion helpers that perform that scan before unlinking.
+- `apps/web/src/db/schema.ts:123-131` defines image indexes, none including `pipeline_version`.
+- `apps/web/src/lib/admin-backfill-runner.ts:393-431` counts and pages candidates with `processed = TRUE AND (pipeline_version IS NULL OR pipeline_version < CURRENT) AND id > cursor`.
+- `apps/web/scripts/backfill-color-pipeline.ts:409-417` uses a similar candidate page query in the sidecar.
 
 Why this is a problem:
 
-The delete path intentionally scans when sizes are unknown, but batch delete repeats the scan per image per derivative format. A 100-image delete can trigger up to 300 full directory scans before unlinking variants. The code bounds concurrency, but the asymptotic cost remains `images * formats * directory_size`, which is expensive on NAS-backed storage or large derivative directories.
+Backfill candidate discovery repeatedly has to find stale rows among all processed rows. Without an index involving `processed`, `pipeline_version`, and the keyset cursor, "mostly current" galleries can still require broad scans to prove there is little or nothing to do. The `OR` predicate on `pipeline_version` further hurts index use unless the query is split or indexed deliberately.
 
 Concrete failure scenario:
 
-An admin deletes 100 imported mistakes from a gallery with tens of thousands of derivatives. The server performs hundreds of `opendir` iterations over the same three derivative directories, causing slow admin response and I/O pressure that can delay image serving or queue writes.
+A large gallery has already been backfilled, then an admin opens the backfill status or reruns it after a partial failure. The count and batch queries inspect broad processed ranges even when only a few rows are stale, adding DB latency during a maintenance window.
 
 Suggested fix:
 
-Add a batch cleanup helper that scans each derivative directory once per batch, groups filenames by base prefix, and deletes all matching variants. Keep strict error aggregation, but make the directory scan cost `formats * directory_size + files_to_delete` instead of `images * formats * directory_size`.
+Add a migration and `reconcileLegacySchema` support for a dedicated candidate index. Validate candidate shapes with `EXPLAIN ANALYZE` before settling on order; likely options are `(processed, pipeline_version, id)` with split NULL/range queries, or a generated `needs_reencode`/`pipeline_bucket` column indexed with `(needs_reencode, id)`.
+
+### PERF-C16-05: The public map page can serialize and render 10,000 markers plus 10,000 list items
+
+Severity: Medium
+Confidence: High
+
+Code region:
+
+- `apps/web/src/lib/data.ts:1766-1817` caps map rows at `MAP_MAX_MARKERS = 10000`.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:42-66` fetches all map rows on each dynamic render and maps them into client props.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:89-110` passes every marker to `MapLoader` and also renders one fallback/accessibility list item per marker.
+- `apps/web/src/components/map/map-client.tsx:77-94` computes bounds over all markers by allocating latitude/longitude arrays and spreading them into `Math.min`/`Math.max`.
+- `apps/web/src/components/map/map-client.tsx:120-139` renders one Leaflet `Marker` per marker.
+
+Why this is a problem:
+
+The DB result is capped, but the cap is too high for first-paint browser work. A GPS-heavy gallery can produce a large RSC payload, a large HTML fallback list, and thousands of Leaflet marker React elements. The bounds calculation also makes full-size arrays and spread calls.
+
+Concrete failure scenario:
+
+A travel archive has 8,000 GPS-enabled public photos. Opening `/map` on a mobile device downloads a large payload, hydrates the map client, creates thousands of markers and popups, renders thousands of links, and stalls the main thread. The user sees slow input, delayed map interaction, or browser tab termination.
+
+Suggested fix:
+
+Lower the initial cap substantially and add marker clustering or viewport/bounds-based fetching. Virtualize or paginate the accessible list. Compute fit bounds in a single pass without allocating arrays. Consider a leaner map-specific SQL projection if `publicMapSelectFields` grows.
+
+### PERF-C16-06: Batch image deletion repeats full derivative-directory scans per image
+
+Severity: Medium
+Confidence: High
+
+Code region:
+
+- `apps/web/src/app/actions/images.ts:860-884` deletes selected image records in chunks, then calls `deleteImageVariantsStrict(..., [])` for WebP, AVIF, and JPEG for each image.
+- `apps/web/src/lib/process-image.ts:575-629` treats an empty sizes array as "scan the whole directory to find historical variants".
+- `apps/web/src/lib/process-image.ts:651-663` uses that scan in strict deletion.
+
+Why this is a problem:
+
+The scan is intentional for one image because it catches variants from older size configs. In batch deletion, the same three derivative directories are scanned once per image per format. The cost becomes `images * formats * directory_size`, which is expensive on large galleries or NAS-backed storage.
+
+Concrete failure scenario:
+
+An admin deletes 100 bad imports from a gallery with tens of thousands of derivative files. The server performs up to 300 full directory iterations before unlinking files, adding I/O pressure and slowing admin response while image serving and queue writes share the same storage.
+
+Suggested fix:
+
+Add a batch cleanup helper that scans each derivative directory once per batch, groups entries by base filename prefix, and deletes matching variants with strict error aggregation. Keep the current single-image helper for isolated deletes.
 
 ## Likely Issues
 
-### PERF-C15-07: Public listing and smart-collection pages still aggregate tags before applying the page limit
+### PERF-C16-07: The home page always runs a non-sargable On This Day query
 
-Confidence: Medium
 Severity: Medium
+Confidence: Medium
 
-Code regions:
+Code region:
 
-- `apps/web/src/lib/data.ts:802-829` builds `getImagesLite` with `LEFT JOIN imageTags/tags`, `GROUP BY images.id`, sort, then limit/offset.
-- `apps/web/src/lib/data.ts:893-940` uses the same grouped page query in `getImagesLitePage`.
-- `apps/web/src/lib/data.ts:1488-1550` uses the same grouped shape for smart collections.
-- `apps/web/src/app/[locale]/(public)/page.tsx:175-177` and `apps/web/src/app/[locale]/(public)/[topic]/page.tsx:189-191` call this on dynamic public pages.
+- `apps/web/src/app/[locale]/(public)/page.tsx:155-177` renders the dynamic public home page and loads the first image page.
+- `apps/web/src/app/[locale]/(public)/page.tsx:232-234` always renders `OnThisDayWidget`.
+- `apps/web/src/components/on-this-day-widget.tsx:15-22` runs `getOnThisDayImages(month, day)` during the home SSR pass.
+- `apps/web/src/lib/data-timeline.ts:102-130` filters with `MONTH(capture_date)` and `DAY(capture_date)` and then joins/group tags.
+- `apps/web/src/db/schema.ts:123-130` has processed/date indexes but no generated month/day index.
 
-Why this is likely a problem:
+Why this is a problem:
 
-The exact-count optimization removed a worse window-function shape, but the page query still joins and groups tags before `LIMIT` can return 30 images. For broad home/topic pages or smart collections with many matches, MySQL may need to group/sort many image-tag rows to produce a small page.
+The function predicates are not sargable on `capture_date`, so the DB cannot use the date key parts to directly seek today's month/day. Because the home page is dynamic, every home request pays this query even though the result changes only once per day.
 
 Concrete failure scenario:
 
-A large gallery has many tags per image. The homepage requests the first 30 photos, but MySQL reads and groups a broad joined rowset to compute `GROUP_CONCAT(tag.name)` for candidate images before returning the page. Under traffic, this burns DB CPU and memory compared with fetching page IDs first.
+On a large archive, crawler or visitor traffic to `/` repeatedly scans the processed dated image set to return at most six photos. That scan competes with the main listing query and background DB work.
 
 Suggested fix:
 
-Use a two-phase query: first select the page of image IDs from `images` with the desired predicates and order using the existing image indexes, then fetch public fields and tag aggregates only for those IDs. Apply the same pattern to smart collections and feed/listing surfaces where tag names are needed.
+Add generated `capture_month`/`capture_day` or `capture_month_day` columns with an index including `processed`, or maintain a small daily cache/materialized table keyed by month/day. Fetch tags in a second phase over the six selected IDs.
 
-### PERF-C15-08: Admin analytics fires five aggregation queries concurrently against the shared DB pool
+### PERF-C16-08: Smart collections can expose expensive dynamic predicates on public pages
 
-Confidence: Medium
 Severity: Medium
+Confidence: Medium
 
-Code regions:
+Code region:
 
-- `apps/web/src/app/[locale]/admin/(protected)/analytics/page.tsx:24-36` executes five analytics helpers in one `Promise.all`.
-- `apps/web/src/lib/analytics-data.ts:28-46` groups top photo views.
-- `apps/web/src/lib/analytics-data.ts:62-79` groups top topic views.
-- `apps/web/src/lib/analytics-data.ts:93-127` documents and runs country grouping.
-- `apps/web/src/lib/analytics-data.ts:161-180` groups shared-group views.
-- `apps/web/src/lib/analytics-data.ts:188-207` groups referrer views.
+- `apps/web/src/lib/smart-collections.ts:142-147` caps depth, AST nodes, group children, and `IN` values.
+- `apps/web/src/lib/smart-collections.ts:221-238` compiles `contains`, `between`, and `in` predicates directly against selected columns.
+- `apps/web/src/lib/smart-collections.ts:250-268` compiles tag predicates as `images.id IN (SELECT ... JOIN tags ...)`, including `contains`.
+- `apps/web/src/lib/data.ts:1488-1548` runs compiled conditions on public image listing queries and, for offset mode, a separate `COUNT(*)`.
 
-Why this is likely a problem:
+Why this is a problem:
 
-The admin page is dynamic and the five helpers are aggregation-heavy. Running them concurrently lowers single-user latency when the database is idle, but it can claim half the shared pool at once and force MySQL to run multiple group/order workloads simultaneously. The code comments already acknowledge heavier all-window aggregation for country/referrer views.
+The AST has structural caps, but the cost of an admin-created public collection still depends on predicate shape. `contains`/LIKE predicates over text-ish columns and tag contains subqueries can defeat useful indexes. Public collection pages are dynamic, so crawlers can repeatedly trigger expensive predicates and counts.
 
 Concrete failure scenario:
 
-An admin opens analytics with `window=all` while image queue or backfill work is active. Five aggregation queries enter the pool together, competing with public SSR and queue updates. MySQL creates temporary aggregation work for multiple tables while the Node pool has fewer slots for normal requests.
+An admin publishes a collection with several OR branches using `contains` on camera/text fields and tag names. Each public visit runs grouped image queries plus a count over the dynamic condition, causing full or broad scans even though the page returns only 30 images.
 
 Suggested fix:
 
-Limit analytics query concurrency to 1-2, or precompute daily rollups for photo/topic/country/referrer/share views. Cache the admin analytics result briefly per window, since analytics does not need request-by-request freshness.
+Restrict public smart-collection predicates to indexed fields or precompute public collection membership into a join table. For flexible text predicates, use a deliberate full-text index/search surface. Add an estimated-cost guard and skip `COUNT(*)` for expensive dynamic predicates.
 
-### PERF-C15-09: Timeline year discovery uses `YEAR(capture_date)` on every dynamic timeline render
+### PERF-C16-09: Timeline and year pages render up to 500 photo cards in one response
 
-Confidence: Medium
 Severity: Low
-
-Code regions:
-
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:19` makes the route dynamic.
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72-81` always includes `getTimelineYears()` in the SSR fan-out.
-- `apps/web/src/lib/data-timeline.ts:143-159` selects distinct `YEAR(images.capture_date)` and orders by `YEAR(images.capture_date)`.
-- `apps/web/src/db/schema.ts:123-130` has no generated year column or `(processed, capture_year)` index.
-
-Why this is likely a problem:
-
-The year list changes rarely, but the query computes a function over `capture_date` for all processed dated rows on every timeline page render. The year-filtered image query below it is sargable; the year-list query is not.
-
-Concrete failure scenario:
-
-On a large archive, every timeline page request scans all processed dated rows to rebuild the year scrubber, even when only one selected year's photos are shown. This adds a fixed DB cost to a route that should otherwise be range-index friendly.
-
-Suggested fix:
-
-Use a generated `capture_year` column with `(processed, capture_year)` index, or maintain a compact year summary table updated on image create/update/delete. Cache the year list briefly if immediate freshness is not required.
-
-## Risks Requiring Manual Validation
-
-### PERF-C15-10: Public text search and smart-collection `contains` predicates are bounded but remain scan-oriented
-
 Confidence: Medium
-Severity: Medium
 
-Code regions:
+Code region:
 
-- `apps/web/src/app/actions/public.ts:247-329` exposes public search with length checks and rate limiting before `searchImages`.
-- `apps/web/src/lib/data.ts:1574-1750` performs `%LIKE%`-style matching across title, description, camera, lens, topic, topic label, tag name, and aliases, with tag/alias fallback queries.
-- `apps/web/src/lib/smart-collections.ts:221-223` compiles field `contains` to `containsLike`.
-- `apps/web/src/lib/smart-collections.ts:250-267` compiles tag `contains` through a tag subquery using `containsLike`.
-- `apps/web/src/lib/data.ts:1488-1550` runs smart-collection pages through grouped listing queries.
+- `apps/web/src/lib/data-timeline.ts:166-222` sets `TIMELINE_PAGE_LIMIT = 500` and returns up to 500 grouped image rows.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:72-94` fetches timeline images during SSR.
+- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:226-265` maps month photos to full `GridPicture` cards.
+- `apps/web/src/lib/data-timeline.ts:243-267` groups year-in-review data from the same timeline result.
+- `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:92-131` fetches and flattens year photos; `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:189-226` renders the cards.
 
-Why this needs validation:
+Why this is a problem:
 
-The request rate and result limits are bounded, but `%term%` predicates generally cannot use normal btree indexes. Smart collections are admin-defined, so a broad `contains` rule can turn a public collection page into a repeated scan surface. The real impact depends on data size, tag cardinality, search frequency, and MySQL execution plans.
+The limit is bounded and visible, but 500 cards is still a large SSR/RSC/HTML response and a large image-candidate surface. The pages are not client-hydrating every card like a full client grid, but the browser still parses and lays out many `<picture>` elements.
 
 Concrete failure scenario:
 
-An admin creates a smart collection using `description contains "a"` or users repeatedly search short common terms. Each allowed request scans large text/tag ranges, joins/group-tags for results, and competes with normal browsing.
+A year with 500 public photos is opened on mobile. The server returns a large response, the browser lays out hundreds of masonry items, and scrolling or first input is delayed.
 
 Suggested fix:
 
-Collect `EXPLAIN ANALYZE` for common and worst-case search/smart-collection predicates. Consider MySQL full-text indexes, an external search index, stricter minimum lengths for public search, and validation warnings or disallow rules for very broad smart-collection `contains` predicates.
+Introduce month-level or page-level pagination/lazy loading for archive pages. Keep the first SSR response to a smaller above-the-fold set and load older months through a cursor action.
 
-### PERF-C15-11: Semantic search brute-forces embedding blobs inside the web process
+### PERF-C16-10: Admin CSV export materializes up to 50,000 rows and the final CSV string in memory
 
+Severity: Low
+Confidence: High
+
+Code region:
+
+- `apps/web/src/app/[locale]/admin/db-actions.ts:45-50` documents the 15-25 MB peak heap concern.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:68-83` selects up to 50,000 grouped image rows.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:90-118` builds an array of CSV lines and then joins it into one string.
+
+Why this is a problem:
+
+This is admin-only and bounded, but it is still a large Server Action response and heap allocation. The code clears the DB result array before joining, which helps, but the line array and final string still coexist.
+
+Concrete failure scenario:
+
+An admin exports a near-50k image catalog while background image work is active. The process allocates tens of MB for the export and stalls GC, causing slow admin UI and possibly affecting public requests in the same Node process.
+
+Suggested fix:
+
+Move CSV export to a streaming admin route using a cursor/batched query and `ReadableStream`. Keep the current Server Action as a small-gallery convenience or remove it once the streaming route exists.
+
+## Manual-Validation Risks
+
+### PERF-C16-11: Sidecar backfill can exceed host budgets outside the web process
+
+Severity: Medium
 Confidence: Medium
-Severity: Medium
 
-Code regions:
+Code region:
 
-- `apps/web/src/lib/clip-embeddings.ts:36-48` permits `SEMANTIC_SCAN_LIMIT` up to 25,000, with default 2,000.
-- `apps/web/src/lib/clip-embeddings.ts:188-205` decodes embedding blobs into `Float32Array`s.
-- `apps/web/src/app/api/search/semantic/route.ts:263-311` scans the most recent embeddings and scores every decoded row in-process.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:177-214` performs the same scan/score pattern for similar photos.
-- `apps/web/src/lib/clip-model.ts:53-64` bounds CLIP inference concurrency and pending count, but this queue does not cover vector scan/scoring work.
+- `apps/web/scripts/backfill-color-pipeline.ts:383-387` accepts `BACKFILL_CONCURRENCY` with fallback 2 and max 8.
+- `apps/web/scripts/backfill-color-pipeline.ts:409-417` pages DB candidates.
+- `apps/web/scripts/backfill-color-pipeline.ts:523-560` queues concurrent `reprocessRow` tasks and flushes batches when pending updates reach the batch size.
+- `apps/web/src/lib/process-image.ts:1227-1440` performs per-row derivative generation with parallel format fan-out.
 
-Why this needs validation:
+Why this is a risk:
 
-The feature is capped and rate-limited, and the default scan limit is conservative. Still, raising the scan limit to the hard max means one public request can read about 25,000 2 KiB vectors before row overhead, decode them, and perform 512-dimension dot products in the Node process. That work is not offloaded to a vector index, worker thread, or shared matrix cache.
+The sidecar runs in a separate Node process with its own DB pool and libvips usage. The web process cannot see or throttle it. Whether this is safe depends on operational practice: running it during a maintenance window at concurrency 1 is different from `BACKFILL_CONCURRENCY=8` during public traffic.
 
 Concrete failure scenario:
 
-Semantic search is enabled in production and an operator raises `SEMANTIC_SCAN_LIMIT` for recall. A few concurrent public semantic/similar requests cause large BLOB reads, heap retention during scoring, and CPU work on the web process, delaying ordinary SSR and route handlers.
+An operator runs the sidecar at high concurrency while the web queue is active. DB connections, CPU, and derivative-directory writes exceed the single-host budget assumed by the in-app queue/backfill arithmetic.
 
 Suggested fix:
 
-Keep the default cap until production profiling says otherwise. Validate RSS, event-loop delay, and DB read time at 2k, 10k, and 25k scans. For larger galleries, use a vector index/store or a preloaded matrix scored off the main event loop, and make the public limiter durable across processes if scale-out is introduced.
+Document and enforce a production-safe default of 1 unless a maintenance flag is supplied. Consider acquiring a DB-backed "heavy maintenance" lock that makes the web queue pause or reject new heavy work while the sidecar runs. Validate with production-like load and disk I/O metrics.
 
-### PERF-C15-12: Large multipart uploads are constrained but still parsed through framework `FormData`
+### PERF-C16-12: Single-writer and process-local state are warning-only, not enforcement
 
-Confidence: Medium
 Severity: Medium
+Confidence: High
 
-Code regions:
+Code region:
 
-- `apps/web/src/lib/upload-limits.ts:1-6` permits individual uploads up to 200 MiB and server-action bodies up to the largest upload/restore body plus multipart overhead.
-- `apps/web/next.config.ts:111-119` configures Next server action and proxy client body limits from that value.
-- `apps/web/src/app/actions/images.ts:129-149` receives browser uploads as `FormData` and extracts `File` objects.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:60-74` limits Lightroom multipart parsing to one in-flight request per process.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:101-128` rejects missing/chunked/oversized `Content-Length`.
-- `apps/web/src/app/api/admin/lr/upload/route.ts:178-200` calls `request.formData()` and only then checks the parsed `File` size.
+- `apps/web/src/lib/single-writer-guard.ts:6-16` states that multiple web processes break restore fences, upload quota tracking, and rate-limit fast paths, and that the guard cannot enforce single-instance operation.
+- `apps/web/src/lib/single-writer-guard.ts:230-234` logs that startup continues even when another live instance is detected.
+- `apps/web/src/lib/upload-tracker-state.ts:7-20` stores upload tracking in `globalThis`.
+- `apps/web/src/lib/background-db-writes.ts:3-10` stores analytics queue state in process memory.
+- `apps/web/src/lib/rate-limit.ts:70-87` and `apps/web/src/lib/rate-limit.ts:393-415` use bounded process-local rate-limit maps for public surfaces.
 
-Why this needs validation:
+Why this is a risk:
 
-The route and action have important bounds, but both rely on framework-level multipart materialization before the app can stream to disk. The Lightroom path serializes parsing to one request, which helps, but one 200 MiB upload can still create a large transient memory spike before image metadata extraction and queueing. The browser server-action path has the same class of framework parsing risk.
+The documented topology is single web instance. If production accidentally runs two containers or a rolling deploy overlaps too long, process-local caps and queues split. The guard warns but does not fail closed, so the system can continue in a mode where rate limits, upload accounting, and shared queues are weaker than intended.
 
 Concrete failure scenario:
 
-On a memory-constrained production host, an admin uploads a near-limit RAW/JPEG through Lightroom or the browser while the image queue is encoding prior uploads. The request body is parsed into a `File`, then saved and processed, causing RSS pressure or GC pauses before the queue even starts derivative generation.
+A deployment leaves an old web process running while a new one starts against the same DB. Each process has separate in-memory rate-limit buckets, upload trackers, analytics queues, and image queue state. Users can exceed per-process quotas, view counts can flush from both processes, and background DB load doubles.
 
 Suggested fix:
 
-Profile RSS and event-loop delay for near-limit uploads in production-like Docker memory limits. If the spike is material, replace `request.formData()` for large upload paths with a streaming multipart parser that writes the file directly to a temp path after auth, origin, content-length, and quota checks. Keep the existing single-parse-slot guard as defense in depth.
+Keep warning-only behavior for local development, but add a production option that fails startup or enters read-only/maintenance when the singleton lock is held. Move critical counters to DB/Redis if multi-instance support becomes a goal.
 
-## Positive Findings / Non-Issues Verified
+### PERF-C16-13: Nginx limiter correctness depends on deployment topology
 
-- `apps/web/src/lib/process-image.ts:36-57` constrains global Sharp/libvips concurrency and disables Sharp cache, reducing CPU thread fan-out and steady RSS.
-- `apps/web/src/lib/process-image.ts:1187-1225` writes derivative outputs through temp paths and backup/restore helpers, reducing partial-file races during re-encode.
-- `apps/web/src/lib/process-image.ts:1433-1456` waits for all WebP/AVIF/JPEG encoders to settle and verifies non-empty outputs before reporting success.
-- `apps/web/src/lib/image-queue.ts:871-895`, `apps/web/src/lib/admin-backfill-runner.ts`, and `apps/web/scripts/backfill-color-pipeline.ts:493-516` all handle delete-during-processing/backfill cleanup instead of blindly marking stale rows.
-- Public semantic and text search surfaces have request size, length, and rate-limit controls before expensive work; the remaining concern is per-allowed-request cost, not total absence of guarding.
-- Cache headers for `/uploads/{jpeg,webp,avif}` are deliberately not immutable because backfill rewrites derivatives in place; this is a correctness/performance tradeoff rather than a missed long-cache bug.
+Severity: Low
+Confidence: High
+
+Code region:
+
+- `apps/web/nginx/default.conf:1-29` defines per-IP `limit_req_zone` and documents the `$binary_remote_addr` caveat.
+- `apps/web/nginx/default.conf:215-226` proxies uploaded derivatives to Next with cache policy.
+- `apps/web/nginx/default.conf:246-263` gives `/_next/image` a dedicated limiter for Sharp CPU.
+- `apps/web/nginx/default.conf:274-286` applies the public SSR limiter only to the catch-all location.
+
+Why this is a risk:
+
+The nginx config has good route-specific limits, but the key is `$binary_remote_addr`. Behind a load balancer without realip/proxy-protocol configuration, every visitor may share one limiter bucket, or the app and edge may disagree on client identity.
+
+Concrete failure scenario:
+
+The deployment moves behind an upstream LB that connects from one private IP. Public SSR and image optimizer limiters see the LB as the client, so normal traffic can trip shared buckets; app-level per-IP DB rate limits may see a different XFF-derived identity.
+
+Suggested fix:
+
+For any LB-fronted deployment, configure and test `ngx_http_realip_module` or PROXY protocol, and align `TRUSTED_PROXY_HOPS` with nginx's forwarded headers. Add an operational smoke test that makes two requests with distinct client IPs through the actual edge and verifies separate limiter buckets.
+
+## Checked Without New Finding
+
+- Rate limiter memory growth: `createResetAtBoundedMap` enforces hard caps on `set` and `prune` (`apps/web/src/lib/bounded-map.ts:91-105`, `apps/web/src/lib/bounded-map.ts:156-188`). Upload tracker also has expiry and hard cap (`apps/web/src/lib/upload-tracker-state.ts:23-60`). I did not find an unbounded process-local rate-limit map in the reviewed public/admin surfaces.
+- Public load-more/search/view actions: limits, offset caps, DB-backed checks, and rollback behavior are present (`apps/web/src/app/actions/public.ts:132-170`, `apps/web/src/app/actions/public.ts:295-380`).
+- Derivative serving: `serve-upload.ts` uses a 5s settings hash cache/inflight dedupe, 304 and HEAD short-circuits, and streamed GET bodies (`apps/web/src/lib/serve-upload.ts:69-105`, `apps/web/src/lib/serve-upload.ts:242-328`).
+- Cache invalidation/revalidation: derivative cache policy is deliberately one hour plus `must-revalidate` in Next and nginx, not immutable (`apps/web/next.config.ts:60-76`, `apps/web/nginx/default.conf:215-218`). Existing static derivatives still require re-encode/mtime change for byte changes, which is documented.
+- OG routes: public OG endpoints are rate-limited and use ETags; per-photo OG does buffer Satori PNG and Sharp JPEG output (`apps/web/src/app/api/og/photo/[id]/route.tsx:38-43`, `apps/web/src/app/api/og/photo/[id]/route.tsx:100-110`, `apps/web/src/app/api/og/photo/[id]/route.tsx:302-306`), but response size is fixed to 1200x630 and not a primary scale risk compared with semantic/map/upload paths.
+- Build/deploy performance: Docker uses standalone output, externalizes native packages, and deploy runs health check before pruning (`apps/web/next.config.ts:49-54`, `apps/web/Dockerfile`, `apps/web/deploy.sh`). I did not find a new build/deploy performance issue beyond the documented cost of native optional dependency installation.
+- Main listing N+1: public image listing and shared groups batch tags rather than loading tags per image. Remaining listing concerns are query shape and aggregation cost, not classic per-row N+1.
 
 ## Final Sweep
 
-Commonly missed areas checked:
+I rechecked the commonly missed categories after drafting findings:
 
-- Rendering hot paths: home, topic, photo, map, timeline, smart collections, feed/sitemap/OG metadata.
-- Image processing: upload save, queue bootstrap, queue claims, Sharp pipeline, derivative writes, deletion cleanup, in-app backfill, sidecar backfill.
-- DB access: pool limits, indexes, listing/grouping queries, timeline queries, map query, analytics aggregations, search, semantic scan, migrations/journal shape.
-- Concurrency/races: advisory locks, queue/backfill overlap, delete-during-processing paths, in-memory rate limits, server-action upload quota claims, restore maintenance fences.
-- Browser responsiveness: map hydration/list rendering, masonry/lightbox/image components, service worker image caching, client search/timeline components.
-- Runtime/deploy: Next cache headers/body limits, Docker/nginx upload/cache behavior, deploy/disk-hygiene constraints.
-
-No relevant file in the performance/concurrency specialty inventory was intentionally skipped. Remaining uncertainty is limited to items explicitly labeled as requiring manual validation, primarily where `EXPLAIN ANALYZE`, production RSS/event-loop profiling, or realistic dataset size is needed to determine severity.
-
-Validation performed for this artifact: static source review with exact code-region citations. No lint/typecheck/test/build/deploy commands were run because this task was a review-only markdown deliverable and the user restricted modifications to this file.
+- Sharp CPU/memory: global `sharp.concurrency()` and `sharp.cache(false)` are deliberate (`apps/web/src/lib/process-image.ts:36-57`); remaining risk is concurrent format fan-out multiplied by independent queues/backfills.
+- Streaming vs buffering: derivative serving and DB dump download stream; large upload/restore ingestion remains framework-buffered before app streaming.
+- Queue/backfill concurrency: in-app queue/backfill and sidecar paths were all reviewed. The strongest issue is lack of a shared heavy-work budget.
+- DB shape/indexes: reviewed schema indexes, listing/timeline/map/smart/semantic/backfill queries, and analytics. Findings cover missing backfill index and non-sargable daily query; map/smart/semantic are payload/scan risks.
+- React rendering/hydration/UI responsiveness: reviewed home load-more, timeline/year, map, and lightbox surfaces. Map is the strongest UI responsiveness issue.
+- Public expensive work: reviewed public actions, semantic/similar APIs, OG, uploads serving, health/live, feed/sitemap style routes, and nginx public limiter. Semantic/similar and map are the main remaining public-cost issues.
+- Shared process state and single-writer assumptions: reviewed singleton guard, process-local rate limits, upload tracker, analytics queue, shared view buffer, queue state, and maintenance scheduler. This remains a topology risk, not a bug under the documented single-instance deployment.

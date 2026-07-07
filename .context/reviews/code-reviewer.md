@@ -1,94 +1,159 @@
-# Cycle 15 Code-Reviewer Review
+# Cycle 16 Code-Reviewer Review
 
-Date: 2026-07-07
+Date: 2026-07-08
 
-Mode: read-only whole-repository review from the code quality/correctness/maintainability angle. The only file written by this prompt is this report.
+Mode: whole-repository code review from the code quality, logic, SOLID, and maintainability angle. The only file intentionally written by this lane is this report.
 
 ## Scope And Inventory
 
-Required instructions read before review: `AGENTS.md`, the relevant `CLAUDE.md` architecture/security/testing/deploy sections, `.context/reviews/prompts/common_review_scope.md`, and `.context/reviews/prompts/code-reviewer.md`.
+Instructions/context loaded: `AGENTS.md` from the prompt, `CLAUDE.md`, and the `code-review` skill.
 
-Inventory basis:
+Inventory built before findings:
 
-- `git ls-files` returned 3,468 tracked paths.
-- The live review-relevant inventory contained 707 tracked paths: app source, server actions, route handlers, components, data/db modules, scripts, migrations, tests, e2e tests, messages, workflows, package files, and TypeScript/Next/Vitest/Playwright config.
-- The production runtime TypeScript/TSX surface contained 261 files under `apps/web/src/{app,components,db,lib,i18n}` plus `proxy.ts` and `instrumentation.ts`.
-- Category counts reviewed: `apps/web/src/app` 80, `components` 61, `lib` 114, `db` 3, `src/__tests__` 355, `apps/web/scripts` 28, `apps/web/e2e` 12, `apps/web/drizzle` 33, `apps/web/messages` 2, `.github/workflows` 2.
-- Historical `.context/reviews` and `.context/plans` files were treated as context/history, not live behavior. Static/binary assets, build output, and dependency directories were excluded from live-code findings.
+- 685 review-relevant files under `apps/web/src`, `apps/web/scripts`, `scripts`, and `apps/web/drizzle` including tests.
+- 328 production/config/migration/script files after excluding `__tests__`.
+- 80 app route/action/page files under `apps/web/src/app`.
+- 179 core `lib`, `components`, `db`, and `i18n` TypeScript/TSX files.
+- Total reviewed production text surface: 56,452 lines from the production inventory.
 
-Review focus:
+Files and interactions examined directly or via targeted sweeps:
 
-- Cross-file correctness around admin/session/PAT auth, same-origin guards, public route rate limits, public data privacy boundaries, upload/delete/bulk-edit flows, Lightroom upload, image queue/backfill/retry, restore/backup/migration flows, semantic search/CLIP gates, public share/feed/OG routes, pagination/cursor semantics, source-contract tests, and package/config quality gates.
+- Admin/session/PAT auth, same-origin action guards, public route rate limits, public/admin selector privacy, upload/delete/bulk image flows, Lightroom upload, processing queue, admin and semantic backfills, restore-maintenance fencing, backup/restore scripts, migration/journal handling, smart collections, public search/semantic/similar routes, share/feed/OG routes, gallery pagination/cursors, UI state components, service-worker cache helpers, storage helpers, and repo hygiene.
+- Static binary assets, fonts, generated screenshots, fixtures, dependency directories, and build output were excluded from behavioral findings. Historical `.context` plans/reviews were treated as review history, not live runtime behavior.
 
 ## Validation Evidence
 
-Executed read-only guard checks:
+Read-only/static validation run in this lane:
 
 - `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
 
-Additional review evidence:
+Additional sweeps performed:
 
-- Inventory-wide `rg` scans covered mutating calls, `catch`/rollback behavior, revalidation, rate-limit helpers, `cache()` usage, `process.env` usage, child processes, stream handling, filesystem cleanup, `TODO/FIXME/HACK`, TypeScript suppressions, and public/admin route surfaces.
-- Direct code reads covered the largest and highest-risk files, including `apps/web/src/lib/data.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/app/actions/auth.ts`, shared feed/share/photo/topic/collection pages, search routes, upload routes, and package scripts.
+- Route export/auth/rate-limit inventory across all `route.ts(x)` files.
+- Server-action export inventory with same-origin/admin guard checks.
+- Raw SQL, advisory-lock, child-process, filesystem write/delete/rename, revalidation, `cache()`, `process.env`, timer, and catch/rollback pattern scans.
+- `TODO/FIXME/HACK`, TypeScript suppression, and ESLint suppression scans.
+- Final check for tracked `.omc`/runtime-state artifacts.
 
-Not run in this prompt:
+Not run:
 
-- Full `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, and Playwright e2e. Those commands can create/update `.next`, Next typegen, tsbuildinfo, cache, coverage, browser artifacts, or DB state, while this assignment forbids modifications outside this review file.
+- Full `npm run lint`, `npm run typecheck`, `npm run build`, `npm test`, or Playwright e2e. This was a review/report lane; the three custom guard scripts above were enough to validate the auth/origin/rate-limit claims made here, but full gates remain required before shipping fixes.
 
 ## Findings Summary
 
-- Confirmed issues: 0
-- Likely issues: 0
-- Risks requiring manual validation: 0 code risks found; 1 validation gap noted below.
+- Confirmed issues: 2
+- Likely issues: 1
+- Manual-validation risks: 1
 
 ## Confirmed Issues
 
-None found in this pass.
+### 1. Admin deletion can throw an unstructured 500 when the dedicated advisory-lock connection cannot be acquired
+
+- Location: `apps/web/src/app/actions/admin-users.ts:231`
+- Severity: Medium
+- Confidence: High
+- Category: confirmed issue
+
+`deleteAdminUser()` acquires its dedicated MySQL connection before entering the `try/catch/finally` that maps lock, transaction, and domain failures to localized action results. If `connection.getConnection()` rejects because the pool is exhausted, the database is restarting, or credentials/TLS are misconfigured, the rejection bypasses the structured error handling entirely and propagates as a server-action exception.
+
+Why this is a problem:
+
+- Sibling admin mutation paths generally convert transient DB/lock acquisition failures into `{ error: t(...) }`.
+- The function has careful transaction rollback and lock release logic after the connection exists, but the first infrastructure failure sits outside that envelope.
+- This creates an inconsistent admin UX and makes a routine infrastructure fault look like an application crash.
+
+Concrete failure scenario:
+
+- An admin tries to delete a stale admin account while the DB pool is saturated by uploads/backfill/health probes.
+- `connection.getConnection()` rejects at line 231.
+- The caller receives a framework-level server-action failure instead of `failedToDeleteUser`; the UI may show a generic crash/toast and no localized recovery message.
+
+Suggested fix:
+
+- Move `connection.getConnection()` into a small guarded acquisition block, or widen the existing `try` to start before acquisition with `let conn: PoolConnection | null = null`.
+- In `finally`, release only when `conn` is non-null.
+- Return `t('failedToDeleteUser')` on acquisition failure and log the detail server-side.
+
+### 2. CLIP embedding backfill has the same unhandled dedicated-connection acquisition gap
+
+- Location: `apps/web/src/app/actions/embeddings.ts:113`
+- Severity: Medium
+- Confidence: High
+- Category: confirmed issue
+
+`backfillClipEmbeddings()` localizes and logs errors inside the `try/catch` beginning at line 115, but the advisory-lock connection is acquired at line 113 before that `try` starts. If the pool cannot hand out a connection, the server action rejects instead of returning `{ status: 'error', message: t('embeddingBackfillFailed') }`.
+
+Why this is a problem:
+
+- The action already treats config read failures as disabled/no-op and later DB/encoder failures as structured `{ status: 'error' }`; connection acquisition is the one infrastructure error outside that policy.
+- The action is currently documented as not UI-wired, but it is exported and linted as an admin server action. Future wiring would inherit this rough failure mode.
+
+Concrete failure scenario:
+
+- An admin/operator triggers embedding backfill during a production CLIP rollout while the DB pool is temporarily exhausted.
+- `connection.getConnection()` throws before `semanticBackfillLockHeld` exists.
+- The action boundary sees an uncaught exception rather than a localized `embeddingBackfillFailed` response.
+
+Suggested fix:
+
+- Match `acquireUploadProcessingContractLock()`'s posture: catch connection-acquisition failures and return a structured unavailable/error result.
+- Keep the current `releasePooledAdvisoryLocks()` discipline after a connection exists.
 
 ## Likely Issues
 
-None found in this pass.
+### 3. Tracked OMX/OMC runtime artifacts pollute the source and review inventory
 
-## Risks Requiring Manual Validation
+- Location: `.omc/plans/plan-cycle12-fixes.md:1`, `apps/web/src/__tests__/.omc/state/sessions/cf88ba27-b054-4385-83b8-446a5996bdbf/pre-tool-advisory-throttle.json:1`
+- Severity: Low
+- Confidence: High
+- Category: likely maintainability issue
 
-No source-backed code risk was found that warrants a manual-validation finding.
+Two runtime/planning artifacts are tracked even though `.gitignore` ignores `.omc` at line 16. One is a stale completed plan under root `.omc`; the other is an agent throttle JSON file nested inside `apps/web/src/__tests__`.
 
-Validation gap:
+Why this is a problem:
 
-- Location: `apps/web/package.json:8-29`, `AGENTS.md` quality-gate section.
-- Issue: This review did not run the full lint/typecheck/build/unit/e2e gate because of the write restriction above.
-- Failure scenario: A TypeScript, Next build, ESLint, or unit/e2e failure outside the three read-only custom guard scripts could still exist even though this source review did not identify one.
-- Suggested validation: after the write restriction is lifted or in the implementation lane, run `npm run lint --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run build --workspace=apps/web`, `npm test --workspace=apps/web`, and e2e where browser-flow coverage is required.
-- Confidence: High that this is a validation gap, not a confirmed code defect.
+- `rg --files` and review inventories pick up `apps/web/src/__tests__/.omc/...` as part of the test tree.
+- The root `.omc` plan is not the project’s committed plan history (`.context/plans` is), and it references old source-line numbers and completed work.
+- Future agents and maintainers can mistake runtime state for authoritative repo context.
 
-## Cross-File Review Notes
+Concrete failure scenario:
 
-- Admin API exports are wrapped by `withAdminAuth(...)`; the custom lint gate passed and the inspected PAT/session paths fail closed with no-store/nosniff response defaults.
-- Mutating non-auth server actions consistently run same-origin checks before mutation and hold restore-maintenance fencing where the action writes shared state; the action-origin lint gate passed.
-- Public expensive/mutating surfaces use pre-increment rate-limit helpers or explicit no-rate-limit annotations; route-level rollback policies in `apps/web/src/lib/rate-limit.ts` match inspected search, OG, share, feed, load-more, and analytics behavior.
-- Public selectors in `apps/web/src/lib/data.ts` maintain admin-only field boundaries, with compile-time privacy guards around public/list/search/map surfaces.
-- Pagination and cursor paths in `getImagesLite`, `getImagesForSmartCollection`, `loadMoreImages`, and `loadMoreSmartCollectionImages` use order-compatible cursor predicates and reject malformed server-action cursors before reaching the data layer.
-- Upload/delete/batch delete/retry/bulk edit paths were checked for quota claim settlement, file cleanup ordering, restore fences, queue-state cleanup, stale-row handling, audit/revalidation ordering, and input shape validation. No confirmed defect found.
-- Share/photo/group/feed metadata avoids unthrottled key existence lookups; page bodies enforce rate limits before enumeration-sensitive DB work.
-- Drizzle migrations, journal metadata, and `apps/web/scripts/migrate.js` reconcile/post-condition logic were checked together; no journal ordering, baseline, or reconcile drift issue was found.
-- JSON-LD injection sites route through `safeJsonLd`; no raw JSON-LD `dangerouslySetInnerHTML` path was found.
+- A future review or code-search script includes `apps/web/src/__tests__/.omc/state/...json`, counts it as a test artifact, or reports stale advisory text as source.
+- Another agent reads `.omc/plans/plan-cycle12-fixes.md` as current planning context and reopens already-fixed work.
 
-## Final Sweep
+Suggested fix:
 
-Commonly missed areas explicitly checked:
+- Remove the tracked `.omc` files from git while preserving `.context/plans` and `.context/reviews` as the committed review/plan surfaces.
+- Add a CI or lint check that fails if tracked paths match `(^|/)\\.omc/` or `(^|/)\\.omx/`.
 
-- Auth/session/PAT token verification and account/IP rate limits.
-- Server-action same-origin and restore-maintenance ordering.
-- Public route rate-limit admission and rollback/refund semantics.
-- Upload processing queue, retry maps, advisory locks, and delete-during-processing cleanup.
-- Shared group view buffering and shutdown flush behavior.
-- Smart collection parsing/compilation and public/private collection handling.
-- Semantic search mode gates, offline CLIP model loading, and embedding result shaping.
-- OG image generation, bounded photo fetch fallback, and feed/ETag generation.
-- Admin-only metadata privacy and public selector boundaries.
-- Migration journal, legacy schema reconciliation, DB backup/restore child-process handling, and post-restore migration.
-- Package scripts and custom lint gate wiring.
+## Manual-Validation Risks
 
-No relevant file in the 707-file live review inventory was intentionally skipped. Files excluded from live-code findings were historical review/plan artifacts, static/binary assets, generated output, dependency directories, and unrelated untracked review files created by other agents.
+### 4. Full quality gates were not run in this review lane
+
+- Location: `AGENTS.md` quality-gates section; `apps/web/package.json` scripts
+- Severity: Low
+- Confidence: High
+- Category: manual-validation risk
+
+The three custom guard scripts passed, but this lane did not run the full lint/typecheck/build/unit/e2e gate suite.
+
+Concrete failure scenario:
+
+- A TypeScript, Next build, ESLint, unit-test, or browser-flow failure unrelated to API auth/action-origin/public-route-rate-limit exists and is not detected by this review pass.
+
+Suggested validation:
+
+- In the implementation/verification lane, run `npm run lint --workspace=apps/web`, `npm run typecheck --workspace=apps/web`, `npm run build --workspace=apps/web`, `npm test --workspace=apps/web`, and `npm run test:e2e --workspace=apps/web` where browser-flow coverage is required.
+
+## Final Sweep Notes
+
+- Auth wrapper coverage: passed `lint:api-auth`; inspected `withAdminAuth`, cookie and PAT branches, response cache headers, token scope gates, and request-token context cleanup.
+- Server-action mutation guard coverage: passed `lint:action-origin`; inspected mutating image/topic/tag/share/settings/admin-user/token/restore-related paths for same-origin and restore-fence patterns.
+- Public route rate-limit coverage: passed `lint:public-route-rate-limit`; inspected search, similar, OG, feed, upload serving, health, and live routes.
+- Data/privacy boundaries: public selectors continue to omit admin-only fields with compile-time guards; map GPS exposure is isolated behind `map_visible`.
+- Upload/queue/backfill: quota claims, lock release, retry maps, file cleanup, restore maintenance checks, and queue side effects are mostly disciplined. The notable exception is the two dedicated connection-acquisition gaps above.
+- Pagination/search: cursor predicates are order-compatible with the `capture_date DESC, created_at DESC, id DESC` listing order; malformed load-more cursors fail closed.
+- Raw SQL/advisory-lock surfaces: most use parameterized queries and shared lock-release helpers. The remaining concern is acquisition placement, not SQL injection.
+- Skipped files: binary fixtures, fonts/icons, screenshots, generated output, and historical review artifacts were not treated as runtime behavior.

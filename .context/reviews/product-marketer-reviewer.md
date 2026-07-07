@@ -1,132 +1,171 @@
-# GalleryKit Product Marketer Review
+# Product Marketer Reviewer - Cycle 16
 
-Date: 2026-07-07
-Reviewed workspace: `/Users/hletrd/flash-shared/gallery`
-Lane: product-marketer-reviewer
-Prompt adaptation: used `/Users/hletrd/.codex/agents/product-marketer-reviewer.md` for evidence-first product/positioning review only. BurstPick-specific desktop-app, culling, pricing, and path requirements were not applied.
+Role: `product-marketer-reviewer`
+Scope: GalleryKit, a self-hosted Next.js photo gallery. This review adapts the local persona to this repository and intentionally excludes BurstPick, SwiftUI, and desktop-app claims.
 
-## Executive Summary
+## Method And Inventory
 
-GalleryKit's core product claims are mostly honest and well scoped: self-hosted finished-photo publishing, private originals, color-aware derivatives, first-party analytics, operator-gated CLIP search, and no editing/culling/scoring/plugin overclaim. The go-to-market risk is weaker than "the docs lie" but still material: the demo and public UI under-present the features that make the product differentiated. Market-readiness score from a product-claim perspective: **7/10**. The product should not add broader marketing claims until the existing map/timeline/search/similar-photo surfaces are easier for evaluators to discover.
+I built an inventory from public/operator-facing docs, localized UI copy, metadata/config surfaces, and relevant source that proves or disproves feature claims.
 
-## Scope And Inventory
+Inspected docs and product copy:
 
-Inventoried claim surfaces:
+- `README.md`: top-level positioning, feature list, install/deploy, semantic search, upload API.
+- `apps/web/README.md`: app setup, semantic search activation, auto alt text, upload API.
+- `CLAUDE.md`: architecture, security/ops guidance, semantic-search operator runbook, smart collections notes.
+- `apps/web/messages/en.json` and `apps/web/messages/ko.json`: public About/Privacy/admin Settings/token UI copy.
+- `apps/web/src/site-config.example.json`, local ignored `apps/web/src/site-config.json`, and site config validation/build helpers.
 
-- Control docs: `AGENTS.md`, `CLAUDE.md`.
-- Public/operator docs: `README.md`, `apps/web/README.md`, `docs/superpowers/specs/2026-06-14-clip-semantic-search-design.md`, `docs/superpowers/plans/2026-06-15-clip-semantic-search.md`.
-- Visible product copy: `apps/web/messages/en.json`, `apps/web/messages/ko.json`, live demo pages at `https://gallery.atik.kr/en`, `/en/map`, `/en/timeline`, `/en/about-gallerykit`, `/en/privacy`.
-- Public UI/source: `apps/web/src/app/[locale]/(public)/**`, `components/nav-client.tsx`, `footer.tsx`, `search.tsx`, `photo-viewer.tsx`, `info-bottom-sheet.tsx`, `similar-photos.tsx`, `on-this-day-widget.tsx`, map/timeline/year/shared/smart-collection pages.
-- Admin/operator UI/source: admin nav, categories, tags, SEO, settings, tokens, DB, analytics, upload/image-manager surfaces, semantic-search settings, deploy/init scripts.
-- Claim verification paths: semantic/similar API routes, CLIP gates/backfill/preflight docs, upload-token API, privacy/analytics data access, smart-collection route/actions/copy, storage quarantine, PWA/offline scope, install/init, deploy scripts, and tests covering those claims.
+Inspected source backing claims:
 
-Skipped from product-claim review after final sweep: generated build output, `node_modules`, raw fixture assets, and unrelated dirty review files already present in the worktree. Prior reviews/plans were checked for duplicates; resolved smart-collection copy was not re-filed.
+- Public/admin routes under `apps/web/src/app/`.
+- PWA implementation: `apps/web/src/app/manifest.ts`, `apps/web/public/sw.template.js`, `apps/web/src/lib/sw-cache.ts`, locale layout service-worker registration.
+- Semantic search gates: `apps/web/src/lib/gallery-config-shared.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, CLIP model scripts/libs.
+- Upload token/API surfaces: `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/actions/lr-tokens.ts`, `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`, `apps/web/src/lib/admin-tokens.ts`.
+- Analytics/privacy source: `apps/web/src/lib/analytics.ts`, `apps/web/src/db/schema.ts`, public privacy page.
+- Docker/site packaging: `apps/web/.dockerignore`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`.
 
-## Findings
+Overall verdict: GalleryKit's top-level positioning is mostly careful and code-backed. The strongest product risks are in operator-facing UI copy where the implementation is safer/more constrained than the words imply.
 
-### PMR-C12-01 - Map and timeline are marketed as visitor experiences but are effectively undiscoverable
+## Confirmed Issues
 
-Severity: Medium
-Confidence: High
-Validation: Confirmed
+### 1. Semantic-search Settings copy implies production CLIP can be enabled from the UI
 
-Evidence:
+Severity: Medium  
+Confidence: High  
+Files/regions:
 
-- `README.md:36` promises the visitor experience includes "map/timeline browsing."
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:68-115` implements a public map page.
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:61-260` implements a public timeline page.
-- `apps/web/src/components/nav-client.tsx:128-164` renders topic links in primary navigation; map/timeline are not included.
-- `apps/web/src/components/nav-client.tsx:167-191` renders search, theme, and locale controls after the topic links; map/timeline are not included there either.
-- `apps/web/src/components/footer.tsx:41-61` links About, Privacy, GitHub, and Admin, but not Map or Timeline.
-- `apps/web/src/components/on-this-day-widget.tsx:24` returns `null` when no same-day historical photos exist; its Timeline link exists only in that conditional widget at `on-this-day-widget.tsx:39-44`.
-- `apps/web/src/app/sitemap.ts:129-135` returns homepage/topic/photo/feed entries only, so static experience pages are not surfaced through sitemap discovery.
-- Live demo on 2026-07-07: `https://gallery.atik.kr/en`, `/en/map`, and `/en/timeline` returned HTTP 200. Playwright on the home page found no `a[href*="/map"]` or `a[href*="/timeline"]` anchors.
+- `apps/web/messages/en.json:766-769`
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:845-852`
+- Correct runbook contrast: `apps/web/README.md:82-89`
+- Runtime gate: `apps/web/src/lib/gallery-config-shared.ts:223-228`
 
-Failure scenario / user impact:
+Why this is a problem:
 
-A README or demo visitor sees "map/timeline browsing" positioned as a visitor capability, opens the live gallery, and has no visible path to either feature. Timeline may appear only on calendar days where `OnThisDayWidget` has matching photos; Map has no normal public entry point. The feature is real, but it looks aspirational from the main product experience.
+The Settings copy says "Enable CLIP-based semantic image search" and "Run the backfill script after enabling." In the actual UI, only `Disabled` and `Stub` are selectable; production is intentionally rendered as disabled/read-only unless an operator has already performed the external runbook. The source even documents that production has no user-selectable radio by design at `settings-client.tsx:847-852`.
 
-Suggested fix:
+That means the UI copy sells an operator action the UI cannot actually perform. Worse, the only selectable enabled mode is `Stub`, and the copy says stub embeddings are "not semantically meaningful" only after already framing the feature as "CLIP-based semantic image search."
 
-Add persistent public affordances for Map and Timeline. A low-risk fix is footer links beside About/Privacy, plus optional primary-nav links when data exists. If these are intentionally secondary, add direct links and scope language on `/about-gallerykit`, and include Timeline in the sitemap. Keep Map `noindex` if that is a privacy choice, but still give visitors an in-product route to the feature.
+Concrete failure scenario:
 
-### PMR-C12-02 - Production semantic search works on the demo but is hidden behind an icon-only affordance
-
-Severity: Medium
-Confidence: High
-Validation: Confirmed
-
-Evidence:
-
-- `README.md:48` positions semantic search as a notable feature: natural-language search in English and Korean plus similar photos.
-- `apps/web/README.md:67-78` repeats the self-hosted CLIP capability and operator activation requirements.
-- `apps/web/messages/en.json:826-830` describes GalleryKit as offering "operator-controlled search" and names semantic search as an operator workflow.
-- `apps/web/src/components/search.tsx:371-386` renders the closed search affordance as `size="icon"` with `aria-label={t('aria.searchPhotos')}` and only a search icon as visible content.
-- `apps/web/src/components/search.tsx:521-555` shows the "Semantic search" switch and production caveat only after the visitor opens the dialog.
-- Live demo on 2026-07-07: Playwright found a visible `button[aria-label="Search photos"]` at 44 x 44 px with empty visible text; `document.body.innerText` did not contain visible `Search photos` or `Semantic search` before opening the dialog.
-- Live demo semantic API smoke on 2026-07-07: `POST https://gallery.atik.kr/api/search/semantic` with `Origin: https://gallery.atik.kr` and `{"query":"TWS","topK":5}` returned HTTP 200 with real photo results.
-
-Failure scenario / user impact:
-
-The strongest differentiator is active in production, but a first-time evaluator must infer that a small magnifying-glass icon opens search, then notice the semantic switch inside the modal. This weakens the first 30 seconds of product evaluation: the product has a defensible feature but does not visibly sell it.
+An admin opens Settings, selects `Stub`, sees the public semantic-search control become available, runs the backfill script "after enabling," and tells photographers or visitors that semantic search is active. Visitor results are deterministic wiring-test results rather than meaningful CLIP matches, while similar-photo search remains unavailable because `apps/web/src/app/api/search/similar/[id]/route.ts:115-130` requires production mode.
 
 Suggested fix:
 
-When `semanticSearchMode === 'production'`, show visible nav copy such as `Search` or `Search photos` next to the icon at desktop widths. In the empty modal state, add a concise cue such as `Keyword or semantic search` and provide example Korean/English prompts drawn from real gallery content. Keep the accessibility label, but do not rely on it as the main product signal.
+Rewrite the Settings copy to separate wiring tests from production activation. Example direction:
 
-### PMR-C12-03 - "Similar photos" is documented as a visitor feature but is absent from the mobile photo surface
+- "This panel can disable semantic search or enable Stub mode for local wiring tests only."
+- "Production CLIP search cannot be enabled here. Follow the operator runbook: seed weights, run the production backfill, set the environment gate, redeploy, then set the DB mode."
+- Rename or annotate the selectable `Stub` option as "Stub - wiring test only; do not use for public galleries."
+- Mirror the same clarification in Korean copy.
 
-Severity: Medium
-Confidence: High
-Validation: Confirmed
+### 2. Upload-token copy promises expiry behavior the admin UI does not expose
 
-Evidence:
+Severity: Medium  
+Confidence: High  
+Files/regions:
 
-- `README.md:48` and `apps/web/README.md:67` advertise `"similar photos"` as part of semantic search.
-- `apps/web/messages/en.json:830` describes "similar photos" as an operator-controlled feature.
-- `apps/web/src/components/similar-photos.tsx:58-141` implements a production-only `<SimilarPhotos>` panel.
-- `apps/web/src/components/photo-viewer.tsx:747-755` marks the info sidebar as hidden on mobile and only visible at `lg+`.
-- `apps/web/src/components/photo-viewer.tsx:797-800` mounts `<SimilarPhotos>` only inside that desktop info sidebar.
-- `apps/web/src/components/info-bottom-sheet.tsx:353-608` is the mobile expanded info surface; it includes tags, description, color details, histogram, EXIF, capture date/time, GPS/admin rows, and downloads, but no `<SimilarPhotos>` mount or semantic-search prop.
-- Targeted source sweep for `SimilarPhotos|similarPhotos|semanticSearchMode` across `info-bottom-sheet.tsx`, `lightbox.tsx`, and `photo-viewer.tsx` finds `SimilarPhotos` only in `photo-viewer.tsx`.
+- `apps/web/messages/en.json:870-880`
+- `apps/web/messages/ko.json:920-930`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-103`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:202-248`
+- Server support contrast: `apps/web/src/app/actions/lr-tokens.ts:29-33` and `apps/web/src/app/actions/lr-tokens.ts:79-101`
 
-Failure scenario / user impact:
+Why this is a problem:
 
-A mobile visitor opens a photo on a production semantic-search gallery and taps Info. They can inspect metadata, histogram, and downloads, but the advertised image-to-image discovery feature is unavailable. For a public photo gallery, mobile is a primary consumption surface; hiding "similar photos" there undercuts the feature claim.
+The English UI says upload tokens can be used "until it expires or is revoked," and the Korean copy carries the same promise. The server action supports an optional `expiresAt`, but the admin client never renders an expiry field and creates tokens with only `{ label, scopes: ['lr:upload'] }`. In practice, tokens created through the UI do not expire unless a separate caller supplies `expiresAt` outside this UI.
+
+This is a trust and credential-safety mismatch: the product copy gives operators a safety boundary that the visible workflow does not provide.
+
+Concrete failure scenario:
+
+An operator creates a token for a temporary external publishing client and assumes the token will naturally age out because the dialog says tokens are valid until expiry or revocation. The token actually remains valid indefinitely unless manually revoked, increasing upload-abuse risk if the client machine or token copy is later compromised.
 
 Suggested fix:
 
-Pass `semanticSearchMode` and `imageSizes` into `InfoBottomSheet` and render `<SimilarPhotos>` in the expanded mobile sheet, likely near the description or below the color/histogram block. If the endpoint is intentionally desktop-only for cost or layout reasons, scope the docs and About copy to "desktop similar photos" instead of advertising it as a general visitor feature.
+Either add an expiry control to the token creation dialog or make the copy explicit that UI-created tokens do not expire by default.
 
-## Positioning Notes
+Recommended product fix:
 
-Best one-sentence positioning based on verified source:
+- Add an expiry selector with presets such as 7 days, 30 days, 90 days, and Never.
+- Send `expiresAt` to `createLrTokenAction`.
+- Keep "Never" available only with clear copy.
 
-> GalleryKit is a self-hosted finished-photo gallery for photographers who want private originals, color-aware public derivatives, first-party analytics, and optional on-host semantic discovery without a hosted SaaS.
+Minimal copy fix:
 
-Avoid leading with "AI" alone. The credible phrasing is "operator-enabled, self-hosted CLIP search" because the implementation is gated, offline-weighted, bounded, and explicit about stub/production behavior. That specificity is more trustworthy than generic AI-gallery language.
+- Change dialog/body text to "Tokens created here do not expire by default; revoke them to disable access."
+- Keep the list label `Never expires`, but make it visually prominent for no-expiry tokens.
+- Update Korean copy in parallel.
 
-## Non-Findings Verified During Final Sweep
+## Likely Issues
 
-- Install/init docs align with source: `npm run init` maps to `scripts/init-db.ts`, which runs migrations and admin seeding.
-- Deploy docs align with source: root `npm run deploy` maps to `scripts/deploy-remote.sh`; remote deploy maps to `apps/web/deploy.sh`; env-file permission checks, host-network Docker, build-time `site-config.json`, and Docker pruning are documented and implemented.
-- Semantic search honesty holds at route/UI level: default disabled, stub disclosed as non-meaningful, production env-gated, model-version-filtered, bounded scan, and 503 instead of fake production results when real embeddings are unavailable.
-- Upload-token docs and UI avoid claiming a bundled Lightroom Classic plugin; they describe a PAT-authenticated multipart upload API and token UI with `lr:upload` scope.
-- Auto alt-text copy is scoped as EXIF-derived hints, not vision AI; `caption-generator.ts` is explicitly a stub and the bulk editor applies suggestions only by admin action.
-- Public About and README correctly reject editor/culling/scoring/proofing/payment/hosted-SaaS positioning.
-- Privacy copy matches inspected source boundaries: standard pages exclude GPS, public map uses explicit topic-level GPS visibility, Google Analytics is config-gated, local analytics are first-party, and OSM map tiles are disclosed.
-- S3/MinIO storage is not marketed as supported; `CLAUDE.md` correctly quarantines the storage abstraction as not integrated.
-- PWA docs are appropriately scoped as installable plus same-origin visited-image/offline HTML fallback, not full offline gallery sync.
-- Smart-collection delete guidance is currently honest about the missing admin UI: `apps/web/messages/en.json:506-507` tells operators to update/remove `smart_collections query_json`.
+No additional likely product-claim issues were strong enough to report as likely defects after source verification. Several initially suspicious claims were code-backed:
 
-## Verification Notes
+- PWA install/cache/offline fallback is backed by `apps/web/src/app/manifest.ts:6-52`, `apps/web/public/sw.template.js:1-24`, and `apps/web/src/lib/sw-cache.ts:17-19`.
+- Same-origin/custom OG image constraints are backed by `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:172-184`, `apps/web/src/app/actions/seo.ts:133-140`, and `apps/web/src/lib/seo-og-url.ts:3-43`.
+- "No bundled Lightroom Classic plugin" is accurately reflected by the API route comments at `apps/web/src/app/api/admin/lr/upload/route.ts:1-19` and by the README/API docs.
+- Docker packaging does not appear to bake local uploads/resources into the image because `apps/web/.dockerignore:27-31` excludes them and `apps/web/docker-compose.yml:24-32` bind-mounts runtime data.
 
-No application source, plans, commits, pushes, deploys, or unrelated review files were modified. Only this assigned review artifact was written.
+## Manual-Validation Risks
 
-Validation evidence collected:
+### A. Local ignored site config contains production-looking Atik metadata
 
-- Read `AGENTS.md`, `CLAUDE.md`, the product-marketer reviewer prompt, READMEs, message files, and relevant docs.
-- Inspected public/admin source for navigation, search, similar photos, map/timeline, semantic gates, upload tokens, settings, privacy, deploy/init, and tests.
-- Used Playwright for live demo visibility evidence on `https://gallery.atik.kr/en`.
-- Used `curl` for live route/API checks on `/en`, `/en/map`, `/en/timeline`, `/en/about-gallerykit`, and `/api/search/semantic`.
-- Ran a final claim sweep for semantic search, similar photos, map/timeline, smart collections, upload API, privacy/analytics, storage, PWA/offline, install/init, deploy claims, and skipped-file boundaries.
+Severity: Low  
+Confidence: Medium  
+Files/regions:
+
+- Local ignored file: `apps/web/src/site-config.json:2-10`
+- Ignore rule: `apps/web/.gitignore:48-53`
+- Tracked template: `apps/web/src/site-config.example.json`
+- Build guard: `apps/web/scripts/ensure-site-config.mjs:14-21` and `apps/web/scripts/ensure-site-config.mjs:28-38`
+
+Why this is a risk:
+
+The tracked repository correctly ships `site-config.example.json`, and `site-config.json` is ignored. However, the local workspace has a real-looking `apps/web/src/site-config.json` with Atik/gallery.atik.kr metadata. The build guard rejects placeholders but does not reject this local production-looking config because it is valid for this deployment.
+
+This is not a confirmed repository defect because the file is ignored and should not ship in clean clones. It is still a manual-validation risk for deployers or reviewers working from a reused workspace.
+
+Concrete failure scenario:
+
+A new operator copies the working tree or deployment directory rather than starting from a clean clone/template, misses that `site-config.json` is ignored/deploy-local, and launches a gallery with Atik title, canonical URL, and metadata.
+
+Suggested fix:
+
+Clarify in setup docs that `apps/web/src/site-config.json` is deploy-local and must be verified per installation, especially when copying an existing working tree. If this repository is meant to be reused by multiple independent deployers, consider a prebuild warning when `site_url` is `gallery.atik.kr` unless an explicit environment acknowledgement is set.
+
+### B. CLIP privacy claim should distinguish one-time model download from runtime privacy
+
+Severity: Low  
+Confidence: Medium  
+Files/regions:
+
+- Product claim: `README.md:29` and `README.md:48`
+- App runbook: `apps/web/README.md:65-91`
+- Runtime offline gate: `apps/web/src/lib/clip-model.ts:208-210`
+- Model seeding script: `apps/web/scripts/download-clip-models.ts:111-122`
+
+Why this is a risk:
+
+The README says GalleryKit avoids handing AI features to hosted SaaS and has no per-query API cost. That is accurate for runtime semantic search: `clip-model.ts` sets `allowRemoteModels: false`. The setup path still downloads public model weights during the seed step. The app README says "Seed CLIP weights" and "weights load offline" but does not plainly state that the seed step contacts the model host while photos, queries, and embeddings stay local.
+
+Concrete failure scenario:
+
+A privacy-sensitive or air-gapped operator reads "without handing originals or AI features to hosted SaaS" as "no external network call is needed for AI setup," runs the seed step in production, and is surprised by a Hugging Face/model-download dependency or by the need to pre-seed weights elsewhere.
+
+Suggested fix:
+
+Add one sentence to the semantic-search runbook: "The seed step downloads public CLIP model weights once; after seeding, photo embeddings and visitor queries run locally and are not sent to Hugging Face or any hosted inference API."
+
+## Final Sweep And Skipped Files
+
+Final sweep performed:
+
+- Searched current docs and UI copy for product/claim terms: `semantic`, `CLIP`, `Lightroom`, `plugin`, `PWA`, `offline`, `AI`, `privacy`, `analytics`, `proofing`, `payment`, `SaaS`, `hosted`, `map`, `GPS`, `HDR`, `originals`, `collections`.
+- Enumerated app routes and API routes under `apps/web/src/app`.
+- Cross-checked README claims against source for semantic search, PWA, upload API, analytics/privacy, SEO metadata, smart collections, and Docker/runtime data handling.
+- Checked tracked vs ignored status for deploy-local config and public upload/resource directories.
+
+Skipped or bounded:
+
+- I did not run the web app, browser flows, or full test suite because this review target is claim correctness from docs/source, and the requested output is a reviewer report.
+- `.context/project/*` files referenced by the generic persona do not exist in this repository; I used `CLAUDE.md`, `AGENTS.md`, README files, messages, and source as the GalleryKit authority.
+- Existing `.context/reviews/*` reports from other agents were not exhaustively reviewed as product source of truth; they are review artifacts, not user/operator-facing product claims.

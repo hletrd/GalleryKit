@@ -1,242 +1,237 @@
-# Cycle 15 - Architect Review
+# Cycle 16 - Architect Review
 
-Date: 2026-07-07
+Date: 2026-07-08
 Role: architect
 Repository: `/Users/hletrd/flash-shared/gallery`
 
 ## Scope And Method
 
-I followed the required review prompts in `AGENTS.md`, the relevant architecture/security/performance/testing/deploy sections of `CLAUDE.md`, `.context/reviews/prompts/common_review_scope.md`, and `.context/reviews/prompts/architect.md`.
+This is a whole-repository architecture/design-risk review for GalleryKit. I built the inventory first from tracked repository files, then reviewed architecture-relevant docs, runtime configuration, App Router routes/actions, data-access modules, migration scripts, deployment scripts, queue/processing code, storage code, semantic-search code, and the tests that lock those boundaries. I did not use prior review conclusions as proof; code, tests, and docs were cross-checked directly.
 
-This is a whole-repository architecture/design review focused on boundaries between routes, actions, lib/db, components, scripts, storage, and the documented operational model. I built the inventory first from tracked repository files, then used repo-wide scans plus targeted line-level reads for each architectural surface and every finding below. Tests, comments, and docs were treated as claims to validate from code, not as proof.
+Generated/build outputs, package caches, binary image fixtures, and historical review artifacts were excluded from architectural source analysis. No source/config/docs surface in the inventory below was intentionally skipped.
 
-## Review Inventory
+## Architecture Inventory Reviewed
 
-Inventory basis: `git ls-files`, filtered for architecture-relevant tracked files. Generated build output, binary media/upload fixtures, `node_modules`, and old archived review artifacts were not part of the implementation surface. Prior review summaries were read only as historical context and not treated as evidence.
+- Operating instructions and design docs: `AGENTS.md`, `CLAUDE.md`, `apps/web/README.md`, `.context/reviews/prompts/**`.
+- Root/package/build config: root `package.json`, `package-lock.json`, `tsconfig.json`, `.github/workflows/**`, `apps/web/package.json`, `apps/web/next.config.ts`, `apps/web/tsconfig*.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`.
+- Next.js App Router and boundaries: all tracked files under `apps/web/src/app/**`, including public pages, admin pages, API routes, server actions, upload routes, layouts, metadata/OG routes, and `apps/web/src/proxy.ts` / `apps/web/src/instrumentation.ts`.
+- Core source modules: all tracked files under `apps/web/src/lib/**`, `apps/web/src/db/**`, `apps/web/src/components/**`, `apps/web/src/auth.ts`, `apps/web/src/env.ts`, `apps/web/src/server-only.ts`, and shared test fixtures/helpers.
+- Schema and migrations: `apps/web/drizzle/**`, `apps/web/drizzle.config.ts`, `apps/web/scripts/migrate.js`, migration journal tests, and schema-drift tripwire tests.
+- Runtime/deploy topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, root deploy scripts, `apps/web/nginx/default.conf`, health/live endpoints, and deployment documentation.
+- Storage/media/search surfaces: upload paths, image queue, Sharp processing, topic resources, derivative serving, storage abstraction quarantine, CLIP model/embedding/search/backfill modules.
+- Quality gates and boundary tests: `apps/web/src/__tests__/**`, `apps/web/e2e/**`, lint scripts for admin API auth/action origin/public route rate limiting, privacy-field tests, migration journal tests, and storage quarantine tests.
 
-- Required instructions and docs: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/prompts/common_review_scope.md`, `.context/reviews/prompts/architect.md`.
-- Application routes and actions: all tracked TypeScript/TSX under `apps/web/src/app/**`, including public pages, admin pages, API routes, server actions, `proxy.ts`, `instrumentation.ts`, layouts, and metadata/image routes.
-- Core library and database layer: all tracked TypeScript under `apps/web/src/lib/**`, `apps/web/src/db/**`, `apps/web/src/auth.ts`, `apps/web/src/env.ts`, and `apps/web/src/server-only.ts`.
-- Components: all tracked TypeScript/TSX under `apps/web/src/components/**`, with emphasis on server/client boundaries, action calls, upload/admin flows, and route coupling.
-- Scripts and operational code: all tracked JavaScript/TypeScript/shell under `apps/web/scripts/**`, root `scripts/**`, `apps/web/deploy.sh`, `apps/web/Dockerfile`, compose files, nginx config, and topology/deploy helpers.
-- Schema and migrations: `apps/web/drizzle/**`, `apps/web/drizzle.config.ts`, and migration reconciliation logic in `apps/web/scripts/migrate.js`.
-- Test and quality-contract surface: `apps/web/src/__tests__/**`, `apps/web/e2e/**`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, `.github/workflows/**`, lint scripts, and package/config files.
-
-Final sweep status: no relevant file in this inventory was intentionally skipped. I examined the full specialty surface through complete inventory scans and targeted reads for routes/actions/lib/db/components/scripts/config interactions.
+Final sweep emphasis: I explicitly rechecked commonly missed seams: startup side effects, App Router route/action auth wrappers, public select shapes, migration baseline logic, host-nginx deploy drift, storage abstraction quarantine, topic-resource paths, CLIP model gates, static derivative cache behavior, and single-writer assumptions.
 
 ## Findings Summary
 
-Confirmed Issues:
+Confirmed issues:
 
-1. Byte-impacting settings are committed before existing static derivatives match the new policy.
-2. The production single-writer invariant is warn-only while multiple correctness mechanisms are process-local.
-3. Background image queue and backfill paths independently reserve database capacity and can overrun the documented single-instance resource model.
-4. Shared-group read helpers still contain view-count write side effects, crossing the read/write boundary and duplicating the explicit public analytics action.
+1. Production single-writer enforcement is warn-only while process-local correctness mechanisms continue running.
+2. Byte-impacting settings become global truth before existing static derivatives match the new policy.
 
-Likely Issues:
+Likely issues:
 
-- None. I did not find a strong likely issue that was not already supported enough to classify as confirmed or that did not require live operational validation.
+1. The quarantined storage abstraction's `resources/*` contract conflicts with the live topic-resource path/URL contract.
+2. The CLIP embedding table supports only one vector per image, so mode/model transitions destructively replace prior embeddings.
 
-Risks Requiring Manual Validation:
+Manual-validation risks:
 
-1. Public dynamic route flood protection depends on active host nginx state that the deploy path does not apply or prove.
-2. The normal quality workflow does not build the Docker production image even though production native dependency materialization is manually pinned in the Dockerfile.
+1. Host nginx configuration is architecture-critical but is not applied or drift-checked by deploy.
+2. Migration safety still depends on hand-maintained `reconcileLegacySchema` matching committed migrations; no database structural diff proves equivalence.
 
 ## Confirmed Issues
 
-### 1. Byte-impacting settings commit ahead of existing derivative bytes
+### A16-ARCH-01 - Single-writer invariant is warning-only
+
+Severity: High
+Confidence: High
+Status: Confirmed issue
 
 Code regions:
 
-- `apps/web/src/app/actions/settings.ts:168-179` documents that byte-impacting keys other than `image_sizes` have no admission fence and only return a soft signal.
-- `apps/web/src/app/actions/settings.ts:193-239` computes `requiresBackfill`, persists the new settings, revalidates caches, and returns success before existing derivatives are regenerated.
-- `apps/web/src/lib/settings-hash.ts:1-20` states that the image settings hash is route-handler metadata only and that existing static derivatives must be re-encoded before bytes change.
-- `apps/web/src/lib/settings-hash.ts:44-48` defines color-impacting keys such as `force_srgb`, `display_p3`, `jpeg_quality`, `jpeg_chroma_subsampling`, `avif_quality`, and `sharpen_derivatives`.
-- `apps/web/src/lib/serve-upload.ts:240-258` attaches the settings hash to route-handler ETags but also notes that static derivative bytes need explicit re-encoding.
-- `apps/web/next.config.ts:60-72` gives `public/uploads` static files precedence over the route handler and sets cache headers for those files.
-- `apps/web/src/lib/process-image.ts:1187-1198` only replaces derivative files when processing/backfill actually rewrites them.
+- `apps/web/src/lib/single-writer-guard.ts:6-16` documents that two live web processes break restore mutation fences, upload quota tracking, and rate-limit fast paths, but the guard must never block startup.
+- `apps/web/src/lib/single-writer-guard.ts:218-235` emits the second-instance warning and explicitly says startup continues.
+- `apps/web/src/lib/single-writer-guard.ts:277-302` starts with a zero-timeout advisory lock probe and only schedules a background re-probe on contention.
+- `apps/web/src/instrumentation.ts:1-10` starts restore sync, maintenance scheduling, and image-queue bootstrap during process registration.
+- `apps/web/src/instrumentation.ts:22-31` starts the single-writer guard fire-and-forget after those startup side effects, and failure is non-fatal.
+- `apps/web/src/lib/maintenance-scheduler.ts:83-91` starts an in-process hourly sweep in every web process.
+- `apps/web/src/lib/advisory-locks.ts:10-18` warns that most advisory lock names are MySQL-server scoped and assume one GalleryKit per MySQL server unless names are prefixed.
 
 Why this is a problem:
 
-The admin settings action makes a byte-impacting policy look applied at the application/configuration layer before the static derivative corpus has been regenerated. The route handler can emit settings-aware ETags, but the documented operational model says most existing upload derivatives are static files under `public/uploads`, and `next.config.ts` routes those before `app/uploads`. That creates a split-brain media pipeline: new settings are true in DB/UI/cache invalidation, while old derivative bytes remain the dominant served artifact until a separate backfill finishes.
+The repository states a single-web-instance / single-writer topology, and multiple correctness mechanisms remain process-local. The only topology guard is intentionally observational, asynchronous, and non-blocking. A second process can continue accepting traffic, starting queue/bootstrap work, running maintenance, and using process-local fast paths even after the guard knows another instance owns the singleton lock.
 
 Concrete failure scenario:
 
-An operator changes `force_srgb`, `display_p3`, `jpeg_quality`, or sharpening to fix delivery quality. The action succeeds and public pages revalidate. New uploads follow the new policy, but existing public derivatives continue to be served from static files encoded with the old policy. Visitors see mixed color/quality behavior across the same gallery, and cache validators do not force static files through the settings-aware route path.
+A deploy, manual sidecar, or duplicated Docker service leaves two `gallerykit-web` processes pointed at the same database for longer than the 25-second grace window. The second process logs the loud warning but keeps serving. During that window both processes can run queue/bootstrap and maintenance code, while restore fences, upload quotas, buffered/shared view-count writes, and rate-limit fast paths are not globally coordinated. The system is now outside its documented consistency model, but readiness/health still appears green.
 
 Suggested fix:
 
-Make byte-impacting settings a durable generation transition instead of an immediate global truth. Viable designs:
+Choose one explicit topology contract and enforce it. If GalleryKit remains single-writer, make persistent singleton-lock contention a production startup/readiness failure after the rolling-deploy grace period, before accepting public/admin traffic. If multi-instance operation is desired, move the process-local fences, quota/rate-limit fast paths, queue ownership, and buffered analytics state into database/distributed coordination before allowing multiple live instances. A transitional compromise is to keep boot non-blocking in development but fail health/readiness in production when contention persists.
 
-- Store an active derivative generation/version and do not mark a byte-impacting policy active for existing assets until the generation is complete.
-- Write settings-versioned derivative filenames/paths so old and new bytes cannot be confused.
-- Route derivative reads through a settings/generation-aware layer until the corpus is re-encoded.
-- At minimum, enqueue and track a required backfill job transactionally with the settings update and surface "pending media regeneration" as a first-class state on admin/public diagnostics.
+### A16-ARCH-02 - Byte-impacting settings commit before derivative bytes converge
 
-Confidence: High.
-
-### 2. Single-writer production invariant is warn-only while correctness state is process-local
+Severity: Medium
+Confidence: High
+Status: Confirmed issue
 
 Code regions:
 
-- `apps/web/src/lib/single-writer-guard.ts:6-16` says the guard is intentionally warn-only and cannot be treated as an admission lock.
-- `apps/web/src/lib/single-writer-guard.ts:218-235` logs a critical multi-writer topology warning but explicitly continues startup.
-- `apps/web/src/instrumentation.ts:22-31` starts the guard with a non-fatal dynamic import and catch handler.
-- `apps/web/src/lib/admin-mutation-barrier.ts:11-29`, `apps/web/src/lib/admin-mutation-barrier.ts:41-58`, and `apps/web/src/lib/admin-mutation-barrier.ts:76-91` maintain restore/admin mutation barrier state in process globals.
-- `apps/web/src/lib/upload-tracker-state.ts:7-20` and `apps/web/src/lib/upload-tracker-state.ts:70-78` maintain upload quota/tracker state in process memory.
-- `apps/web/src/lib/image-queue.ts:313-340` and `apps/web/src/lib/image-queue.ts:350-357` maintain queue, processing, retry, and embedding cursor state in process memory.
-- `apps/web/src/lib/rate-limit.ts:78-110` keeps public route limiter maps in process memory for several important fast paths.
+- `apps/web/src/app/actions/settings.ts:168-201` explicitly allows byte-impacting settings, other than hard-fenced upload-contract keys, to change with only a soft `requiresBackfill` signal.
+- `apps/web/src/app/actions/settings.ts:207-239` persists those settings, revalidates app data, invalidates detached config cache, and returns success before existing derivatives are re-encoded.
+- `apps/web/src/lib/settings-hash.ts:14-26` states that the route-handler ETag hash only helps fallback route-handler traffic; existing static derivatives still need re-encoding before bytes change.
+- `apps/web/next.config.ts:60-77` confirms existing derivatives live under `public/uploads` and are normally served as static files with one-hour `must-revalidate` caching.
+- `apps/web/src/lib/process-image.ts:1187-1204` only rewrites final derivative paths when processing/backfill actually runs.
+- `apps/web/src/db/schema.ts:82-83` tracks `pipeline_version`, while `apps/web/src/db/schema.ts:115-117` stores a pending-row processing snapshot that is cleared after successful processing; there is no durable per-image active settings-generation state for already-processed derivatives.
 
 Why this is a problem:
 
-`CLAUDE.md` correctly documents a single web instance / single writer operational model, but the code only warns when that model is violated. Several mechanisms that affect correctness and abuse resistance are process-local. If a second web process/container runs, each process has its own restore barrier, upload tracker, image queue state, and memory-backed rate limits. The database is shared, but the admission and coordination state is not.
+The configuration layer can say a new color/quality policy is active while the dominant served artifact, static files in `public/uploads`, still contains old bytes. The system has warnings and operational docs, but no durable "media generation pending" state tying a settings commit to corpus convergence. That makes the media pipeline split-brain: new uploads and future backfills use the new settings, while old static derivatives keep old color/quality behavior under unchanged filenames.
 
 Concrete failure scenario:
 
-A deploy, manual recovery, or accidental compose change leaves two `gallerykit-web` instances serving traffic. Both continue after the warn-only guard. One process may enter restore mode while the other still accepts admin mutations. Upload quotas and public rate limits are split by process. Image queue coordination relies on DB locks for per-image processing, but process-local concurrency and embedding cursor state still diverge. The result is a production topology the docs explicitly prohibit, without a hard readiness failure.
+An admin changes `force_srgb_derivatives`, wide-gamut settings, AVIF/JPEG/WebP quality, or sharpening to correct delivery quality. The settings action succeeds and pages revalidate. New uploads follow the new encoder policy, but existing images continue serving old static derivatives until a separate backfill is run and completes. Public galleries show mixed color/quality behavior, and operators can no longer infer delivered bytes from current settings.
 
 Suggested fix:
 
-Choose one architecture and enforce it:
-
-- If single-writer remains the contract, make production startup/readiness fail after persistent lock contention, and include the single-writer state in health/deploy checks.
-- If multi-instance should be supported, move correctness-bearing state to shared durable storage: restore/admin barriers, upload quotas, rate-limit buckets, queue cursors, and maintenance locks.
-- Keep warn-only behavior only for local development or explicitly documented diagnostic mode.
-
-Confidence: High.
-
-### 3. Background queue and backfill paths independently reserve DB capacity
-
-Code regions:
-
-- `apps/web/src/db/index.ts:21-31` and `apps/web/src/db/index.ts:33-41` set `connectionLimit` and `queueLimit`, with comments tying queue limits to expected backfill usage.
-- `apps/web/src/lib/image-queue.ts:121-135` reserves about half the pool for live traffic and computes image-queue concurrency independently.
-- `apps/web/src/lib/image-queue.ts:137-153` parses and clamps `QUEUE_CONCURRENCY` inside the image queue only.
-- `apps/web/src/lib/admin-backfill-runner.ts:97-128` separately reserves about half the pool for live traffic for backfill.
-- `apps/web/src/lib/admin-backfill-runner.ts:130-143` computes the backfill cap independently.
-- `apps/web/src/lib/admin-backfill-runner.ts:720-728` starts a backfill `PQueue` from that independent cap.
-- `apps/web/src/lib/admin-backfill-runner.ts:324-343` and `apps/web/src/lib/admin-backfill-runner.ts:363-379` use backfill locks that do not coordinate shared background capacity with the upload/image queue.
-- `apps/web/src/lib/image-queue.ts:777-785` and `apps/web/src/lib/image-queue.ts:798-835` show image-queue workers doing lock, DB, and processing work concurrently with backfill.
-- `apps/web/scripts/backfill-color-pipeline.ts:383-387` allows a sidecar `BACKFILL_CONCURRENCY` default of 2 and max of 8 without sharing the web process pool-budget helper.
-- `apps/web/scripts/backfill-color-pipeline.ts:523-570` runs sidecar backfill jobs independently of the in-app queue/backfill resource budget.
-
-Why this is a problem:
-
-Both the image queue and in-app admin backfill reserve capacity as if they are the only background workload. The sidecar backfill has another independent budget. The documented production model is a disk-constrained, single-instance host with a small MySQL pool. Independent "reserve half for live traffic" formulas do not compose when upload processing, admin backfill, and sidecar backfill overlap.
-
-Concrete failure scenario:
-
-An operator starts an admin derivative backfill while uploads are still processing, or runs the sidecar color pipeline during normal traffic. With a pool limit of 10, the image queue can use its own workers, admin backfill can use its own workers, and the sidecar can add another DB client pool. Live SSR/admin requests then queue behind long image-processing transactions or lock polling. The app remains "up" but latency and admin actions degrade sharply, and recovery is operational rather than enforced by architecture.
-
-Suggested fix:
-
-Create one shared background capacity model:
-
-- Centralize background concurrency in a shared helper/semaphore that covers upload image processing, in-app backfill, and any in-process maintenance work.
-- Add a DB-visible maintenance/backfill lease so sidecar and web jobs can detect and coordinate heavy work.
-- Make aggressive sidecar concurrency require an explicit maintenance-mode flag, and document that it is not safe during normal live traffic.
-- Expose background capacity and active maintenance jobs in health/admin diagnostics.
-
-Confidence: High.
-
-### 4. Shared-group reads still have view-count write side effects
-
-Code regions:
-
-- `apps/web/src/lib/data.ts:13-18` and `apps/web/src/lib/data.ts:49-63` define module-level buffered shared-group view increments.
-- `apps/web/src/lib/data.ts:1318-1325` exposes `getSharedGroup` with an `incrementViewCount` option that defaults to count behavior.
-- `apps/web/src/lib/data.ts:1392-1407` calls `bufferGroupViewCount(group.id)` during the read helper when photos are visible and no selected photo is present.
-- `apps/web/src/lib/data.ts:1828-1834` wraps `getSharedGroup` in React `cache()` and warns that the cached helper may also buffer the side effect.
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:111-117` calls `getSharedGroupCached` as part of page rendering.
-- `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:137-142` separately calls the public analytics action `recordSharedGroupView`.
-- `apps/web/src/app/actions/public.ts:517-558` implements `recordSharedGroupView` as an explicit durable shared-group view action.
-
-Why this is a problem:
-
-The read model for shared groups crosses into write behavior by incrementing denormalized view counts during data access. The route also has a separate explicit analytics action. That splits one user-facing event across two different architectural paths: one hidden inside a cached read helper and one explicit action. It makes read reuse unsafe because callers must know whether a "read" can mutate state.
-
-Concrete failure scenario:
-
-A future metadata route, admin preview, background renderer, or cache-warming path calls `getSharedGroup` without passing `incrementViewCount: false`. It increments `groups.view_count` even though no real public view occurred. Conversely, changing cache behavior or calling the cached helper with different options can alter whether denormalized counters move. The durable `shared_group_views` analytics table and the denormalized counter can drift in ways that are hard to reason about.
-
-Suggested fix:
-
-Make shared-group reads pure. Move denormalized counter updates into the same explicit view-recording service path as `recordSharedGroupView`, or create a single shared function that records both durable analytics and denormalized counters with clear idempotency rules. Keep `getSharedGroupCached` side-effect free.
-
-Confidence: High.
+Make byte-impacting settings a durable generation transition. Store an active derivative-generation/settings hash per image or per derivative, mark the gallery as "backfill required" transactionally with the settings update, and surface completion state in admin/ops diagnostics. Stronger designs are settings-versioned derivative paths or routing all derivative reads through a generation-aware resolver. At minimum, enqueue/track the required backfill in the same transaction as the settings write and do not present the new policy as fully applied until the corpus converges.
 
 ## Likely Issues
 
-None.
+### A16-ARCH-03 - Storage abstraction resource paths conflict with live topic-resource paths
 
-## Risks Requiring Manual Validation
-
-### 1. Public dynamic route flood protection depends on active host nginx state not proven by deploy
-
-Code regions:
-
-- Public dynamic pages set `revalidate = 0`, including `apps/web/src/app/[locale]/(public)/page.tsx:19`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx:42`, `apps/web/src/app/[locale]/(public)/map/page.tsx:14`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:19`, `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:24`, `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:17`, `apps/web/src/app/[locale]/(public)/s/[key]/page.tsx:19`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:20`, and `apps/web/src/app/[locale]/(public)/topics/[topic]/page.tsx:20`.
-- `apps/web/nginx/default.conf:1-10` defines the public route rate-limit zone and related maps.
-- `apps/web/nginx/default.conf:274-295` applies the limiter at `location /` and explicitly notes that the template is config-only and deploys do not touch nginx.
-- `apps/web/deploy.sh:51-77` builds/starts the Docker app and runs a health check but does not apply or reload nginx.
-- `apps/web/deploy.sh:79-104` performs Docker pruning only after app startup.
-- `scripts/deploy-remote.sh:31-52` and `scripts/deploy-remote.sh:87-93` execute the remote deploy helper, which defaults to `bash apps/web/deploy.sh`.
-- `scripts/check-proxy-topology.mjs:7-16` says it cannot prove the actual client IP bucket used by the edge limiter.
-- `scripts/check-proxy-topology.mjs:131-134` reports forwarded-host/proto spoof resistance but labels XFF/client-IP bucket correctness as not verified.
-
-Why this is a risk:
-
-The app intentionally keeps public pages dynamic to reflect processing/admin changes, and `CLAUDE.md` says public flood protection is handled at the nginx edge. The repository includes the nginx template, but the deploy path does not apply it or validate that the live host is using the expected limiter and real-IP behavior. Therefore the architecture depends on external mutable host state that normal deploy verification does not prove.
-
-Concrete failure scenario:
-
-A host is rebuilt, nginx is edited manually, or traffic is routed through a different proxy layer. The Next app deploy succeeds and health checks pass, but public dynamic pages are now reachable without the intended edge rate limit or with all clients collapsed into one proxy bucket. A crawl or burst of map/photo/timeline requests reaches Next/MySQL directly, causing avoidable load on the single-instance host.
-
-Suggested fix:
-
-Close the gap with one of these designs:
-
-- Make deploy responsible for applying/testing the nginx template when the operator opts into managed edge config.
-- Add a deploy or health validation step that proves the active limiter and real-client-IP bucket behavior.
-- Add a conservative app-layer fallback limiter for expensive public dynamic routes, so correctness does not depend entirely on external nginx state.
-- Keep `check-proxy-topology` as a diagnostic, but do not treat it as proof of rate-limit enforcement unless it validates live limiter behavior.
-
-Confidence: Medium for live production impact, High for the repo/deploy validation gap.
-
-### 2. Quality workflow does not build the Docker production image despite manual native dependency pins
+Severity: Medium
+Confidence: Medium
+Status: Likely issue
 
 Code regions:
 
-- `.github/workflows/quality.yml:54-83` runs install, lint, typecheck, security lint gates, audit, tests, DB init, E2E tests, and `npm run build`, but no Docker build.
-- `apps/web/Dockerfile:50-62` manually installs platform-native build dependencies by exact package/version, including `@img/sharp-libvips-linux-${npm_arch}@1.2.4`, `@img/sharp-linux-${npm_arch}@0.34.5`, `@parcel/watcher-linux-${npm_arch}-glibc@2.5.6`, `@swc/core-linux-${npm_arch}-gnu@1.15.43`, `@next/swc-linux-${npm_arch}-gnu@16.2.10`, and `lightningcss-linux-${npm_arch}-gnu@1.32.0`.
-- `apps/web/Dockerfile:76-85` repeats production native installs and smoke-tests `require('sharp')`.
-- `apps/web/package.json:58-68` and `apps/web/package.json:79-83` declare the source package versions that the Dockerfile pins must continue to match.
-- `apps/web/deploy.sh:51-62` runs `docker compose ... up -d --build` on the deploy host, so the Dockerfile is part of the production path even though CI does not exercise it.
+- `apps/web/src/lib/storage/types.ts:4-16` says the storage layer is experimental, not wired end-to-end, and maps derivative/resource keys to `UPLOAD_ROOT/<key>`.
+- `apps/web/src/lib/storage/local.ts:21` includes `resources` in `REQUIRED_PUBLIC_DIRS`.
+- `apps/web/src/lib/storage/local.ts:55-67` resolves non-original keys under `UPLOAD_ROOT`.
+- `apps/web/src/lib/storage/local.ts:159-166` returns public URLs as `/uploads/<key>`.
+- `apps/web/src/lib/process-topic-image.ts:11-28` resolves live topic resources under `public/resources` or `TOPIC_RESOURCES_ROOT`.
+- `apps/web/src/lib/process-topic-image.ts:95-126` writes and deletes topic cover files directly in that resources directory.
+- `apps/web/src/lib/serve-upload.ts:15` and `apps/web/src/lib/serve-upload.ts:172-175` only serve `/uploads/{jpeg,webp,avif}` and reject other top-level upload directories.
+- `apps/web/src/__tests__/storage-quarantine.test.ts:1-27` acknowledges the abstraction is quarantined because importing it would create a second unaudited write path.
 
-Why this is a risk:
+Why this is a problem:
 
-The Dockerfile uses an explicit native dependency materialization path that can drift from package updates. The standard quality workflow validates the Next build on the CI runner, but not the actual production image build. Production-only failures are therefore deferred to deploy time on the host.
+The quarantine currently prevents active damage, but the abstraction's documented `resources/*` namespace does not match the live product namespace. Live topic covers are stored under `public/resources` and served as `/resources/...`; the storage backend would put `resources/foo.webp` under `public/uploads/resources/foo.webp` and return `/uploads/resources/foo.webp`, which the upload-serving handler rejects. This is exactly the kind of boundary drift that becomes a bug when a future integration removes or relaxes the quarantine test.
 
 Concrete failure scenario:
 
-Dependabot or a manual package update changes Next, Sharp, SWC, Lightning CSS, or related optional native dependency versions. CI passes because the workspace build succeeds outside Docker. The deploy host then fails during Docker build or starts an image with mismatched native packages. Because deploy is the first Docker build gate, this becomes an operational outage or rollback event instead of a pre-merge failure.
+A future refactor intentionally wires topic-image handling through `getStorage()` and writes `resources/<uuid>.webp`. The write succeeds and tests that only assert file existence may pass, but the admin/public UI still asks for `/resources/<filename>` or the storage URL returns `/uploads/resources/<filename>`, which the upload route 404s. The deploy also persists `public/resources` separately from `public/uploads`, so backups and cleanup scripts can miss or orphan the new files.
 
 Suggested fix:
 
-Add a non-publishing Docker image build smoke check to CI for `apps/web/Dockerfile`, including the existing `require('sharp')` runtime smoke. If CI cost is a concern, add a source-contract test that derives the Dockerfile native pins from `package-lock.json` and fails when they drift, then run a scheduled or required Docker build for release branches.
+Before unquarantining `@/lib/storage`, remove `resources` from the local backend unless it is actually supported, or add an explicit namespace mapper: `resources/*` must resolve to `TOPIC_RESOURCES_ROOT` and public URLs must be `/resources/*`. Add focused tests that cover topic-cover write/read/delete URL behavior through the abstraction. Keep the quarantine test until upload, derivative serving, originals, topic resources, cleanup, backup, and restore all use the same storage contract.
 
-Confidence: Medium for immediate breakage, High for architectural test coverage gap.
+### A16-ARCH-04 - Semantic embeddings destructively replace prior model rows
+
+Severity: Medium
+Confidence: Medium
+Status: Likely issue
+
+Code regions:
+
+- `apps/web/src/db/schema.ts:277-304` defines `image_embeddings` with `image_id` as the primary key and `model_version` as an attribute, not part of the key.
+- `apps/web/src/lib/image-queue.ts:486-524` writes embeddings with `onDuplicateKeyUpdate`, replacing both the vector and `modelVersion` for the image.
+- `apps/web/src/app/api/search/semantic/route.ts:263-279` scans only rows matching the active model version.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:137-190` requires production model rows for both the target image and candidates.
+- `CLAUDE.md:169` documents that one active row exists per image and running a different mode/model destructively replaces the prior vector.
+- `apps/web/src/lib/gallery-config-shared.ts:223-229` heals stored production mode to disabled unless the production env gate is set, so mode changes can happen through config/environment transitions.
+
+Why this is a problem:
+
+The schema is intentionally an "active embedding" store, not a model-history store. That is simple, but it couples operator mode changes, backfills, and future model upgrades to destructive replacement. The search routes are correctly model-gated, so any accidental overwrite with stub rows or a future model's rows can make production search appear empty or partially unavailable until a full production backfill runs again.
+
+Concrete failure scenario:
+
+An operator enables production CLIP and backfills all images. Later, during troubleshooting or a demo, stub mode is enabled and upload/bootstrap/backfill writes rows for the same images. The single primary key causes production vectors to be overwritten with `stub-sha256-v1`. Production semantic and similar search then filter for the production model and either return `semantic_no_embeddings` or only a partial corpus until the full production backfill is repeated.
+
+Suggested fix:
+
+If model switching or upgrades are expected, change the schema to retain multiple vectors per image with a composite key such as `(image_id, model_version)` plus an active-model setting or view. If the one-row design is intentional, make transitions that overwrite a different `model_version` explicit operator actions with row-count previews and confirmation, and expose current row counts by model in admin/ops diagnostics.
+
+## Manual-Validation Risks
+
+### A16-ARCH-05 - Host nginx template is not applied or drift-checked by deploy
+
+Severity: Medium
+Confidence: High
+Status: Manual-validation risk
+
+Code/doc regions:
+
+- `CLAUDE.md:509-521` states that deploys do not touch host nginx and that changes to `apps/web/nginx/default.conf` are inert until an operator applies them manually.
+- `apps/web/deploy.sh:51-56` only runs Docker Compose rebuild/start for the application.
+- `apps/web/deploy.sh:57-77` health-checks the app container/live endpoint, not the live host nginx configuration.
+- `apps/web/deploy.sh:79-108` prunes Docker artifacts and reports disk state, but performs no nginx hash check, `nginx -t`, or reload.
+
+Why this is a problem:
+
+The nginx layer owns architecture-significant behavior: body-size limits, rate limiting, real-client-IP forwarding, static upload/resource handling, TLS/HSTS headers, and routing to Next.js. The repository can ship a correct `nginx/default.conf` while production continues running an older manual host config. The docs call this out, but the deploy path cannot prove the running edge matches the committed architecture.
+
+Concrete failure scenario:
+
+A fix adds or changes a limiter/body-size cap in `apps/web/nginx/default.conf`, tests and code review pass, and `npm run deploy` succeeds. The host still runs the previous nginx file because no operator applied it. Public flood protection, Lightroom upload body limits, or `_next/image` rate limits remain stale in production even though the repo says the issue is fixed.
+
+Suggested fix:
+
+Add a deploy-time drift check that compares the committed nginx template hash to the configured host nginx file and fails or loudly warns when they differ. A stronger fix is to manage nginx as deployment-owned infrastructure: copy the template, run `nginx -t`, reload, and verify a bounded live smoke test behind an explicit production-change gate. If nginx must remain manual, persist the applied template hash/date in an ops ledger and have deploy print the drift status.
+
+### A16-ARCH-06 - Migration reconcile path lacks an automated structural equivalence proof
+
+Severity: Medium
+Confidence: Medium
+Status: Manual-validation risk
+
+Code regions:
+
+- `apps/web/drizzle/meta/_journal.json:48-58` shows the historical non-monotonic migration jump from idx 6 to idx 7.
+- `apps/web/src/__tests__/migration-journal-monotonicity.test.ts:1-28` documents the Drizzle MAX-created-at footgun and pins monotonicity/post-condition behavior.
+- `apps/web/src/__tests__/migration-journal-monotonicity.test.ts:44-54` allowlists the known historical inversion.
+- `apps/web/src/__tests__/migration-journal.test.ts:63-105` enforces monotonic behavior from the safe tail and global max from idx 18 onward.
+- `apps/web/scripts/migrate.js:348-370` starts `reconcileLegacySchema`, the maintained idempotent schema bootstrap path.
+- `apps/web/scripts/migrate.js:684-730` mirrors `image_embeddings` and related indexes/FKs manually in reconcile.
+- `apps/web/scripts/migrate.js:758-782` explains that Drizzle MySQL relies on a MAX timestamp cursor rather than per-entry hash checks.
+- `apps/web/scripts/migrate.js:858-878` routes fresh databases through reconcile plus per-entry baseline.
+- `apps/web/scripts/migrate.js:949-973` enforces the post-condition that every journal hash must be recorded.
+
+Why this is a problem:
+
+The migration discipline is much stronger than a naive Drizzle setup, but it still depends on authors manually keeping `reconcileLegacySchema` equivalent to the current committed migration state. The tests pin monotonic journal behavior and hash-recording guarantees; they do not prove that a fresh reconcile-baselined database and a database that applied all SQL migrations have identical column types, defaults, indexes, foreign keys, collations, or intentionally mirrored DML outcomes.
+
+Concrete failure scenario:
+
+A future migration adds a column with a non-default collation, an index prefix, or a DML backfill. The `.sql` file is correct and the journal tests pass, but `reconcileLegacySchema` mirrors only the column name or misses the exact default/index/DML semantics. A brand-new or legacy-baselined deployment boots with a schema that differs from a normally migrated deployment. The mismatch surfaces later as a query-plan regression, strict-mode insert failure, or semantic inconsistency that the post-condition hash check cannot detect because the hash was baselined.
+
+Suggested fix:
+
+Add an integration test that spins two disposable MySQL databases: one applying committed migrations through the normal Drizzle path and one applying reconcile+baseline. Compare `INFORMATION_SCHEMA` for tables, columns, indexes, foreign keys, nullability, defaults, collations, and generated/extra attributes. Include explicit fixtures for mirrored DML migrations or require DML-bearing migrations to provide a verifier query. Keep the current journal/hash tests as fast tripwires, but add the structural diff as the architecture proof.
+
+## No Finding After Review
+
+- Module boundaries and data layering: `apps/web/src/lib/data.ts:251-327` separates admin select fields, `apps/web/src/lib/data.ts:368-407` derives public fields by omission, and `apps/web/src/lib/data.ts:458-476` compile-guards sensitive fields. I did not find a confirmed admin/public leak in the reviewed public surfaces.
+- Semantic-search enrichment: `apps/web/src/lib/search-enrichment-fields.ts:1-47` centralizes public search result fields with a compile-time `PrivacySensitiveKeys` guard. The CLIP risks above are model-retention/ops risks, not public-data separation issues.
+- App Router/admin boundaries: `apps/web/src/lib/api-auth.ts:58-144` centralizes admin API auth, token-scope bypass rules, and no-store/nosniff response defaults; `apps/web/src/lib/action-guards.ts:37-43` centralizes same-origin admin checks for mutating server actions. I did not find a new confirmed boundary bypass in this architecture pass.
+- Migration discipline: despite A16-ARCH-06, the repo has substantial protections against the known Drizzle skip failure: journal monotonicity tests, DML-baseline guards, per-entry baselining, and a post-condition hash assertion.
+- Image processing pipeline coupling: the pipeline is tightly coupled by design to local files, Sharp/libvips, static derivative paths, and admin settings. I did not find a new confirmed corruption issue beyond the settings-generation gap in A16-ARCH-02 and the storage-abstraction mismatch in A16-ARCH-03.
 
 ## Final Sweep
 
-I performed final architecture-focused checks for commonly missed issue classes:
+Commonly missed issue classes checked:
 
-- Route/action boundary: scanned admin APIs, public APIs, server actions, and origin/auth/rate-limit contracts. No additional unguarded admin mutation route was identified beyond the findings above.
-- Server/client boundary: scanned client components for database/server-only imports and server modules for boundary leaks. No new direct DB-to-client import leak was identified.
-- Storage/media boundary: scanned storage imports, upload serving, derivative generation, image processing, and quarantine paths. The major architectural gap is the derivative-generation/settings transition captured in Confirmed Issue 1.
-- Privacy/public data boundary: scanned public select fields, search enrichment fields, GPS/map allowances, and privacy fixture guards. No additional confirmed public data exposure issue was identified in this architecture pass.
-- Operational model: scanned single-writer guard, restore/admin barrier, upload tracker, queue/backfill runners, deploy scripts, nginx, Dockerfile, and CI. The major mismatches are captured in Confirmed Issues 2 and 3 plus the two manual-validation risks.
-- Migration/schema boundary: scanned migration files, journal metadata, migration runner, and reconcile paths. I did not find a new confirmed architecture issue beyond the need to keep the documented migration/journal contract enforced.
-- Component cohesion: scanned admin/public components for direct operational coupling. No additional cross-layer component issue rose to confirmed or likely status.
+- Startup/background side effects before readiness.
+- Multiple web-process / single database assumptions.
+- Public API and server-action auth boundaries.
+- Public select shapes and search enrichment fields.
+- Static `public/uploads` precedence over route-handler derivative serving.
+- Storage abstraction vs direct filesystem upload/topic-resource paths.
+- CLIP production/stub gates, row model-version filters, and embedding overwrite behavior.
+- Migration journal monotonicity, reconcile/baseline behavior, and hash post-condition.
+- Docker/compose/deploy/nginx runtime topology and docs-code drift.
 
-No app code, tests, deploy scripts, or configuration files were modified by this review. Only `.context/reviews/architect.md` was written.
+Skipped as non-architecture implementation surface: generated output, dependency caches, uploaded/binary media fixtures, and old review artifacts not needed as evidence. No relevant tracked source/config/doc file category from the inventory was skipped.

@@ -1,142 +1,139 @@
-# Cycle 15 Critic Review
+# Cycle 16 Critic Review
 
-Date: 2026-07-07
+Date: 2026-07-08
 Reviewer: critic
-Mode: read-only review except this report.
-Specialty: strongest objections, hidden tradeoffs, and aging risks.
+Mode: review-only; this report is the only intended write.
+Specialty: product/implementation mismatches, hidden coupling, overfit tests, stale artifacts, and operational tradeoffs.
 
 ## Inventory And Coverage
 
 Inventory was built before finding selection.
 
-- Tracked repository inventory: 3,468 files.
-- Review-relevant tracked inventory: 736 files.
-- Included surfaces: `AGENTS.md`, relevant `CLAUDE.md`, required review prompts, root/app package and lock files, app build/config/deploy files, nginx template, `apps/web/src` routes/actions/lib/components/db/instrumentation/proxy, scripts, migrations, public/service-worker assets, messages, e2e tests, and unit/source-contract tests.
-- Relevant inventory by bucket: app routes/actions 81, lib 114, components 61, db 3, tests 359, scripts 28, migrations 34, e2e 12, public assets/SW 9, build/config 12, nginx 1, i18n 2, required docs/prompts 14, other app entry/config files 6.
-- Excluded from behavioral conclusions: generated/dependency/runtime outputs (`.git`, `node_modules`, `.next`, `.omx`, `.omc`), local secret/env files, and historical review/plan archives except the required prompt files and current operator docs.
+- Source/review surface counted: 536 TypeScript files, 111 TSX files, 30 SQL migrations, 8 JS/MJS scripts, 13 JSON configs/snapshots, and 2,224 markdown review/plan docs under the repo review surface.
+- Core runtime inventory: all files under `apps/web/src/app`, `apps/web/src/components`, `apps/web/src/lib`, `apps/web/src/db`, `apps/web/src/i18n`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, root/app package manifests, Docker/deploy/CI config, `AGENTS.md`, and `CLAUDE.md`.
+- Current review surface: top-level `.context/reviews/*.md`, current `.context/plans/README.md`, `cycle-15-2026-07-08-plan.md`, `cycle-15-2026-07-08-deferred.md`, current `_aggregate.md`, and recent cycle artifacts needed to understand provenance.
+- Relevant files were examined through full-file reads where findings cite behavior, plus repo-wide scans for auth/origin/rate-limit coverage, raw SQL, filesystem/process operations, source-contract tests, runtime artifacts, TODO/FIXME/HACK markers, deployment claims, migrations, public privacy selectors, semantic search, service worker, and map/UX performance surfaces.
+- Excluded from behavioral conclusions: dependencies, generated build output, binary fixtures/screenshots, local env/secrets, and historical plan/review archives except where they are currently linked by active indexes or directly pollute the review inventory.
 
-Primary validation and sweeps:
+Validation evidence:
 
-- Read required instructions: `AGENTS.md`, relevant architecture/security/testing/deploy sections in `CLAUDE.md`, `.context/reviews/prompts/common_review_scope.md`, `.context/reviews/prompts/critic.md`.
-- Ran repo-wide static sweeps over TODO/FIXME/HACK/manual/operator/process-local warnings, raw SQL/security sinks, admin API wrapping, server-action origin guards, public route rate limits, cache/revalidation, service worker paths, semantic search, nginx/proxy, deployment, migrations, privacy/public select fields, and rate-limit state.
-- Ran guard scanners:
-  - `npm run lint:api-auth --workspace=apps/web` passed.
-  - `npm run lint:action-origin --workspace=apps/web` passed.
-  - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- Verified committed `apps/web/public/sw.js` matches `apps/web/public/sw.template.js` stamped with `IMAGE_PIPELINE_VERSION=7` (`36c91deb-p7`).
-- Full lint/typecheck/build/unit/e2e were not run because this task is review-only and made no code changes beyond this report.
+- Confirmed current `HEAD`/`origin/master`: `78778dd8 fix(cycle-15): prevent review-found regressions`.
+- Guard evidence from sibling lanes: API-auth, action-origin, and public-route-rate-limit scanners passed in the current cycle reports.
+- This lane did not run full lint/typecheck/build/unit/e2e gates; it is a critic/report lane and changed only this markdown report.
 
 ## Confirmed Issues
 
-### C15-CRIT-01 - Nginx multi-hop proxy comments still contradict the tested/documented client-IP contract
+### C16-CRIT-01 - Admin deletion can bypass structured error handling before the advisory-lock try/catch
 
 - Severity: Medium
 - Confidence: High
 - Status: Confirmed issue
-- File/region:
-  - `apps/web/nginx/default.conf:20-28`
-  - `apps/web/nginx/default.conf:59-71`
-  - `apps/web/nginx/default.conf:100-112`
-  - `apps/web/nginx/default.conf:270-306`
-  - `README.md:172-174`
-  - `apps/web/README.md:56`
-  - `apps/web/.env.local.example:63-70`
-  - `apps/web/src/__tests__/nginx-config.test.ts:33-44`
-  - `apps/web/src/lib/rate-limit.ts:175-197`
-- Problem: The nginx template still tells operators that in an upstream-LB topology they `MUST` switch `X-Forwarded-For` from `$remote_addr` to `$proxy_add_x_forwarded_for` and set `TRUSTED_PROXY_HOPS` to the real hop count. The root README, app README, env example, and test suite define the opposite shipped contract: nginx overwrites incoming XFF with `$remote_addr`, operators keep `TRUSTED_PROXY_HOPS=1`, and any outer edge must be normalized with nginx `real_ip` or PROXY protocol before forwarding to the app. The test suite explicitly rejects `$proxy_add_x_forwarded_for`.
-- Concrete failure scenario: An operator follows `apps/web/nginx/default.conf:69-71` for `client -> LB -> nginx -> app`, switches locations to `$proxy_add_x_forwarded_for`, and sets `TRUSTED_PROXY_HOPS=2`. `getClientIp()` selects the address before the trusted suffix when the chain is long enough and otherwise falls back to `X-Real-IP`; with the template still setting `X-Real-IP $remote_addr`, app-layer login/search/share budgets can collapse to the LB address. That causes global 429s for legitimate users and weakens abuse isolation.
-- Suggested fix: Make the nginx comments match the tested contract: use nginx `real_ip` / PROXY protocol to normalize `$remote_addr`, keep overwriting XFF to the app, and keep `TRUSTED_PROXY_HOPS=1` for the shipped nginx-app hop. If append-mode support is desired, change the nginx template, READMEs, env example, tests, proxy checker, and `getClientIp()` examples together with concrete header-chain examples.
+- File/region: `apps/web/src/app/actions/admin-users.ts:220-314`
+- Problem: `deleteAdminUser()` acquires a dedicated MySQL connection at line 231 before entering the `try/catch/finally` that maps lock, transaction, and domain failures to localized action results. If `connection.getConnection()` rejects, the server action throws a framework-level error instead of returning `{ error: t('failedToDeleteUser') }`.
+- Why it matters: The function is deliberately careful after the connection exists: it serializes through an advisory lock, rolls back, maps `LAST_ADMIN`/`USER_NOT_FOUND`, and releases or destroys pooled locks. The one infrastructure step most likely to fail under pool saturation sits outside that envelope.
+- Concrete failure scenario: Upload processing or backfill consumes pool capacity while an admin deletes a stale account. `connection.getConnection()` rejects at line 231. The UI receives an unstructured server-action failure instead of a localized, recoverable delete-user error.
+- Suggested fix: Declare `let conn: PoolConnection | null = null` and move acquisition inside a guarded try. Release/destroy only when `conn` is non-null, and return `failedToDeleteUser` on acquisition failure while logging the detail server-side.
+
+### C16-CRIT-02 - CLIP embedding backfill has the same pre-try dedicated-connection failure path
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed issue
+- File/region: `apps/web/src/app/actions/embeddings.ts:59-213`
+- Problem: `backfillClipEmbeddings()` takes a restore mutation slot and checks auth/rate limits, then calls `connection.getConnection()` at line 113 before the `try/catch` that returns `{ status: 'error', message: t('embeddingBackfillFailed') }`. A pool/TLS/DB restart failure rejects the action rather than preserving its typed result contract.
+- Why it matters: The action is intentionally mode-aware, rate-limited, restore-aware, and typed. A connection-acquisition miss is the only advisory-lock infrastructure failure not converted to the same user-facing shape as later failures.
+- Concrete failure scenario: An operator triggers or later wires embedding backfill during semantic-search rollout while MySQL is briefly unavailable. The action rejects before `semanticBackfillLockHeld` exists; callers see a server-action exception instead of a localized `embeddingBackfillFailed` response.
+- Suggested fix: Wrap dedicated connection acquisition in the same error-handling policy as the rest of the action. If acquisition fails, return the typed error. Keep `releasePooledAdvisoryLocks()` once a connection exists.
+
+### C16-CRIT-03 - Active plan provenance still advertises stale cycle-15 push/deploy state after the fix commit is already on origin
+
+- Severity: Low
+- Confidence: High
+- Status: Confirmed review-surface issue
+- File/region: `.context/plans/cycle-15-2026-07-08-plan.md:1-5`, `.context/plans/README.md:34-39`, `.context/reviews/_aggregate.md:1-10`
+- Problem: The active cycle-15 plan says `Status: IMPLEMENTED - GATES GREEN, PUSH/DEPLOY PENDING` and points to aggregate HEAD `6256a988`. Current git state shows `HEAD`, `origin/master`, and `origin/HEAD` at `78778dd8`, the cycle-15 fix commit. The plan index still presents cycle 15 as active current-cycle work while cycle 16 reports are being produced.
+- Why it matters: In this repo, plan/review files are part of the operating surface for subsequent agents. A stale active status can cause duplicate scheduling, incorrect deploy assumptions, or false "pending push" work in the next plan phase.
+- Concrete failure scenario: A planner reads the active plan index, assumes cycle 15 fixes were not pushed, and schedules another provenance/deploy cleanup instead of ingesting the new cycle-16 findings. Alternatively, a deploy operator treats the plan as the current pending action despite origin already carrying the fix commit.
+- Suggested fix: After push/deploy completion, update the plan status to reflect the actual terminal state and move or mark superseded active entries. The cycle-16 aggregation step should make `_aggregate.md` and `.context/plans/README.md` unambiguously point at the newest review cycle.
 
 ## Likely Issues
 
-### C15-CRIT-02 - Docker native-package pins duplicate the lockfile and will drift on dependency upgrades
+### C16-CRIT-04 - Critical behavior is still over-protected by source-string tests instead of behavior tests
+
+- Severity: Medium-High
+- Confidence: High
+- Status: Likely issue
+- File/region:
+  - Logout revocation source contracts: `apps/web/src/__tests__/pending-session-revocations.test.ts:88-107`, `apps/web/src/__tests__/auth-mutation-barrier-source.test.ts:63-72`, runtime `apps/web/src/app/actions/auth.ts:275-317`
+  - Upload quota TOCTOU source contract: `apps/web/src/__tests__/images-action-toctou-claim.test.ts:17-56`, runtime `apps/web/src/app/actions/images.ts:232-320`
+  - Tag aggregation source contract: `apps/web/src/__tests__/data-tag-names-sql.test.ts:234-248`, runtime `apps/web/src/lib/data.ts:1682-1729`
+  - Migration reconcile self-declared source tripwire: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:107-122`, runtime `apps/web/scripts/migrate.js:858-947`
+- Problem: The suite has many valuable regression tripwires, but several high-risk contracts assert strings, index order, or name presence rather than executing the behavior. The current inventory found 170 tests that read source files and 249 tests with source/contract/wiring/lock-style markers. For the examples above, a real behavior regression can preserve the checked strings.
+- Why it matters: These tests can create false confidence in the exact areas this codebase most needs behavioral proof: logout session revocation, upload quota concurrency, search result tag correctness, and schema bootstrap parity.
+- Concrete failure scenario: A refactor leaves `enqueuePendingSessionRevocation(hashSessionToken(token))` and `if (!revoked)` in `auth.ts`, but moves them outside the real blocked logout branch. The source tests pass while logout during restore fails to queue server-side revocation. Similarly, a new awaited precheck can be inserted between upload quota validation and claim without matching the two hard-coded awaited needles in the test.
+- Suggested fix: Keep source contracts only as cheap secondary guards. Add behavior tests for the blocked logout branches, concurrent same-key upload quota, multi-tag search aggregation, and a structural schema parity check against `information_schema` for reconcile/bootstrap. When behavior tests exist, remove or downgrade brittle source-order assertions.
+
+### C16-CRIT-05 - OMC runtime artifacts still leak into source/review inventories
+
+- Severity: Low
+- Confidence: High
+- Status: Likely maintainability issue
+- File/region: `.gitignore:16-17`, `.omc/plans/plan-cycle12-fixes.md:1-63`, `apps/web/src/__tests__/.omc/state/sessions/cf88ba27-b054-4385-83b8-446a5996bdbf/pre-tool-advisory-throttle.json:1-10`
+- Problem: The repo ignores `.omc` and `.omx`, but `git ls-files` still includes `.omc/plans/plan-cycle12-fixes.md`, and an untracked `.omc` state JSON lives under `apps/web/src/__tests__`. Even when not tracked, nested runtime state under `src/__tests__` is picked up by broad `rg --files` inventories.
+- Why it matters: Review-plan-fix lanes depend on accurate inventory. A completed April 2026 runtime plan and an advisory throttle JSON are not app source, tests, or committed project memory, but they appear in the same tree locations as relevant material.
+- Concrete failure scenario: A future reviewer or static scan counts `apps/web/src/__tests__/.omc/...json` as test surface, or reads `.omc/plans/plan-cycle12-fixes.md` as a live plan and reopens old work. This increases review noise and makes "no relevant file skipped" harder to audit.
+- Suggested fix: Remove tracked `.omc` artifacts from git and keep `.context/plans`/`.context/reviews` as the committed review surfaces. Add a small CI/source hygiene check that fails if tracked files match `(^|/)\\.omc/` or `(^|/)\\.omx/`, and clean nested runtime state from `apps/web/src`.
+
+### C16-CRIT-06 - Docker production-image correctness is still mostly deploy-time, not CI-time
 
 - Severity: Medium
 - Confidence: High
-- Status: Likely issue, not currently broken
-- File/region:
-  - `apps/web/Dockerfile:50-62`
-  - `apps/web/Dockerfile:76-85`
-  - `apps/web/package.json:59-68`
-  - `apps/web/package.json:79-87`
-  - `package-lock.json` entries for `next`, `sharp`, `@next/swc-linux-*`, `@img/sharp-*`, `@swc/core-linux-*`, `lightningcss-linux-*`, `@parcel/watcher-linux-*`
-- Problem: The Dockerfile installs Linux native packages with literal versions after `npm ci --no-save`. Those versions currently match the lockfile (`next 16.2.10`, `sharp 0.34.5`, native pins matching the same versions), but nothing enforces that relationship. The normal dependency bump path updates `package.json`/`package-lock.json`; it does not force a Dockerfile edit.
-- Concrete failure scenario: A future Next or Sharp upgrade passes local macOS tests and updates the lockfile, but leaves `@next/swc-linux-${npm_arch}@16.2.10` or `@img/sharp-linux-${npm_arch}@0.34.5` in the Dockerfile. The deploy-only Linux build can then fail at `next build`, load an incompatible native binary, or ship a runtime image whose externalized `sharp` dependency does not match the JS package.
-- Suggested fix: Remove hand-copied native versions from the Dockerfile. Either derive them from `package-lock.json` during the Docker build with a small Node helper, or add a blocking source-contract test that parses Dockerfile pins and compares them to the lockfile. Prefer a single source of truth over another comment reminding future agents to update both.
+- Status: Likely operational fragility
+- File/region: `.github/workflows/quality.yml:48-83`, `apps/web/Dockerfile:50-62`, `apps/web/Dockerfile:76-85`, `apps/web/deploy.sh:51-56`
+- Problem: The quality workflow runs npm lint/typecheck/tests/e2e/build on the runner, but it does not build the production Docker image. The Dockerfile then overlays hard-coded Linux-native package pins after `npm ci --no-save`. This is a separate build graph from the CI `npm run build` graph.
+- Why it matters: Production deploys are where Linux native packages, standalone output copying, and Docker-only build args are actually exercised. A dependency or lockfile update can pass CI and fail only during `npm run deploy`.
+- Concrete failure scenario: Next, Sharp, Lightning CSS, SWC, or Parcel watcher versions change in `package-lock.json`; `.github/workflows/quality.yml` stays green, but the Dockerfile still installs stale native packages at lines 56-62 or 82-84. The production image build fails on the remote host or ships mismatched native bindings.
+- Suggested fix: Add a CI job or required local gate that builds the Docker image for the target architecture, or add a lockfile-vs-Dockerfile pin checker. Prefer deriving Docker native package versions from the lockfile instead of duplicating them by hand.
 
-## Risks Requiring Manual Validation
+## Manual-Validation Risks
 
-### C15-RISK-01 - Public SSR and image-optimizer rate limits depend on manually applied host nginx
+### C16-RISK-01 - Public map UX can still hydrate 10,000 Leaflet markers plus a duplicate accessible list
 
-- Severity: High if production host config is stale; otherwise low
-- Confidence: Medium
-- Status: Risk requiring production/host validation
-- File/region:
-  - `apps/web/nginx/default.conf:1-29`
-  - `apps/web/nginx/default.conf:274-294`
-  - `apps/web/deploy.sh:51-56`
-  - `CLAUDE.md:245-247`
-  - `CLAUDE.md:508-518`
-- Problem: The repo documents that public SSR pages are protected at the nginx edge, not by app-layer page limiters, and `deploy.sh` only rebuilds/restarts Docker. It does not apply or verify the host nginx template. A commit can therefore “fix” or add an edge limiter in the repo while production continues running a stale host config.
-- Concrete failure scenario: A crawler floods `/`, `/p/:id`, `/map`, `/timeline`, or `/_next/image`. The app routes are dynamic (`revalidate = 0`) and multi-query/CPU-heavy; if the host nginx config was never applied or lacks real-IP normalization, the intended per-IP public/nextimage zones either do not exist or key all users to one upstream address.
-- Suggested fix: Add a non-destructive deploy/ops verification step that captures `nginx -T` from the host and checks the active config for the committed limiter zones, upload caps, XFF contract, and real-IP topology. Longer term, manage the host nginx config through the same deploy/IaC path or add app-layer page throttling for deployments where edge enforcement cannot be guaranteed.
-
-### C15-RISK-02 - Semantic search recall is bounded by recency, not by relevance
-
-- Severity: Medium
+- Severity: Medium-High at GPS-heavy gallery scale
 - Confidence: High
-- Status: Risk requiring production-scale validation
-- File/region:
-  - `apps/web/src/app/api/search/semantic/route.ts:263-311`
-  - `apps/web/src/app/api/search/similar/[id]/route.ts:177-214`
-  - `apps/web/src/db/schema.ts:292-304`
-  - `apps/web/src/lib/clip-embeddings.ts:22-48`
-  - `apps/web/README.md:67-76`
-  - `CLAUDE.md:620-625`
-- Problem: Both semantic text search and similar-photo search select only the newest `SEMANTIC_SCAN_LIMIT` embedding rows, then score that bounded set in process. The index supports `model_version + updated_at`, not vector similarity. This is honest in the docs, but it is still a product-aging ceiling: once the gallery exceeds the scan limit, older relevant photos can become unsearchable regardless of their score.
-- Concrete failure scenario: A 30,000-photo archive has older wedding or travel photos with perfect semantic matches, but the default scan limit is 2,000 and the hard cap is 25,000. A user searches for a specific concept that exists only in older rows; the API returns weaker or empty results because those rows were never candidates.
-- Suggested fix: Before presenting semantic search as complete retrieval, validate production row counts and query recall against representative old/new albums. For durable scale, introduce a real vector index/ANN sidecar, a database-native vector capability if adopted, or another all-row candidate strategy that does not make relevance dependent on upload/re-embed recency.
+- Status: Manual performance/UX validation risk
+- File/region: `apps/web/src/lib/data.ts:1766-1816`, `apps/web/src/app/[locale]/(public)/map/page.tsx:42-110`, `apps/web/src/components/map/map-client.tsx:77-140`
+- Problem: The code intentionally caps public map data at 10,000 rows, but it still materializes, serializes, hydrates, fits bounds for, and renders one Leaflet `Marker` per row, plus a separate HTML list row for every marker. The truncation notice is honest, but it does not make the 10,000-marker path responsive.
+- Concrete failure scenario: A GPS-enabled archive grows to several thousand public map-visible photos. Mobile Safari or low-memory Android receives the large SSR payload, hydrates thousands of React/Leaflet nodes, computes bounds across every marker, and presents a slow or crashing map. The page is technically capped but not practically usable.
+- Suggested fix: Validate `/map` with production-like marker counts on mobile. Schedule clustering, viewport/bbox queries, pagination/virtualization for the accessible list, or a lower operational cap before advertising map as scalable beyond personal small/medium GPS sets.
 
-### C15-RISK-03 - Service-worker HTML offline caching is broad by default and future personalized routes must opt out deliberately
+### C16-RISK-02 - Edge/proxy assumptions remain operator-validated rather than release-validated
 
-- Severity: Medium for future personalized/public routes
+- Severity: High if live host config drifts
 - Confidence: Medium
-- Status: Risk requiring future-route validation
-- File/region:
-  - `apps/web/public/sw.template.js:438-473`
-  - `apps/web/public/sw.template.js:547-555`
-  - `apps/web/src/proxy.ts:112-122`
-  - `apps/web/src/__tests__/sw-template-contract.test.ts:102-147`
-- Problem: The service worker caches any OK HTML response for offline fallback unless it is admin-session-rendered or matches today’s revocable object routes (`/c`, `/s`, `/g`, `/map`). That is correct for the current public gallery, but the default is cache-all HTML. Future public pages with user-specific, expiring, or private-but-not-admin content will be cached for up to 24 hours unless the author remembers to add a route-pattern bypass or server marker.
-- Concrete failure scenario: A future private proofing page, client login area, expiring preview link, or personalized public dashboard ships outside `/admin` and outside the current `[csg]`/`map` patterns. A visitor loads it once, loses network, logs out or has access revoked, and the browser can still serve the cached HTML offline.
-- Suggested fix: Invert the policy to an allowlist of offline-safe public routes, or add a server-controlled opt-in/opt-out header such as `x-gk-offline-cache`. Add a source-contract test that every new HTML route is classified as offline-safe or offline-bypassed, instead of relying on broad fallback behavior.
+- Status: Manual security/ops validation risk
+- File/region: `apps/web/deploy.sh:51-56`, `apps/web/nginx/default.conf:20-29`, `apps/web/nginx/default.conf:290-306`, `apps/web/src/lib/rate-limit.ts:175-205`, `apps/web/src/lib/request-origin.ts:47-145`, `CLAUDE.md` runtime topology / public SSR page-rate-limit sections
+- Problem: App-layer origin checks are fail-closed, but several abuse controls depend on live nginx/CDN/LB configuration: public SSR throttling, `/_next/image` throttling, upload body caps, and trustworthy client IP extraction. The normal deploy script rebuilds/restarts Docker and does not prove host nginx state.
+- Concrete failure scenario: Production is moved behind a CDN/LB or nginx config is edited manually. The app sees collapsed or spoofable client IPs, or the public-page limiter is absent. Public dynamic routes and semantic/OG endpoints then take traffic based on app-only assumptions that were never validated against the active edge config.
+- Suggested fix: Add an operator/deploy diagnostic that reads active `nginx -T` or probes rate-limit behavior from outside the host. Keep `BASE_URL`, `TRUST_PROXY`, and `TRUSTED_PROXY_HOPS` tied to real topology and fail health/deploy checks where practical.
 
-### C15-RISK-04 - The single-writer topology is warn-only, so accidental scale-out degrades correctness instead of failing closed
+### C16-RISK-03 - Single-writer correctness is documented but still warn-only at runtime
 
 - Severity: High if replicas are introduced
 - Confidence: High
-- Status: Risk requiring deployment-topology validation
-- File/region:
-  - `apps/web/src/lib/single-writer-guard.ts:6-16`
-  - `apps/web/src/lib/single-writer-guard.ts:218-235`
-  - `apps/web/src/instrumentation.ts:22-31`
-  - `apps/web/src/lib/admin-mutation-barrier.ts:11-29`
-  - `apps/web/src/lib/data.ts:49-63`
-  - `CLAUDE.md:245-249`
-- Problem: The app has a well-documented single-web-instance design, but the runtime guard only logs and continues when another process holds the singleton advisory lock. Several correctness and abuse-control mechanisms are process-local: restore mutation draining, upload quota/tracker state, queue/backfill status, some rate-limit fast paths, and buffered shared-group view counts.
-- Concrete failure scenario: An operator accidentally deploys two web replicas against the same DB. One process starts a restore and drains only its local foreground mutation slots; an admin mutation already admitted in the other process can still complete after the import begins. Public rate-limit budgets can also split across processes, while buffered analytics can be lost per process on crashes.
-- Suggested fix: Either make production startup fail closed on persistent singleton-lock contention unless an explicit `ALLOW_MULTI_INSTANCE_UNSAFE=true` override is set, or move the process-local coordination state into shared durable storage and make the guard informational only after the architecture is actually multi-instance safe. Add deploy-time replica-count validation for the documented topology.
+- Status: Manual deployment-topology risk
+- File/region: `apps/web/src/lib/single-writer-guard.ts:6-16`, `apps/web/src/lib/single-writer-guard.ts:218-235`, `apps/web/src/instrumentation.ts:22-31`, `apps/web/src/lib/admin-mutation-barrier.ts:11-29`, `CLAUDE.md` runtime topology section
+- Problem: The app is explicitly single-web-instance, but persistent singleton-lock contention only logs and continues startup. Restore mutation slots, upload tracker/quota state, queue/backfill status, some rate-limit buckets, and buffered analytics remain process-local.
+- Concrete failure scenario: An operator accidentally runs two containers during blue/green testing. Restore drains one process's mutation slots while the other process can still admit writes, and in-memory limiter budgets split by process.
+- Suggested fix: Make multi-instance contention fail startup/readiness in production unless an explicit unsafe override is set, or move correctness-bearing state to shared durable coordination before allowing scale-out.
 
 ## Final Sweep
 
 Commonly missed areas checked:
 
-- Admin API auth wrapping: scanner passed; admin API routes are wrapped by `withAdminAuth(...)`.
-- Mutating server-action same-origin provenance: scanner passed; mutating admin actions enforce `requireSameOriginAdmin()` or carry explicit exemptions.
-- Public API route rate limiting: scanner passed; public mutating/expensive routes use pre-increment helpers or documented exemptions.
-- JSON-LD/script injection: public JSON-LD sites use `safeJsonLd`; no raw broad `dangerouslySetInnerHTML` path was found outside those structured-data blocks.
-- Privacy boundary: public/admin select fields and `_PrivacySensitiveKeys` were reviewed; no new unguarded admin-only column exposure was found in this pass.
-- Service worker drift: generated `sw.js` matches the template stamp.
-- BoundedMap shallow-copy follow-up: current cycle-15 write-back fixes are present in `sharing.ts`, `admin-users.ts`, and `embeddings.ts`; no production `.data` reach-around use was found.
-
-No review-relevant file in the 736-file inventory was intentionally skipped. Files excluded from behavioral conclusions were generated outputs, dependencies, runtime state, local secrets, and historical review/plan archives that do not define current app behavior.
+- Product claims vs implementation: smart collections, semantic-search gating, site-config build-time behavior, map visibility/GPS privacy, and current plan provenance were checked against source and docs.
+- Hidden coupling: restore maintenance, admin mutation slots, upload tracker, advisory locks, token usage tracking, image queue/backfills, Docker native packages, and service-worker template/generated output were traced across files.
+- Security/privacy: no new public selector GPS/original-filename leak was confirmed; API auth/origin/rate-limit guard reports are green in sibling lanes. Remaining security concerns are topology/manual-validation risks.
+- Performance/UX: map marker hydration, semantic scan recency limits, Docker/deploy-only validation, and source-contract-heavy tests remain the highest critic-lane concerns.
+- Stale/misleading artifacts: active plan status and `.omc` runtime artifacts are called out above.
+- Skipped files: binary fixtures/screenshots, dependency/build outputs, local secrets, and historical archives not linked from the current review surface were excluded. No current source/config/review file relevant to the findings above was intentionally skipped.
