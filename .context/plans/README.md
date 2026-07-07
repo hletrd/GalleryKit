@@ -33,7 +33,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- None. The next review-plan-fix iteration should create Run-10 Cycle 6 artifacts.
+- Run-10 Cycle 9/100 Implementation Plan - active: schedules migration compatibility, semantic embedding contract honesty, public privacy alias guards, maintenance single-flight, cursor normalizer coverage, doc/copy drift, explicit admin/CLIP proof commands, and PostCSS audit remediation attempt (`cycle-9-2026-07-07-plan.md`)
+- Run-10 Cycle 9/100 Deferred Findings - active deferred register with preserved severity/confidence and exit criteria for broader performance/UI/operator/upstream findings (`cycle-9-2026-07-07-deferred.md`)
 
 ## Recent Plans
 

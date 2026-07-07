@@ -1,91 +1,118 @@
-# Verifier Review - Cycle 8 Lane
+# Verifier Review - Cycle 9
 
 Date: 2026-07-07
-HEAD reviewed: `eca55414` (`fix(cycle-7): 🐛 harden review findings`)
-Mode: verifier/read-only review. No fixes, commits, pushes, deploys, service actions, or database mutations were performed. This artifact is the only intended write.
+Reviewer: verifier
+HEAD reviewed: `ff0c79d607208bae9487be8152fa648f4161674f`
+Mode: PROMPT 1 deep review from evidence-based correctness against stated behavior. Application code was not modified. No commit, push, deploy, service action, database mutation, or destructive runtime action was performed.
 
 ## Inventory
 
-I read the repo instructions first:
+Read first:
+
 - `AGENTS.md`
 - `CLAUDE.md`
-- `code-review` skill instructions
+- `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-I then built this working inventory:
-- Policy and gate scripts: root `package.json`, `apps/web/package.json`, `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, `apps/web/scripts/migrate.js`, `apps/web/scripts/build-sw.ts`, `apps/web/scripts/generate-pwa-icons.ts`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`.
-- Routes and actions: all `apps/web/src/app/**/route.{ts,tsx}` files; all `apps/web/src/app/actions/*.ts`; admin DB actions; LR PAT upload route; public analytics actions; public map/timeline/year/smart-collection route coverage.
-- Privacy/schema/migrations: `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, `apps/web/drizzle/meta/_journal.json`, migrations `0021`, `0026`, `0027`, `0028`, `0029`, and reconcile/index mirrors in `migrate.js`.
-- Admin/LR flows: `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/admin-tokens.ts`, `apps/web/src/app/actions/lr-tokens.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, LR token/upload tests.
-- Runtime/browser tests: `apps/web/playwright.config.ts`, `apps/web/scripts/run-e2e-server.mjs`, `apps/web/scripts/seed-e2e.ts`, `apps/web/e2e/*.spec.ts`.
-- Generated/deploy invariants: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, deploy script contract tests, PWA icon generator/source contract.
-- Review/plan context: prior root `.context/reviews/verifier.md`, latest run-9 cycle-8 aggregate/verifier, and `plan/done/plan-369-cycle8-fixes.md`.
+Repository inventory reviewed, not sampled:
 
-Fresh read-only evidence:
-- `npm run lint:api-auth --workspace=apps/web`: pass; `db/download` and `lr/upload` routes OK.
-- `npm run lint:action-origin --workspace=apps/web`: pass; all mutating server actions enforce same-origin provenance or approved public/read-only shape.
+- Docs and policies: `AGENTS.md`, `CLAUDE.md`, root `README.md`, `apps/web/README.md`, current root `.context/reviews/*.md`, prior run9 review aggregates, `.context/plans/`, `plan/`, deploy/runbook docs.
+- App source: 81 files under `apps/web/src/app`, 111 under `apps/web/src/lib`, 61 under `apps/web/src/components`, plus `src/db`, `src/i18n`, config, generated-public contracts, and route/action surfaces.
+- Tests and gates: 342 unit test files under `apps/web/src/__tests__`, 12 Playwright/e2e files under `apps/web/e2e`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`, root/app `package.json`, and custom lint scanners.
+- Operations and schema: 30 scripts under `apps/web/scripts` + root `scripts`, 33 Drizzle migration/meta files, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, migration/reconcile code, CLIP/backfill scripts, and service-worker/PWA generation.
+
+Fresh validation evidence:
+
+- `npm run lint:api-auth --workspace=apps/web`: pass; both admin API route files OK.
+- `npm run lint:action-origin --workspace=apps/web`: pass; scanner reports every mutating server action guarded or explicitly exempt.
 - `npm run lint:public-route-rate-limit --workspace=apps/web`: pass; 10 public route files classified OK.
 - `npm run lint --workspace=apps/web`: pass.
-- In-memory SW generation check: expected `36c91deb-p7`; committed `apps/web/public/sw.js` also has `36c91deb-p7`; generated output matches template exactly.
-- Migration journal tail check: 30 entries; current max and last entry are `0029_feed_updated_indexes` with `when=1783397921062`. The known historical non-monotonic `0006`/`0007` ordering remains, but CLAUDE.md documents that historical condition and `migrate.js` uses hash-based postconditions rather than relying on simple monotonic order.
-- `git status --short`: clean before this artifact write.
+- `npx vitest run src/__tests__/auth-mutation-barrier-source.test.ts src/__tests__/shared-link-runtime-contracts.test.ts src/__tests__/public-actions.test.ts src/__tests__/smart-collection-pagination.test.ts --config vitest.config.ts`: pass; 4 files, 43 tests.
+- `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: fail; Next's nested PostCSS remains vulnerable.
+- Test-surface sweep: no `.only(` focus marker found in `apps/web/src/__tests__`, `apps/web/e2e`, or test configs. Intentional skip surface remains in admin/origin Playwright and CLIP env-gated suites.
 
 Not run:
-- `npm run typecheck --workspace=apps/web`: skipped because `typecheck:app` runs `next typegen` (`apps/web/package.json:26`), which writes generated Next type artifacts.
-- `npm run build --workspace=apps/web`: skipped because `prebuild` writes generated PWA icons and `sw.js` (`apps/web/package.json:10`, `apps/web/scripts/generate-pwa-icons.ts:68-81`, `apps/web/scripts/build-sw.ts:39-43`).
-- `npm test --workspace=apps/web`: skipped to preserve the "write exactly one review file" constraint; many tests are safe, but the full suite includes temp/generated-file patterns.
-- `npm run test:e2e --workspace=apps/web`: skipped because the local Playwright server runs `npm run init`, `npm run e2e:seed`, and `npm run build` (`apps/web/scripts/run-e2e-server.mjs:75-84`), and the seed deletes/recreates seeded rows and files in disposable DBs (`apps/web/scripts/seed-e2e.ts:174-183`, `apps/web/scripts/seed-e2e.ts:217-230`).
+
+- `npm run typecheck --workspace=apps/web`: skipped because `typecheck:app` runs `next typegen`, which writes generated framework artifacts.
+- `npm run build --workspace=apps/web`: skipped because `prebuild` writes generated PWA icons and `sw.js`.
+- Full `npm test --workspace=apps/web`: targeted tests were run instead; the full suite was not necessary to establish the findings below.
+- `npm run test:e2e --workspace=apps/web`: skipped because the local harness initializes/builds/seeds and `seed-e2e.ts` deletes/recreates disposable DB rows/files.
 
 ## Findings
 
-### VER-C8-01 - Real LR PAT multipart upload is still not proven end-to-end
+### VER-C9-01 - Production dependency audit still fails despite the root PostCSS override
 
 Severity: Medium
 Confidence: High
-Status: risk
-File/region: `apps/web/src/app/api/admin/lr/upload/route.ts:84-92`, `apps/web/src/app/api/admin/lr/upload/route.ts:528-565`, `apps/web/src/app/api/admin/lr/upload/route.ts:611`; `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:44-47`, `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:172-182`; `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:7-8`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:421-431`; `apps/web/src/__tests__/api-auth-response-headers.test.ts:50-149`; `apps/web/src/__tests__/admin-tokens.test.ts:181-294`.
+Status: Confirmed
+File/region: `package.json:7-9`, `apps/web/package.json:57,80`, `package-lock.json:9194-9205`, `package-lock.json:9334-9355`
 
-Evidence: The production route is token-authenticated through `withAdminAuth(..., { allowTokenScope: 'lr:upload' })` and then reads wrapper-supplied token context (`route.ts:84-92`, `route.ts:611`). Its enqueue payload correctly forwards the processing snapshot and semantic mode (`route.ts:528-565`). However, the route behavior test mocks `withAdminAuth` to an identity wrapper (`lr-upload-route-behavior.test.ts:44-47`) and directly calls `POST` with a `FormData` body (`lr-upload-route-behavior.test.ts:172-182`). The source-contract test explicitly says the route is heavy to exercise end-to-end (`lr-upload-hdr-gate.test.ts:7-8`) and locks source strings such as the enqueue payload (`lr-upload-hdr-gate.test.ts:421-431`). Token verification/scope/header defaults are tested separately with mocked DB/wrapper layers (`api-auth-response-headers.test.ts:50-149`, `admin-tokens.test.ts:181-294`).
+Why: the root package declares an override to `postcss@8.5.16`, and the workspace also has top-level `postcss@^8.5.16`, but the production lockfile still contains `node_modules/next/node_modules/postcss@8.4.31` through `next@16.2.10`. `npm audit --workspace=apps/web --omit=dev --audit-level=moderate` fails with GHSA-qx2v-qp2m-jg93. The override gives false confidence because it does not remove the nested production copy.
 
-Failure scenario: a real external publish client can fail at the integration boundary while all current tests stay green: header casing/context propagation, `markTokenUsed`, wrong-scope fallthrough, multipart parsing under the wrapper, DB insert, and queue enqueue are never proven in one request against a real token row.
+Concrete failure scenario: a future feature accepts user/admin-controlled CSS or theme snippets and stringifies them through the vulnerable nested PostCSS path into an HTML style context. The production audit gate would already have caught this dependency risk, but no repo quality gate currently runs it, so the issue can remain hidden behind passing lint/type/test gates.
 
-Fix: add a disposable integration test that creates an admin token row with `lr:upload`, posts a real JPEG multipart request with `X-GalleryKit-Token`, asserts 2xx plus `uploaded_by`/`last_used_at`/enqueue/row state, and asserts an `lr:read` token never reaches handler work.
+Suggested fix: upgrade Next to a stable release that no longer vendors vulnerable PostCSS, or add a tested package-manager override that actually removes `node_modules/next/node_modules/postcss@8.4.31`. Add a CI/package-lock contract check for the nested path after remediation.
 
-### VER-C8-02 - Authenticated admin/browser e2e proof remains opt-in and was not established in this lane
+### VER-C9-02 - Production CLIP activation depends on manual skipped suites, not an enforced gate
+
+Severity: High
+Confidence: High
+Status: Confirmed evidence gap
+File/region: `CLAUDE.md:587-596`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31,72-80`, `apps/web/src/__tests__/semantic-route-production.test.ts:3-5,33-41`, `apps/web/src/lib/gallery-config.ts:123-126`, `apps/web/src/app/api/search/semantic/route.ts:247-289`
+
+Why: the docs label CLIP's real offline-load/ranking checks as the pre-activation test gate, but also state they are permanently skipped in CI and are the only verification before flipping production mode. The default production route test mocks `embedTextReal`; it proves the route's no-embedding response, not that the real model loads or ranks. Runtime production mode is still enabled by env plus DB setting, and the public route then calls `embedTextReal` and returns 503 if inference fails.
+
+Concrete failure scenario: a model-cache layout, pinned revision, ONNX runtime binding, container mount, or Transformers.js behavior changes. Unit/CI gates stay green because real CLIP suites skip or mock the encoder. An operator follows the activation runbook, flips `semantic_search_mode='production'`, and public semantic search returns 503 for real users.
+
+Suggested fix: make CLIP activation proof executable and enforceable. For example, add `npm run test:clip:preflight` and require a recent preflight marker/artifact before allowing production mode, or run the real-model suites in CI with a seeded cache artifact. Keep fast route tests mocked, but do not let production activation rely only on a manual doc step.
+
+### VER-C9-03 - Load-more action tests duplicate a looser cursor normalizer
 
 Severity: Medium
 Confidence: High
-Status: risk
-File/region: `apps/web/playwright.config.ts:78-85`, `apps/web/scripts/run-e2e-server.mjs:75-84`, `apps/web/scripts/seed-e2e.ts:174-183`, `apps/web/scripts/seed-e2e.ts:217-230`, `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/origin-guard.spec.ts:28-31`, `apps/web/e2e/origin-guard.spec.ts:55-57`.
+Status: Confirmed
+File/region: `apps/web/src/lib/data.ts:701-759`, `apps/web/src/app/actions/public.ts:132-245`, `apps/web/src/__tests__/public-actions.test.ts:39-56`, `apps/web/src/__tests__/smart-collection-pagination.test.ts:56-75`, `apps/web/src/__tests__/load-more-rate-limit.test.ts:30-45`
 
-Evidence: Playwright defaults to a local server command (`playwright.config.ts:78-85`) that initializes, seeds, and builds (`run-e2e-server.mjs:75-84`). The seed is intentionally destructive unless the DB is disposable or explicitly allowed (`seed-e2e.ts:174-183`) and deletes seeded image rows/files before recreation (`seed-e2e.ts:217-230`). Authenticated admin specs are skipped unless `adminE2EEnabled` is true (`admin.spec.ts:11-13`); CI has a guard that expects credentials only when CI runs this suite (`admin.spec.ts:6-9`). The authenticated origin-guard branch has the same opt-in skip (`origin-guard.spec.ts:55-57`), while the unauthenticated smoke explicitly does not prove the origin branch (`origin-guard.spec.ts:33-53`).
+Why: production `normalizeImageListCursor` strictly accepts MySQL datetime strings or ISO UTC strings, length-caps values, rejects invalid `Date`s, and requires a positive integer id. The public action tests mock `@/lib/data` and reimplement a simpler normalizer; two mocks accept any parseable date string and do not preserve all regex/length/invalid-date checks. These tests prove the mocked contract, not the real cursor validation used by `loadMoreImages` and `loadMoreSmartCollectionImages`.
 
-Failure scenario: admin hydration, login, admin upload, topic CRUD, or authenticated cross-origin rejection can regress while read-only verifier lanes and non-admin e2e runs stay green. The test code exists, but the evidence is conditional on running against a configured disposable environment with admin credentials.
+Concrete failure scenario: a client emits a slash-formatted date or fractional timestamp shape that the mock accepts but production rejects, causing load-more to return `invalid` or restart pagination. Conversely, a future production normalizer regression can relax unsafe cursor data while action tests still pass because the duplicate mock did not change.
 
-Fix: keep the destructive seeded profile, but add a separate non-destructive smoke profile for an already-provisioned disposable server, or make release verification require an explicit admin-e2e job with disposable DB credentials and record that evidence in the cycle artifact.
+Suggested fix: add direct unit tests for `normalizeImageListCursor` covering accepted ISO/MySQL forms, null capture dates, invalid dates, slash-formatted dates, overlong strings, non-integer ids, and non-object values. In action tests, import the actual normalizer with `vi.importActual('@/lib/data')` while mocking only DB-fetching functions.
+
+### VER-C9-04 - Authenticated admin/browser e2e proof remains conditional
+
+Severity: Medium
+Confidence: High
+Status: Confirmed risk
+File/region: `apps/web/playwright.config.ts:48-87`, `apps/web/e2e/helpers.ts:28-45`, `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/origin-guard.spec.ts:27-73`, `apps/web/scripts/run-e2e-server.mjs:80-90`, `apps/web/scripts/seed-e2e.ts:169-183,217-233`
+
+Why: Playwright runs one desktop Chromium project. Admin tests are skipped unless `adminE2EEnabled` resolves true; that auto-enables only for local non-production origins with plaintext `E2E_ADMIN_PASSWORD` or plaintext `ADMIN_PASSWORD`, and remote admin remains opt-in. CI includes a guard that expects admin coverage, which is good, but ordinary `npm run test:e2e` can still pass without proving authenticated admin navigation or the authenticated same-origin rejection branch. The local server path also builds and seeds a disposable DB, so verifier/review lanes often cannot run it without mutating local test state.
+
+Concrete failure scenario: an authenticated admin route, login-cookie behavior, hydrated settings/dashboard UI, or same-origin branch after a valid session regresses. A local e2e smoke without plaintext e2e credentials skips the authenticated specs and still reports green on public/unauthenticated flows.
+
+Suggested fix: split e2e into explicit projects: a required local disposable admin project that seeds a known admin account, and a separate remote-admin project that remains opt-in. Make the default e2e command fail with a clear message when browser-flow coverage is requested but authenticated admin proof was skipped.
+
+### VER-C9-05 - The unit gate has no coverage threshold or changed-file ratchet
+
+Severity: Medium
+Confidence: High
+Status: Confirmed risk
+File/region: `apps/web/package.json:13`, `apps/web/vitest.config.ts:16-39`, broad source-contract surface under `apps/web/src/__tests__`
+
+Why: the unit gate is plain `vitest run`, and the Vitest config only defines include/exclude and timeout. There is no coverage provider, branch threshold, critical-directory threshold, or changed-file ratchet. A repo-wide sweep found 154 test files using source-contract patterns (`readFileSync`, `source-contract`, or `extractFnBody`), which are useful tripwires but can pass while behavior branches remain unexecuted.
+
+Concrete failure scenario: a new public API route, server action branch, migration reconcile branch, upload queue failure path, or security helper lands with no behavior test. Existing source-contract and unrelated unit tests stay green, and no gate reports that the new file or branch has zero executed coverage.
+
+Suggested fix: add a non-blocking coverage report first, then ratchet changed files and critical directories such as `src/app/actions`, `src/app/api`, `src/lib`, and migration scripts. Keep explicit exemptions for source-contract-only invariants, but require behavior coverage for user/security/data paths.
 
 ## Verified Non-Findings
 
-- Admin API auth gate is active and import-source hardened: `check-api-auth.ts` only approves `withAdminAuth` imported from `@/lib/api-auth` (`apps/web/scripts/check-api-auth.ts:63-93`), and the fresh gate run passed both admin route files.
-- Server action origin gate is recursive and import-source hardened: it discovers `app/actions/**` recursively plus `db-actions.ts` and `app/actions.ts` (`apps/web/scripts/check-action-origin.ts:91-113`), approves `requireSameOriginAdmin` only from `@/lib/action-guards` (`apps/web/scripts/check-action-origin.ts:50`, `apps/web/scripts/check-action-origin.ts:130-149`), and the fresh gate run passed.
-- Public route rate-limit gate is active: it scans route files under `src/app`, excludes admin, requires imported pre-increment helpers or reasoned exemptions (`apps/web/scripts/check-public-route-rate-limit.ts:25-47`, `apps/web/scripts/check-public-route-rate-limit.ts:245-266`), and the fresh gate run passed 10 route files.
-- Data privacy guards are symmetric: sensitive keys include GPS, originals, processing diagnostics, admin upload attribution, color/HDR admin-only fields, and processing snapshots (`apps/web/src/__tests__/privacy-fields.test.ts:7-45`); public keys are locked to an allowlist (`privacy-fields.test.ts:47-76`, `privacy-fields.test.ts:103-128`); timeline/search enrichment mirrors are also checked (`privacy-fields.test.ts:139-166`).
-- Cycle-8 semantic/processing snapshot fixes are present: uploads persist `processing_settings_json` (`apps/web/src/app/actions/images.ts:487`), browser and LR enqueue all processing/semantic settings (`apps/web/src/app/actions/images.ts:527-558`, `apps/web/src/app/api/admin/lr/upload/route.ts:528-565`), retry reads strict config before clearing failed state (`apps/web/src/app/actions/images.ts:1290-1308`), and queue consumption runtime-gates stored production semantic mode (`apps/web/src/lib/image-queue.ts:184-188`).
-- Restore queue lifecycle matches the plan: restore quiesces the queue (`apps/web/src/app/[locale]/admin/db-actions.ts:539-545`) and resumes it when maintenance is cleared after verified restore or pre-import failure after quiesce (`db-actions.ts:572-589`), while import/migration failures keep maintenance active (`db-actions.ts:821-845`).
-- Analytics validation/index work is present: public view actions validate processed/visible targets before insert (`apps/web/src/app/actions/public.ts:436-455`, `apps/web/src/app/actions/public.ts:465-489`, `apps/web/src/app/actions/public.ts:499-527`), link-local referrer fixtures exist (`apps/web/src/__tests__/analytics.test.ts:156-158`), and top-view/retention indexes are mirrored in schema, migrations, and reconcile (`apps/web/src/db/schema.ts:238-268`, `apps/web/drizzle/0026_analytics_top_view_indexes.sql:1-3`, `apps/web/drizzle/0027_analytics_retention_indexes.sql:1-3`, `apps/web/scripts/migrate.js:638-682`).
-- Deploy invariants match policy: deploy refuses unsafe runtime env permissions before compose (`apps/web/deploy.sh:15-43`), waits for health before pruning (`apps/web/deploy.sh:57-77`), and prunes after health without `volume prune -a` (`apps/web/deploy.sh:79-104`). Root remote deploy env loading is config-driven and permission-checked before `source` (`scripts/deploy-remote.sh:22-84`).
-- Generated service worker is current without writing files: `build-sw.ts` computes a template-hash plus pipeline version (`apps/web/scripts/build-sw.ts:27-43`), and committed `apps/web/public/sw.js:26` matches the in-memory expected `36c91deb-p7`.
+- Restore barrier regression from earlier cycle-9 lane reports is fixed in the current tree: `updatePassword` checks `if (!mutationSlot.acquired)` before rate-limit, Argon2, transaction, or cookie work (`apps/web/src/app/actions/auth.ts:309-312`), and the source contract asserts that shape (`apps/web/src/__tests__/auth-mutation-barrier-source.test.ts:17-25`).
+- Admin CSV export no longer uses MySQL-invalid `SEPARATOR CHAR(1)`: it defines `CSV_TAG_SEPARATOR` and uses a quoted `sql.raw` separator (`apps/web/src/app/[locale]/admin/db-actions.ts:42,116,139-144`), and the shared-link runtime contract checks both the public and admin export source (`apps/web/src/__tests__/shared-link-runtime-contracts.test.ts:21-40`).
+- Custom auth/origin/rate-limit scanners execute and passed in this review. They prove the current source matches scanner contracts, though they do not replace the behavior/e2e gaps listed above.
+- No focused `.only(` test marker was found in the reviewed test surfaces.
 
 ## Final Sweep
 
-Checked categories:
-- Repo instructions and current docs contracts (`AGENTS.md`, `CLAUDE.md`, plan/review history).
-- Lint gates and their actual pass output.
-- App route inventory, admin API wrappers, server actions, public route rate limits.
-- Admin flows: DB backup/restore, LR PAT upload, token actions, upload queue/retry semantics.
-- Data privacy selectors and compile/runtime test guards.
-- Migration journal tail, reconcile/index/foreign-key mirrors, and deploy migration postcondition architecture.
-- Deployment invariants: env permissions, config-driven remote target, post-health Docker prune safety.
-- Generated artifacts: service worker template/output parity; PWA icon generation source contract.
-- Browser/e2e coverage shape, with destructive/mutating commands intentionally not run.
+Commonly missed areas checked: repo docs vs source claims, root/app quality gates, intentional skips, source-contract test concentration, custom scanner pass evidence, production dependency audit, CLIP activation, load-more cursor validation, admin e2e proof, restore-barrier claims, CSV separator claims, migration/schema docs, privacy guards, deploy/test write behavior, and generated artifact gates.
 
-Verifier verdict: no confirmed source behavior defect was found in the inspected policy/code surfaces. The two findings are evidence risks: real PAT-authenticated LR multipart upload and authenticated admin/browser runtime behavior still require a configured disposable integration run to prove end-to-end.
+I did not inspect live production host state, real environment secrets, deployed DB rows, real CLIP weights, or browser/CDN cache state. The findings above are limited to current repository evidence.

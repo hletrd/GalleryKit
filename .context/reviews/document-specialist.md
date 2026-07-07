@@ -1,79 +1,58 @@
-# Document Specialist Review - Cycle 8
+# Document Specialist Review - Cycle 9
 
-Reviewer: document-specialist. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `eca55414`.
-Mode: docs-vs-code review. Only this requested review artifact was written. No fixes, commits, pushes, deploys, service changes, or database/container mutations were performed.
+Reviewer: document-specialist. Repo: `/Users/hletrd/flash-shared/gallery`. HEAD reviewed: `ff0c79d6`.
+Mode: documentation/code mismatch review. Only this requested review artifact was written. No application code, commits, pushes, deploys, service changes, database actions, or container mutations were performed.
 
 ## Inventory
 
-Built the documentation/source inventory first, then verified claims against implementation:
+I read the canonical documentation first, then built a repository inventory and checked documentation claims against the current implementation:
 
-- Canonical instructions: `AGENTS.md`, `CLAUDE.md`.
-- Public/operator docs: `README.md`, `apps/web/README.md`, `apps/web/__test_fixtures__/color/README.md`.
-- Historical/context docs: `.context/**`, `plan/**`, `docs/**` inventoried via full file listing and searched for deploy, schema, semantic-search, payment, storage, Lightroom, smart-collection, and operational-state claims; current high-signal docs/readmes were read directly.
-- Environment/config: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/src/site-config.json`, `apps/web/src/site-config.example.json`.
-- Package/deploy/runtime: root `package.json`, `apps/web/package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/next.config.ts`.
-- Schema/migration: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, migration source-contract tests.
-- Source checked for claims: semantic search and similar-photo routes/components/actions, CLIP scripts/libs, gallery config, upload paths, topic resource paths, analytics/GA CSP path, admin settings, Lightroom upload API, storage quarantine, removed payment/reaction schema cleanup.
+- Canonical instructions and project docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `apps/web/__test_fixtures__/color/README.md`.
+- Docs and context corpus: `docs/**`, `.context/plans/**`, `.context/reviews/**`, and `plan/**` were inventoried and searched for review-relevant claims. Current high-signal plan/review artifacts and the latest aggregate files were read directly; archived historical artifacts were included in repo-wide drift searches.
+- Full file inventory: 6,677 filesystem entries enumerated with review conclusions focused on source/docs/config while excluding vendor, build, upload, runtime data, and `.git` internals from source-of-truth analysis.
+- Source/config inventory: 1,266 relevant files under `apps/web` source, scripts, migrations, e2e, tests, messages, config, deploy, and package areas were covered by targeted reads and repo-wide searches.
+- Domains checked: setup, deploy, environment variables, security, migrations, semantic search, CLIP operator runbooks, image/color/HDR pipeline, storage, e2e, quality gates, and current unsupported-product boundaries.
 
-Validation scope:
-
-- Static/read-only review only. I did not run test suites because this lane was constrained to one review-file write and no container/database mutation. Evidence below is from direct source/doc inspection.
+Validation was static/read-only. I did not run the app or test suites because this review lane is documentation/source consistency only and the user explicitly requested no application-code changes. Evidence below comes from direct source and documentation inspection.
 
 ## Findings
 
-### DOC-C8-01 - Operator semantic-search docs still understate the single-row embedding overwrite contract
+### DOC-C9-01 - Semantic-search docs claim per-model embedding rows, but storage still overwrites one row per image
 
 - Severity: Medium
 - Confidence: High
-- Classification: confirmed
-- Files/regions: `apps/web/README.md:64-74`, `CLAUDE.md:553-574`, `apps/web/drizzle/0012_image_embeddings.sql:5-11`, `apps/web/src/db/schema.ts:286-300`, `apps/web/scripts/backfill-clip-embeddings.ts:25-42,212-223`, `apps/web/src/app/actions/embeddings.ts:127-186`, `apps/web/src/app/api/search/semantic/route.ts:263-279`, `apps/web/src/app/api/search/similar/[id]/route.ts:140-190`
+- Classification: confirmed documentation/code mismatch
+- Files/regions: `apps/web/README.md:64-75`, `CLAUDE.md:156-160`, `apps/web/drizzle/0012_image_embeddings.sql:5-11`, `apps/web/src/db/schema.ts:286-301`, `apps/web/scripts/backfill-clip-embeddings.ts:24-42,210-223`, `apps/web/src/app/actions/embeddings.ts:170-186`, `apps/web/src/lib/image-queue.ts:500-524`, `apps/web/src/app/api/search/semantic/route.ts:263-279`, `apps/web/src/app/api/search/similar/[id]/route.ts:137-190`
 
-Evidence:
+Why this is a mismatch:
 
-- The operator docs explain production activation, model-version filtering, scan limits, and repeated backfill runs (`apps/web/README.md:64-74`; `CLAUDE.md:553-574`).
-- The storage schema allows only one embedding row per image: `image_embeddings.image_id` is the primary key in SQL and Drizzle (`apps/web/drizzle/0012_image_embeddings.sql:5-11`; `apps/web/src/db/schema.ts:286-300`).
-- Both embedding writers upsert on that primary key and replace the vector plus `model_version` in place (`apps/web/scripts/backfill-clip-embeddings.ts:212-223`; `apps/web/src/app/actions/embeddings.ts:175-186`). The sidecar script comment documents this locally (`apps/web/scripts/backfill-clip-embeddings.ts:25-42`), but the operator runbook does not surface the rollout/rollback consequence.
-- Readers filter by active/production model version (`apps/web/src/app/api/search/semantic/route.ts:270-279`; `apps/web/src/app/api/search/similar/[id]/route.ts:140-148,181-190`).
+- The current docs say `image_embeddings` stores one row per `(image_id, model_version)` and that queries filter by active `model_version` (`apps/web/README.md:72`; `CLAUDE.md:160`).
+- The actual SQL and Drizzle schema still key the table only by `image_id`; `model_version` is a regular column plus a secondary scan index (`apps/web/drizzle/0012_image_embeddings.sql:5-11`; `apps/web/src/db/schema.ts:286-301`).
+- Every current embedding writer inserts/upserts by that single-image primary key and replaces both `embedding` and `modelVersion` in place (`apps/web/scripts/backfill-clip-embeddings.ts:210-223`; `apps/web/src/app/actions/embeddings.ts:175-186`; `apps/web/src/lib/image-queue.ts:512-523`).
+- Read paths then filter by active or production model version (`apps/web/src/app/api/search/semantic/route.ts:263-279`; `apps/web/src/app/api/search/similar/[id]/route.ts:137-190`). The code therefore cannot retain side-by-side embeddings for multiple model versions even though the docs now describe that as the storage contract.
 
-Failure scenario:
+Concrete failure scenario:
 
-An operator reads the runbook as meaning multiple model-version embeddings can coexist while search selects the active one. They start a new production backfill, stop midway, then roll back or flip model state during troubleshooting. Rows already processed for the new version have overwritten prior vectors, while unprocessed rows still lack the new version. The model-version filter then creates partial recall in both directions, and rollback requires re-embedding affected images rather than changing a config value.
-
-Suggested fix:
-
-Update `apps/web/README.md` and the `CLAUDE.md` CLIP runbook to state: `image_embeddings` currently stores exactly one embedding per image; a production/stub/model-version backfill replaces any previous vector for that image; complete and verify a full backfill before relying on a new production model; rollback to a previous model version requires re-running a backfill for that target version. If coexistence is desired, document it only after a schema migration keys embeddings by `(image_id, model_version)`.
-
-### DOC-C8-02 - Semantic-search docs blur text-search stub mode with production-only similar photos
-
-- Severity: Low
-- Confidence: High
-- Classification: confirmed
-- Files/regions: `README.md:48`, `apps/web/README.md:64-72`, `apps/web/src/app/api/search/semantic/route.ts:186-204`, `apps/web/src/app/api/search/similar/[id]/route.ts:115-130`, `apps/web/src/components/similar-photos.tsx:47-52,138-141`, `apps/web/src/components/search.tsx:519-552`
-
-Evidence:
-
-- Public docs describe semantic search as natural-language search plus `"similar photos"` and then describe modes as `disabled`, `stub`, and `production` without distinguishing that only text search has a stub demo path (`README.md:48`; `apps/web/README.md:64-72`).
-- The text semantic-search API serves both `stub` and `production` (`apps/web/src/app/api/search/semantic/route.ts:186-204`), and the search UI shows the semantic toggle in stub/production with a stub disclaimer (`apps/web/src/components/search.tsx:519-552`).
-- The similar-photo API is production-only and returns 503 outside production (`apps/web/src/app/api/search/similar/[id]/route.ts:115-130`).
-- The similar-photo UI is hidden unless `semanticSearchMode === 'production'` (`apps/web/src/components/similar-photos.tsx:47-52,138-141`).
-
-Failure scenario:
-
-An admin/operator enables stub mode from Settings to validate semantic wiring and expects both documented semantic features to appear. Natural-language search appears with the disclaimer, but "Similar photos" is absent and the endpoint would 503 if called directly. The current wording makes this look like a setup failure even though the code is intentionally hiding an unsupported stub-mode feature.
+An operator trusts the runbook language and runs a stub or next-model backfill against the same database, expecting old and new model rows to coexist. Processed images have their previous production vector overwritten with the new model tag, while unprocessed images remain on the previous tag. If the operator flips back to production or rolls back model settings, model-version filters omit the overwritten images until a full production re-embed is run. This presents as partial semantic-search recall and missing similar-photo results, not as an obvious migration/setup error.
 
 Suggested fix:
 
-Clarify the mode matrix in `README.md` and `apps/web/README.md`: `stub` is a text-search wiring demo only; "similar photos" is available only in production mode with real CLIP embeddings. Keep the current operator-gated production wording, but split text search and image-to-image recommendations in the feature/runbook language.
+Choose one contract and make docs/code agree. The smaller documentation fix is to update `apps/web/README.md` and `CLAUDE.md` to say there is exactly one embedding row per image; changing semantic mode or model version rewrites the prior vector for that image; rollback to a prior model requires re-running a backfill for that target model. If side-by-side model storage is the intended product behavior, add a migration and code changes for a composite key or unique constraint on `(image_id, model_version)`, then update writers, cleanup, tests, and operator rollback language.
 
 ## Verified Aligned Areas
 
-- Deploy docs match scripts: root `npm run deploy` loads `.env.deploy` or the fallback env file, refuses unsafe permissions, derives SSH command fields, runs the remote deploy script, pulls on host, builds with Compose, health-checks `/api/live`, then prunes Docker after the new web container is healthy.
-- Docker persistence docs match Compose: `./data`, `./public/uploads`, `./public/resources`, and read-only `./src/site-config.json` are bind mounts; `site-config.json` imports are build-time-inlined and edits require rebuild/deploy.
-- Quality-gate docs match package scripts for lint, API auth, action-origin, public-route rate-limit, typecheck, build, Vitest, and Playwright e2e.
-- Migration guidance matches the current journal/postcondition design: journal/file parity, `when` cursor caveat, hash assertion, and `reconcileLegacySchema` coverage are represented in docs and tests.
-- Product-boundary docs match current source for no payment/Stripe surface, no bundled Lightroom Classic plugin, local-filesystem-only storage, smart-collection public read side without admin UI, and no editing/culling/scoring workflow.
-- Analytics docs match runtime: `site-config.json.google_analytics_id` drives script rendering and middleware CSP through `proxy.ts`; the `NEXT_PUBLIC_GA_ID` CSP helper default is not the live request path.
+- Setup and environment docs match current examples and source for required app secrets, MySQL connection variables, `DB_SSL_CA`/`DB_SSL=false`, upload limits, admin credentials, rate-limit trust proxy, semantic mode controls, and deploy env-file fallback behavior.
+- Deploy docs match `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, Compose mounts, health checks, and post-health Docker pruning. I found no hardcoded deploy host/key drift in docs or scripts.
+- Security docs match current auth/session/origin/rate-limit lint gates, public API rate-limit policy, admin API wrapping expectations, public data omission guards, CSP/GA request path, and no-editing/no-culling product boundary.
+- Migration docs match the current journal/file parity, strictly increasing `when` warning, post-condition hash assertion, DML-baseline guard, and `reconcileLegacySchema` coverage.
+- Semantic-search docs now correctly separate stub text-search behavior from production-only similar-photo recommendations, except for the embedding-row cardinality issue above.
+- Image/color/HDR docs match the current derivative-impacting keys, pipeline version, hash length, AVIF/JPEG quality defaults, HDR ingest default, wide-gamut guardrails, and color-chip fixture intent.
+- Storage docs match the current quarantine: local filesystem paths remain the live pipeline; `src/lib/storage` is not integrated outside storage tests.
+- E2E docs match the current Playwright/server safety gates: Chromium-only project, local safe DB assertion before init/seed/build, and remote-admin e2e blocking unless explicitly enabled.
+- Quality gate docs match current package scripts for ESLint, API auth lint, action-origin lint, public-route rate-limit lint, typecheck, build, Vitest, and Playwright e2e.
 
 ## Final Sweep
 
-Checked stale runbooks, migration/deploy instructions, env examples, unsupported feature exposure, schema comments, historical docs, current docs, package scripts, and relevant implementation. I found two current documentation/code mismatches above. Residual risk is limited to live-host state that a repo-only review cannot prove: actual production DB rows/settings, seeded CLIP weight presence, deployed nginx/proxy state, and real semantic-search result quality on the running demo.
+I performed final drift searches for commonly missed mismatches: stale Stripe/payment language, Lightroom plugin bundling, S3/MinIO support, smart-collection admin UI, editing/culling/scoring claims, `image_embeddings` cardinality, model-version filtering, DB SSL handling, deploy env fallback, nginx/body-limit behavior, GA/CSP placement, migration journal rules, color/HDR settings, privacy-sensitive fields, e2e safety, and quality-gate script names.
+
+Confirmed finding count: 1. No additional confirmed documentation/code mismatches were found in the required domains. Residual risk is limited to live external state that a repo-only static review cannot prove: actual production DB rows, seeded CLIP model files, production nginx/host config, secret values, and real semantic-search quality on deployed data.
