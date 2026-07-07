@@ -161,7 +161,30 @@ that image's reprocessing.
 
 ## Progress ledger (updated during PROMPT 3)
 
-- [ ] WP1 … WP15
+- [x] WP1 — `ae197531` shared destroy-don't-release helper + all pooled sites migrated + unit/source-contract tests (peer co-authored dependent test updates in-worktree)
+- [x] WP2 — `c882e82d` pending-session-revocations queue + logout enqueue + restore-clear/hourly flush + tests
+- [x] WP3 — `ceb7c8a5` sanitizeImageBaseUrlSafely warn-once (server-side)
+- [x] WP4 — `878508e3` search trigger min-w-11
+- [x] WP5 — `ceb7c8a5` getConfiguredBaseOrigin siteConfig.url production fallback (+C7-13 comment); peer added the production-branch test (NODE_ENV stubbing fixed in `f3cafa9c`)
+- [x] WP6 — `878508e3` SimilarThumb #id disambiguator (peer pinned in cycle-21 source contracts)
+- [x] WP7 — `878508e3` per-button save focus restore
+- [x] WP8 — `ceb7c8a5` client image-base memoization (keyed on raw attribute)
+- [x] WP9 — `ceb7c8a5` parseImageBaseUrl forwards optional environment
+- [x] WP10 — `9f416f01` cumulative rolling raw suffix + three-short-read + case fixtures
+- [x] WP11 — `584417f5` (peer-committed from this worktree) + `f3cafa9c` EXISTS tag filter, unfiltered aggregation, dead ternaries removed, NODE_ENV test typing
+- [x] WP12 — `515a25bd` watchdog extraction + behavioral tests, drizzle TLS behavior tests, image_sizes order-independence (surfaced a real gap — buildHash now normalizes for every caller), purge cap test
+- [x] WP13 — `510eea49` dead .ts recovery twin removed + .mjs/durable parity pins
+- [x] WP14 — CLAUDE.md IMAGE_BASE_URL row: production-scoped HTTPS wording (C7-14) + build-time-frozen remotePatterns callout (C7-06 doc half); C7-07 boundary comment + C7-13 topology comment landed in `ceb7c8a5`
+- [x] WP15 — this ledger + README/carry-forward updates (`bb67c6a5`)
 - [ ] Gates: eslint / typecheck / vitest / build / lint:api-auth / lint:action-origin /
-      lint:public-route-rate-limit / playwright e2e
+      lint:public-route-rate-limit / playwright e2e (recorded below when green)
 - [ ] Deploy (per-cycle): `npm run deploy` from repo root after checking for a concurrent peer run.
+
+### Shared-worktree note (for provenance)
+
+The peer session converged on this plan in near-lockstep throughout PROMPT 3: it committed
+matching test updates (advisory-lock suite, request-origin production-branch test, cycle-21
+SimilarThumb pins, data-tag-names EXISTS pin), the `584417f5` data.ts landing, and the
+`normalizeHashValue` settings-hash normalization. Where its uncommitted edits blocked
+`git pull --rebase`, this loop pushed directly after verifying the tree; no peer work was
+reverted or clobbered.
