@@ -111,6 +111,18 @@ export function _resetServingSettingsHashCacheForTesting(): void {
     servingHashInflight = null;
 }
 
+/**
+ * ARCH4-05 (run-10 c4): single source of the derivative ETag formula.
+ * Both the pre-body ETag (computed from the path stat, used for the 304 /
+ * HEAD short-circuits) and the streamed-body ETag (computed from the fd
+ * stat, race-safe) MUST use the identical formula, or a conditional GET
+ * could 304 against a tag the body path would never emit. Weak (`W/`)
+ * because must-revalidate revalidation compares weakly.
+ */
+function buildDerivativeEtag(stats: { mtimeMs: number; size: number }, settingsHash: string): string {
+    return `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`;
+}
+
 /** Map from top-level directory to allowed file extensions. Prevents serving
  *  mismatched files (e.g., a .webp from /uploads/jpeg/). */
 const DIR_EXTENSION_MAP: Record<string, Set<string>> = {
@@ -251,7 +263,7 @@ export async function serveUploadFile(
         // 5 s TTL above — NOT per-request — so derivative floods do not
         // issue one `admin_settings` SELECT per file.
         const settingsHash = await getServingColorSettingsHash();
-        const etag = `W/"v${IMAGE_PIPELINE_VERSION}-${stats.mtimeMs.toFixed(0)}-${stats.size}-${settingsHash}"`;
+        const etag = buildDerivativeEtag(stats, settingsHash);
 
         // R11-M1: HTTP-conditional GET. If the client's If-None-Match
         // matches the freshly-computed ETag, return 304 Not Modified
@@ -299,7 +311,7 @@ export async function serveUploadFile(
             await closeFileHandle();
             return new NextResponse('Access denied', { status: 403 });
         }
-        const bodyEtag = `W/"v${IMAGE_PIPELINE_VERSION}-${bodyStats.mtimeMs.toFixed(0)}-${bodyStats.size}-${settingsHash}"`;
+        const bodyEtag = buildDerivativeEtag(bodyStats, settingsHash);
         const responseHeaders = {
             'Content-Type': contentType,
             'Content-Length': bodyStats.size.toString(),
