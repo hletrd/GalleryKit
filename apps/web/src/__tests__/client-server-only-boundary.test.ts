@@ -139,7 +139,31 @@ function extractAliasedImports(source: string): string[] {
     const sf = ts.createSourceFile('m.tsx', source, ts.ScriptTarget.Latest, /*setParentNodes*/ false, ts.ScriptKind.TSX);
     const specs: string[] = [];
 
-    const isAliased = (spec: string): boolean => spec.startsWith('@/lib') || spec.startsWith('@/db');
+    // AGG-C10b-02 (cycle 10b, architect): the closure walk must follow VALUE edges
+    // through intermediate `@/components/*` modules too, not only `@/lib`/`@/db`.
+    // Two real Server Components (`@/components/nav`, `@/components/on-this-day-widget`)
+    // already value-reach `@/lib/data`/`@/lib/data-timeline` → `@/db` → `mysql2`; they
+    // are safe today ONLY because their sole importers are Server Component entries.
+    // Before this widening, a future `'use client'` file importing one of them directly
+    // (or one of them turning interactive) was never even queued by the DFS — so the
+    // leak would pass this fast test GREEN and regress to the opaque `next build`
+    // mysql2-bundling failure the test exists to convert into a readable failure.
+    // Every prior hardening pass extended WHICH modules count as server-only, never
+    // WHICH edges get walked, so this blind spot persisted. Type-only imports are still
+    // erased below (all-`type` named specifiers / `import type`), so a client file that
+    // imports only a TYPE from a component with an unrelated value chain is NOT followed.
+    //
+    // `@/app` is deliberately NOT followed: a `'use client'` component importing a
+    // `'use server'` action from `@/app/actions/*` is the ONE legitimate client→server
+    // VALUE import — Next replaces it with an RPC reference and never bundles the action
+    // body — so following `@/app` edges would false-positive on every real server-action
+    // call site (verified: doing so flags `tokens-client → lr-tokens`,
+    // `search → public`, etc., which are all safe). The `'use server'` boundary, not
+    // this walk, is what keeps those safe.
+    const isAliased = (spec: string): boolean =>
+        spec.startsWith('@/lib') ||
+        spec.startsWith('@/db') ||
+        spec.startsWith('@/components');
 
     for (const stmt of sf.statements) {
         // import … from '…';  AND  import '…';
@@ -555,6 +579,41 @@ describe('client → server-only import boundary (AGG-R5C3-21)', () => {
                 "import { type TopPhotoRow, type CountryRow, type TimeWindow } from '@/lib/analytics-data';",
             ),
         ).toEqual([]);
+    });
+
+    it('extractAliasedImports follows VALUE @/components edges but NOT @/app server actions (AGG-C10b-02)', () => {
+        // The closure walk previously followed ONLY @/lib/@/db edges, so a leak
+        // routed through an intermediate @/components/* module was never traversed.
+        // nav.tsx / on-this-day-widget.tsx are real Server Components that value-reach
+        // @/lib/data(-timeline) → @/db → mysql2; a future 'use client' file importing
+        // one of them directly must now be walked through the component edge.
+        expect(extractAliasedImports("import { Nav } from '@/components/nav';")).toContain('@/components/nav');
+        expect(
+            extractAliasedImports("import { OnThisDayWidget } from '@/components/on-this-day-widget';"),
+        ).toContain('@/components/on-this-day-widget');
+        // Type-only imports of a component are STILL erased — a client file that
+        // imports only a TYPE from a component with an unrelated value chain is not a
+        // runtime leak and must not be followed (avoids the false-positive class).
+        expect(extractAliasedImports("import type { NavProps } from '@/components/nav';")).not.toContain(
+            '@/components/nav',
+        );
+        expect(
+            extractAliasedImports("import { type OnThisDayProps } from '@/components/on-this-day-widget';"),
+        ).not.toContain('@/components/on-this-day-widget');
+
+        // @/app server-action imports are deliberately NOT followed: a 'use client'
+        // component importing a 'use server' action is the ONE legitimate client→server
+        // value import (Next turns it into an RPC reference; the action body is never
+        // client-bundled). Following it would false-positive on every real call site.
+        expect(extractAliasedImports("import { uploadImages } from '@/app/actions/images';")).toEqual([]);
+        expect(extractAliasedImports("import { searchImages } from '@/app/actions/public';")).toEqual([]);
+
+        // End-to-end: the real nav.tsx on disk DOES reach a server-only module
+        // (@/db via @/lib/data), so a walk entered at nav.tsx flags it — proving the
+        // @/components node participates in the closure the client-entry walk relies on.
+        const navPath = resolveAliasedModule('@/components/nav');
+        expect(navPath, '@/components/nav must resolve to an on-disk module').not.toBeNull();
+        expect(findServerOnlyInClosure(navPath as string)).not.toBeNull();
     });
 
     it('extractAliasedImports follows dynamic import() and import-equals-require value forms (AGG-C6-02)', () => {

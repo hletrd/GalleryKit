@@ -315,6 +315,23 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 8 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 8 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |
 | C8b-04 / PERF8-BF-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 8 | Next schema/migration-authoring cycle folds a `(pipeline_version, id)` index for backfill candidate scans (rides the next journal entry, same treatment as C2-21) |
+| D9b-01..05 | up to HIGH (test-infra) | cycle-9b-2026-07-08 | r10c9(loop-B) | 1 | See `cycle-9b-2026-07-08-deferred.md` (e2e color/semantic/SW harness, color-sidecar lock exit tests, Toaster browser-validation, TagFilter single-mount, GPS action harness) — authoritative detail there; table-catch-up (cycle-9b WP14 landed no register row) |
+| D10b-01 / AGG-C10b-01 | Major/High (test-design) | cycle-10b-2026-07-08 | r10c10b(loop-B) | 0 | Next cycle owning `grid-picture-fallback-boundary.tsx` extracts the handler + fake-DOM behavioral test; peer-fresh-file conflict, code correct today |
+| D10b-02 / AGG-C10b-07 | MED (up to HIGH/High) | cycle-10b-2026-07-08 | r10c10b(loop-B) | 0 | Next cycle owning the WP11 components (lightbox/image-zoom/photo-viewer/image-manager/search) adds extracted behavioral locks; peer-fresh-file conflict, code correct today |
+| D10b-03 / AGG-C10b-08 | LOW..LOW-MED | cycle-10b-2026-07-08 | r10c10b(loop-B) | 0 | Self-healing races T1/T3/T4 (delete-mid-encode log, restore-drain late audit-log, uploadImages topic race) — per-row exit criteria in the cycle-10b deferred register |
+| D10b-04 / WP6 / AGG9B-06 | MED/Med | cycle-10b-2026-07-08 | r10c9(loop-B) | 1 | Admin-token-management cycle implements cross-admin list/revoke; escape hatch exists (`admin_tokens.user_id` onDelete cascade) |
+| D10b-05 / AGG-C10b-03 | MED/High | cycle-10b-2026-07-08 | r10c10b(loop-B) | 0 | `deleteImages` folds one multi-row INSERT with a verified id-recovery + mapping test, OR measured remote-MySQL degradation; non-unique `image_id` defeats naive read-back |
+
+Cycle-10b (loop-B) age-budget check: five new rows (D10b-01..05; the Major row D10b-01 is a
+test-design gap on the peer's freshly-landed cycle-28 component — code verified correct today, a
+peer-file-ownership conflict, not an unpatched defect). No newly-deferred row is a contained
+unpatched correctness/security/data-loss bug. No open loop-B High-severity CODE finding crosses
+the 8-cycle budget (D9b-05 GPS-action-harness HIGH is test-infra, age 1; C8b-02 upload-quota-harness
+HIGH is test-design, age 8 — both verified code-correct). WP6 (D10b-04) carried from cycle-9b is age
+~1, below the 16-cycle MED checkpoint. Catch-up: cycle-9b's D9b-01..05 are folded into the table
+above (cycle-9b WP14 shipped no register row); their authoritative detail stays in
+`cycle-9b-2026-07-08-deferred.md`. Already-fixed (peer) this cycle: WP10/ARCH9-03 mutation-barrier
+scanner CLOSED (`check-action-origin.ts`), so it is neither scheduled nor deferred.
 
 Cycle-8 (loop-B) age-budget check: four new rows (C8b-01..04; the HIGH row C8b-02 is a
 test-design gap — the underlying upload-quota code is verified correct, and its stronger

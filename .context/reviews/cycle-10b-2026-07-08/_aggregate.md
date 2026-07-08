@@ -43,7 +43,7 @@ committed its previously-dirty `check-action-origin.ts` + tests in `36a79146`).
 - **Severity:** Medium · **Confidence:** High · Source: perf-reviewer (PERF10b-01).
 - **Citation:** `apps/web/src/app/actions/images.ts:808-836` (`for` loop of `await tx.insert(pendingFileDeletions)...` before the batched `imageTags`/`images` DELETEs); batch capped at 100 (`images.ts:754-756`). Single-image `deleteImage` (`images.ts:674-694`) unaffected.
 - **Problem:** side effect of cycle-21's `pending_file_deletions` durability feature — the per-row insert loop extends the transaction's pinned-connection + row/gap-lock critical section by up to ~100 round trips (tens of ms same-host; ~100-500 ms on remote MySQL), counter to the repo's pool-budget discipline, worst under concurrent admin activity.
-- **Disposition:** SCHEDULED (WP-B). Replace with one multi-row `INSERT` + one read-back `SELECT ... WHERE image_id IN (...)` to recover per-row ids (safer than relying on AUTO_INCREMENT contiguity); preserves the durability guarantee (rows still committed in the same transaction).
+- **Disposition:** DEFERRED (D10b-05). The plan/deferred register chose the lower-risk disposition after reviewing the suggested read-back: `pending_file_deletions.image_id` is non-unique, so `SELECT ... WHERE image_id IN (...)` can over-match stale pending rows, while an AUTO_INCREMENT-contiguity mapping needs a focused correctness proof. Keep the perf finding open with its existing exit criterion instead of scheduling a rushed durability-transaction rewrite.
 
 ### AGG-C10b-04 — CLAUDE.md omits the `pending_file_deletions` table + recent index additions
 - **Severity:** Medium · **Confidence:** High · Source: document-specialist (DOC-C10b-01).
@@ -54,7 +54,7 @@ committed its previously-dirty `check-action-origin.ts` + tests in `36a79146`).
 ### AGG-C10b-05 — CLAUDE.md misstates `lint:public-route-rate-limit` scan scope
 - **Severity:** Low · **Confidence:** Medium · Source: document-specialist (DOC-C10b-02).
 - **Citation:** `CLAUDE.md` Lint Gates section says it scans `apps/web/src/app/api/**`; the actual scanner (`apps/web/scripts/check-public-route-rate-limit.ts`) recurses all of `apps/web/src/app/` (proven by non-`api/` compliant routes `app/uploads/[...path]/route.ts`, `app/feed.xml/route.ts`). `AGENTS.md` already states the correct broader scope.
-- **Disposition:** SCHEDULED (WP-C, folded with AGG-C10b-04). Correct the CLAUDE.md wording to match the scanner + AGENTS.md.
+- **Disposition:** ALREADY-CORRECT at HEAD (implementation finding). On inspection the only `lint:public-route-rate-limit` description in CLAUDE.md (Lint Gates section, ~line 698) already reads `apps/web/src/app/**/route.*` excluding admin/private segments — matching the scanner and AGENTS.md. The doc-specialist's `api/**` citation was stale; no CLAUDE.md edit was needed. (The 0028/0029 index additions the doc-specialist also cited were likewise already documented; only `pending_file_deletions` + the pipeline_version index were genuinely missing — fixed in WP-C.)
 
 ### AGG-C10b-06 — `archiveRange()` December off-by-one (dormant)
 - **Severity:** Low · **Confidence:** High · Source: code-reviewer (F1).
@@ -90,7 +90,7 @@ committed its previously-dirty `check-action-origin.ts` + tests in `36a79146`).
 
 ## Cycle disposition
 - **New findings produced:** 8 merged (AGG-C10b-01..08; T2 dropped as documented).
-- **Scheduled this cycle:** AGG-C10b-02 (WP-A), -03 (WP-B), -04/-05 (WP-C), -06 (WP-D).
-- **Deferred:** AGG-C10b-01 (D10b-01), -07 (D10b-02), -08/T1/T3/T4 (D10b-03), WP6 (D10b-04).
+- **Scheduled this cycle:** AGG-C10b-02 (WP-A), -04/-05 (WP-C), -06 (WP-D).
+- **Deferred:** AGG-C10b-01 (D10b-01), -03 (D10b-05), -07 (D10b-02), -08/T1/T3/T4 (D10b-03), WP6 (D10b-04).
 - **Already-fixed (peer):** WP10/ARCH9-03 + the list above.
 - Codebase remains exceptionally converged; zero new CRITICAL/HIGH unpatched correctness/security/data-loss defects.
