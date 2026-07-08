@@ -92,18 +92,6 @@ export const POST = withAdminAuth(
         const actorUserId = tokenUserId ?? cookieUser?.id ?? null;
         const ip = getClientIp(request.headers);
 
-        // PAT uploads are intentionally cross-origin capable, but they are still
-        // foreground admin mutations. Hold the same restore-drain slot as server
-        // actions so a request admitted just before restore maintenance starts
-        // cannot write into the freshly restored database.
-        using mutationSlot = acquireAdminMutationSlot();
-        if (!mutationSlot.acquired) {
-            return NextResponse.json(
-                { error: 'Restore in progress; retry shortly' },
-                { status: 503, headers: NO_CACHE },
-            );
-        }
-
         if (isRestoreMaintenanceActive()) {
             return NextResponse.json(
                 { error: 'Restore in progress; retry shortly' },
@@ -264,11 +252,25 @@ export const POST = withAdminAuth(
             return NextResponse.json({ error: 'Description too long (max 5000 characters)' }, { status: 400, headers: NO_CACHE });
         }
 
+        // PAT uploads are intentionally cross-origin capable, but they are still
+        // foreground admin mutations. Acquire the restore-drain slot only for
+        // the actual topic-verify -> save -> insert -> enqueue mutation window,
+        // not while parsing a potentially large multipart body.
+        using mutationSlot = acquireAdminMutationSlot();
+        if (!mutationSlot.acquired) {
+            settleTrackerToActual(false);
+            return NextResponse.json(
+                { error: 'Restore in progress; retry shortly' },
+                { status: 503, headers: NO_CACHE },
+            );
+        }
+
         // C61-02: re-check restore maintenance after multipart parsing and
-        // validation, then acquire the upload-processing contract lock BEFORE
-        // the topic DB SELECT. A restore can begin while a large multipart body
-        // is being parsed; without this second guard and earlier lock, the route
-        // can query tables during the restore window before the lock rejects it.
+        // validation and after acquiring the foreground mutation slot, then
+        // acquire the upload-processing contract lock BEFORE the topic DB
+        // SELECT. A restore can begin while a large multipart body is being
+        // parsed; without this second guard and earlier lock, the route can
+        // query tables during the restore window before the lock rejects it.
         if (isRestoreMaintenanceActive()) {
             settleTrackerToActual(false);
             return NextResponse.json(

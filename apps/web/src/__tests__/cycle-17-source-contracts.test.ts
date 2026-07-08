@@ -56,6 +56,9 @@ describe('cycle 17 maintenance-lock and upload contracts', () => {
         expect(source).toContain("import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';");
         expect(source).toContain('using mutationSlot = acquireAdminMutationSlot();');
         expect(source).toContain('if (!mutationSlot.acquired)');
+        expect(source.indexOf('using mutationSlot = acquireAdminMutationSlot();')).toBeGreaterThan(
+            source.indexOf('formData = await request.formData();'),
+        );
 
         const ensureIdx = source.indexOf('await ensureUploadDirectories()');
         const failureWindow = source.slice(ensureIdx, ensureIdx + 700);

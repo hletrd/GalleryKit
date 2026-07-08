@@ -14,6 +14,7 @@ export const revalidate = 3600;
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';
 import { localizePath, localizeUrl } from '@/lib/locale-path';
+import { getGalleryConfig } from '@/lib/gallery-config';
 
 const BASE_URL = process.env.BASE_URL || siteConfig.url;
 
@@ -22,7 +23,15 @@ const BASE_URL = process.env.BASE_URL || siteConfig.url;
 // and localized per-topic feed entries) first, then spend the remaining slots
 // on images. A final `.slice(0, MAX_SITEMAP_URLS)` clamp guards the total.
 const MAX_SITEMAP_URLS = 50000;
-const STATIC_PUBLIC_PATHS = ['/timeline', '/map', '/privacy', '/about-gallerykit'] as const;
+const ALWAYS_STATIC_PUBLIC_PATHS = ['/privacy', '/about-gallerykit'] as const;
+
+function getStaticPublicPaths(config: { showTimelineNav: boolean; showMapNav: boolean }) {
+  return [
+    ...(config.showTimelineNav ? ['/timeline'] as const : []),
+    ...(config.showMapNav ? ['/map'] as const : []),
+    ...ALWAYS_STATIC_PUBLIC_PATHS,
+  ] as const;
+}
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // AGG8F-02 / plan-234 follow-up: when this route is prerendered at build
@@ -34,16 +43,21 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // is preferable to a 5xx on /sitemap.xml that would teach crawlers to back off.
   let topics: Awaited<ReturnType<typeof getTopicsWithLatestUpdate>> = [];
   let images: Awaited<ReturnType<typeof getImageIdsForSitemap>> = [];
+  let staticPublicPaths = getStaticPublicPaths({ showTimelineNav: true, showMapNav: true });
   // R18-M1: site-wide `MAX(images.updated_at)` for the homepage entries'
   // `<lastmod>`. Googlebot uses lastmod as a published crawl-prioritization
   // signal ("We use lastmod to detect fresh content"). Cached via the route's
   // `revalidate = 3600` ISR window.
   let homepageLastModified: Date | null = null;
   try {
-    [topics, homepageLastModified] = await Promise.all([
+    const [resolvedTopics, resolvedHomepageLastModified, galleryConfig] = await Promise.all([
       getTopicsWithLatestUpdate(),
       getLatestImageUpdatedAt(),
+      getGalleryConfig(),
     ]);
+    topics = resolvedTopics;
+    homepageLastModified = resolvedHomepageLastModified;
+    staticPublicPaths = getStaticPublicPaths(galleryConfig);
     // WP18 (C2-29/CRIT-02, run-10 cycle-2): reserve budget for EVERY non-image
     // row appended below, not just homepage + topic pages. homepageEntries +
     // staticPublicEntries + topicEntries reserve
@@ -54,7 +68,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // reserved, so feedEntry and topicFeedEntries could push the total past
     // MAX_SITEMAP_URLS uncounted.
     const reservedNonImageUrls =
-      LOCALES.length * (1 + STATIC_PUBLIC_PATHS.length + topics.length) + 1 + LOCALES.length * topics.length;
+      LOCALES.length * (1 + staticPublicPaths.length + topics.length) + 1 + LOCALES.length * topics.length;
     const imageBudget = Math.max(
       0,
       Math.floor((MAX_SITEMAP_URLS - reservedNonImageUrls) / LOCALES.length),
@@ -97,7 +111,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }))
   );
 
-  const staticPublicEntries: MetadataRoute.Sitemap = STATIC_PUBLIC_PATHS.flatMap((path) =>
+  const staticPublicEntries: MetadataRoute.Sitemap = staticPublicPaths.flatMap((path) =>
     LOCALES.map((locale) => ({
       url: localizeUrl(BASE_URL, locale, path),
       lastModified: homepageLastModified ? new Date(homepageLastModified) : undefined,

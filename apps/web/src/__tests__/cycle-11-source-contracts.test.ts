@@ -54,6 +54,9 @@ describe('cycle 11 source contracts', () => {
 
     it('footer always renders the privacy link regardless of analytics configuration', () => {
         const footer = src('components/footer.tsx');
+        expect(footer).toContain("import { getGalleryConfig } from '@/lib/gallery-config'");
+        expect(footer).toContain('config.showTimelineNav ?');
+        expect(footer).toContain('config.showMapNav ?');
         expect(footer).toContain("href={localizePath(locale, '/privacy')}");
         expect(footer).toContain("href={localizePath(locale, '/timeline')}");
         expect(footer).toContain("href={localizePath(locale, '/map')}");

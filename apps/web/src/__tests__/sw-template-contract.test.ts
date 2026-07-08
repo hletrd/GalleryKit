@@ -4,7 +4,7 @@
  * `src/proxy.ts`.
  *
  * R4C6 COR-R4C6-05: the offline HTML fallback was provably dead in
- * production (dynamic public gallery/photo pages ship `no-cache`, and the old
+ * production (dynamic public gallery pages ship `no-cache`, and the old
  * `hasAdminSession` guard read the forbidden Cookie header — always
  * null in SW fetch handlers). These contracts pin the fixed shape:
  * the explicit offline-only Cache-Control exemption gated on the

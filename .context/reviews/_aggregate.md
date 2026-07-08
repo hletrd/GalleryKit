@@ -1,244 +1,287 @@
-# Run-10 Cycle 36 Aggregate Review
+# Run-10 Cycle 37 Aggregate Review
 
 Date: 2026-07-08 KST
 Repo: `/Users/hletrd/flash-shared/gallery`
-Scope: Prompt 1 aggregate over all cycle-36 review lanes.
+Scope: Prompt 1 aggregate over all cycle-37 review lanes.
 
 ## Agent Coverage
 
 Completed review files:
 
-- `code-reviewer.md`
-- `critic.md`
-- `perf-reviewer.md`
-- `architect.md`
-- `security-reviewer.md`
-- `debugger.md`
-- `verifier.md`
-- `test-engineer.md`
-- `tracer.md`
-- `document-specialist.md`
-- `designer.md`
-- `ui-ux-designer-reviewer.md`
-- `product-marketer-reviewer.md`
+- `cycle37/code-reviewer.md`
+- `cycle37/security-reviewer.md`
+- `cycle37/perf-reviewer.md`
+- `cycle37/critic.md`
+- `cycle37/verifier.md`
+- `cycle37/test-engineer.md`
+- `cycle37/tracer.md`
+- `cycle37/architect.md`
+- `cycle37/debugger.md`
+- `cycle37/document-specialist.md`
+- `cycle37/designer.md`
+- `cycle37/product-marketer-reviewer.md`
 
-Additional reviewer-style agents discovered and included: `ui-ux-designer-reviewer`, `product-marketer-reviewer`.
+Registered reviewer-style agents discovered and included: `ui-ux-designer-reviewer` (covered through `designer.md` against GalleryKit) and `product-marketer-reviewer`.
 
-AGENT FAILURES: none. One UI/UX/product spawn initially failed due to the active agent thread limit, then succeeded after a completed worker was closed.
+AGENT FAILURES: none. The native child-agent service exposed only `default`, `explorer`, and `worker` role types; required specialist perspectives were run as bounded default subagents with explicit reviewer personas. The service accepted five concurrent agents, so review fan-out ran in bounded waves after the initial thread-limit rejection.
 
 ## Deduplicated Findings
 
-### AGG-C36-01 - Background DB/CPU capacity is budgeted locally, not globally
+### AGG-C37-01 - New `GalleryConfig` fields currently break the blocking typecheck
 
 - Severity: High
 - Confidence: High
-- Status: likely operational correctness/performance issue
-- Cross-agent agreement: code-reviewer, critic, perf-reviewer, architect, tracer
-- Source findings: CR36-02, CRT36-02, PERF-C36-01, ARCH-C36-01, TRC-C36-01
-- Regions: `apps/web/src/db/index.ts:31-42`; `apps/web/src/lib/image-queue.ts:121-153`; `apps/web/src/lib/admin-backfill-runner.ts:97-143`; `apps/web/src/lib/background-db-writes.ts:8-75`; `apps/web/src/lib/clip-model.ts:53-173`
-- Failure scenario: image processing, admin color backfill, semantic embedding work, analytics writes, and maintenance can each obey a local cap while collectively exhausting the 10-connection pool and CPU. Foreground gallery/admin requests can queue behind background work during upload/backfill/search overlap.
-- Suggested fix: add a shared background resource coordinator or admission policy for DB-bearing and CPU-heavy background work. Gate image queue, in-app color backfill, semantic embedding work, maintenance, and analytics through one budget, and add overlap regression coverage.
+- Status: Confirmed
+- Cross-agent agreement: debugger, designer
+- Source findings: `DBG37-01`, designer validation note
+- Regions: `apps/web/src/lib/gallery-config.ts:92-94`, `apps/web/src/lib/gallery-config.ts:146-154`, `apps/web/src/__tests__/settings-hash.test.ts:153-169`, `apps/web/src/__tests__/settings-hash.test.ts:187-203`, `apps/web/src/__tests__/settings-hash.test.ts:229-240`
+- Failure scenario: `npm run typecheck --workspace=apps/web` fails because `settings-hash.test.ts` constructs `GalleryConfig` fixtures without `showTimelineNav` and `showMapNav`. CI and the required cycle gates cannot pass.
+- Suggested fix: add the two non-byte-impacting fields to every full `GalleryConfig` fixture or introduce a shared complete test helper. Keep them out of derivative settings hash mappers.
 
-### AGG-C36-02 - Semantic embedding/retrieval ownership is fragmented
-
-- Severity: Medium
-- Confidence: High
-- Status: likely resource ownership and maintainability risk
-- Cross-agent agreement: code-reviewer, critic, architect, perf-reviewer, tracer
-- Source findings: CR36-03, CRT36-03, ARCH-C36-03, PERF-C36-03, TRC-C36-02
-- Regions: `apps/web/src/lib/image-queue.ts:501-637`; `apps/web/scripts/backfill-clip-embeddings.ts:114-130`; `apps/web/src/app/actions/embeddings.ts:113-210`; `apps/web/src/lib/clip-model.ts:53-173`; `apps/web/src/app/api/search/semantic/route.ts:247-330`; `apps/web/src/app/api/search/similar/[id]/route.ts:177-280`
-- Failure scenario: upload-time embedding, bootstrap embedding, admin action embedding, sidecar backfill, semantic search, and similar-photo routes share model/DB/CPU resources without one owner. Upserts prevent duplicate-row corruption, but production activation can contend with public semantic requests and duplicate inference.
-- Suggested fix: centralize embedding writes and semantic retrieval behind a service or durable queue/lease table. Make scan-limit semantics explicit and preserve public query capacity during backfills.
-
-### AGG-C36-03 - Color sidecar batch flushing can persist another worker's claimed image
-
-- Severity: Low-Medium
-- Confidence: Medium
-- Status: ownership-invariant risk
-- Cross-agent agreement: code-reviewer, tracer
-- Source findings: CR36-04, TRC-C36-03
-- Regions: `apps/web/scripts/backfill-color-pipeline.ts:471-527`; `apps/web/scripts/backfill-color-pipeline.ts:557-603`
-- Failure scenario: process-global `updateBatch` / `derivativeBatch` allow worker A to flush worker B's row while B owns the per-image claim. Current global sidecar locking limits blast radius, but claim release is no longer strictly tied to the transaction committing that image.
-- Suggested fix: make batches caller-owned or attach per-item completion/release callbacks. Add a two-worker regression proving a claim is held until the transaction containing that item commits.
-
-### AGG-C36-04 - Root Playwright runtime state is tracked
-
-- Severity: Low
-- Confidence: High
-- Status: confirmed repository hygiene/provenance issue
-- Cross-agent agreement: code-reviewer, critic
-- Source findings: CR36-01, CRT36-01
-- Regions: `test-results/.last-run.json:1-4`; `.gitignore:126-127`; `apps/web/playwright.config.ts:63-77`
-- Failure scenario: committed Playwright `.last-run.json` reports stale failure state and root-level Playwright runs can dirty the worktree with mutable runtime artifacts.
-- Suggested fix: untrack `test-results/.last-run.json` and ignore root `test-results/` and `playwright-report/`. Keep intentional screenshots in `.context/`.
-
-### AGG-C36-05 - Checked-in Atik deployment config can ship as another operator's production metadata
+### AGG-C37-02 - Timeline/Map visibility settings hide only part of public discovery
 
 - Severity: Medium
 - Confidence: High
-- Status: distribution/product risk
-- Cross-agent agreement: critic, document-specialist, product-marketer-reviewer
-- Source findings: CRT36-04, DOC-C36-02, PMR-C36-01
-- Regions: `apps/web/src/site-config.json:1-10`; `apps/web/src/site-config.example.json:1-12`; `apps/web/scripts/ensure-site-config.mjs:11-42`; `README.md:60-77`; `apps/web/src/app/[locale]/layout.tsx:15-48`; `apps/web/src/components/footer.tsx:33-37`
-- Failure scenario: a self-hosted production build that forgets to replace `site-config.json` can emit Atik branding, canonical URL, footer/nav text, OpenGraph metadata, and sitemap/feed origin.
-- Suggested fix: track only a generic example config, or fail production builds using `gallery.atik.kr` unless an explicit deployment opt-in is present.
+- Status: Confirmed
+- Cross-agent agreement: architect, debugger, designer, document-specialist
+- Source findings: `C37-ARCH-01`, `DBG37-02`, `DES37-01`, `C37-DOC-01`
+- Regions: `apps/web/src/lib/gallery-config-shared.ts:68-70`, `apps/web/src/lib/gallery-config.ts:92-95`, `apps/web/src/components/nav.tsx:14-30`, `apps/web/src/components/nav-client.tsx:35-49`, `apps/web/src/components/footer.tsx:45-50`, `apps/web/src/app/sitemap.ts:25`, `apps/web/src/app/sitemap.ts:100-107`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:878-920`, `apps/web/messages/en.json:789-794`, `apps/web/messages/ko.json:789-794`
+- Failure scenario: an admin disables the Map or Timeline visitor link. The header link disappears, but the footer and sitemap still advertise the route, and docs do not describe the DB-backed visibility controls. The UI copy implies a broader hide contract than the source currently enforces.
+- Suggested fix: choose one contract. If these switches control first-party discovery, apply the flags to header, footer, sitemap, and docs/tests. If they are header-only, rename the setting/copy to say so.
 
-### AGG-C36-06 - Live nginx limiter/client-IP behavior is not proven by repo gates
+### AGG-C37-03 - Upload queue and in-app re-encode backfill oversubscribe the same DB/CPU budget
+
+- Severity: High
+- Confidence: High
+- Status: Confirmed
+- Cross-agent agreement: perf-reviewer, tracer, architect
+- Source findings: `PERF37-01`, `TRC37-02`, `C37-ARCH-03`
+- Regions: `apps/web/src/lib/image-queue.ts:121-153`, `apps/web/src/lib/image-queue.ts:447-456`, `apps/web/src/lib/image-queue.ts:883-898`, `apps/web/src/lib/admin-backfill-runner.ts:23-44`, `apps/web/src/lib/admin-backfill-runner.ts:120-143`, `apps/web/src/lib/admin-backfill-runner.ts:722-733`, `apps/web/src/lib/process-image.ts:1411-1418`
+- Failure scenario: with the shipped 10-connection pool, upload processing can run two jobs while in-app color backfill runs two more. Each subsystem believes it preserved foreground headroom, but together they can pin most of the DB pool and launch many Sharp/libvips format encoders, slowing live requests during upload plus re-encode overlap.
+- Suggested fix: introduce one process-wide background resource budget or weighted semaphore for image encode/backfill work. A narrower interim fix is to pause/refuse in-app backfill while upload processing is active and add overlap regression coverage.
+
+### AGG-C37-04 - Lightroom upload holds the restore foreground mutation slot during multipart parsing
 
 - Severity: Medium
 - Confidence: High
-- Status: manual validation risk
-- Cross-agent agreement: code-reviewer, critic, security-reviewer, debugger, verifier
-- Source findings: RISK36-01, MAN36-01, security manual risk, debugger manual risk, VER-C36-01
-- Regions: `apps/web/nginx/default.conf:1-29`; `apps/web/nginx/default.conf:59-71`; `apps/web/nginx/default.conf:274-307`; `apps/web/deploy.sh:51-108`; `scripts/check-proxy-topology.mjs:12-16`; `CLAUDE.md:514-526`
-- Failure scenario: normal deploys rebuild the container but do not apply/reload host nginx. Production can run stale limiter/body-size/real-IP behavior, or bucket all visitors by a load balancer IP.
-- Suggested fix: keep this as an ops proof requirement: `nginx -t`, reload, burst 429 proof for `/` and `/_next/image`, normal non-429 proof, and effective client-IP validation.
+- Status: Confirmed
+- Cross-agent agreement: perf-reviewer, tracer, critic
+- Source findings: `PERF37-02`, `TRC37-01`, `C37-CRIT-01`
+- Regions: `apps/web/src/app/api/admin/lr/upload/route.ts:85-105`, `apps/web/src/app/api/admin/lr/upload/route.ts:165-201`, `apps/web/src/app/api/admin/lr/upload/route.ts:267-294`, `apps/web/src/lib/admin-mutation-barrier.ts:94-117`, `apps/web/src/app/[locale]/admin/db-actions.ts:625-669`
+- Failure scenario: a slow valid 200 MB Lightroom upload acquires an admin mutation slot before `request.formData()`. A restore started during parsing waits up to the 30 s mutation-drain budget and can abort even though the upload has not reached the DB/file mutation window.
+- Suggested fix: move `acquireAdminMutationSlot()` to just before the fenced mutation window, after pure request parsing/validation, then immediately re-check restore maintenance before DB/storage mutation and before the upload-processing contract lock.
 
-### AGG-C36-07 - CLIP production readiness is outside standard release evidence
+### AGG-C37-05 - Public map can mount up to 10k markers and a 10k fallback list in one render
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed/manual gate gap
-- Cross-agent agreement: code-reviewer, critic, verifier, test-engineer
-- Source findings: RISK36-03, MAN36-03, VER-C36-02, TE-C36-04
-- Regions: `apps/web/package.json:21-23`; `.github/workflows/quality.yml:69-83`; `.github/workflows/clip-preflight.yml:3-46`; `apps/web/src/__tests__/clip-offline-load.test.ts:15-41`; `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`; `CLAUDE.md:558-626`
-- Failure scenario: semantic/CLIP changes can pass normal CI while offline real-model loading or ranking fails on the production volume.
-- Suggested fix: run the CLIP preflight on PR/push for CLIP/model/semantic files and lockfile changes, or require a recorded activation artifact before enabling production semantic mode.
+- Status: Confirmed performance/UX risk
+- Cross-agent agreement: perf-reviewer, designer
+- Source findings: `PERF37-03`, `DES37-03`
+- Regions: `apps/web/src/lib/data.ts:1766-1816`, `apps/web/src/app/[locale]/(public)/map/page.tsx:42-111`, `apps/web/src/components/map/map-client.tsx:78-95`, `apps/web/src/components/map/map-client.tsx:109-143`
+- Failure scenario: a large GPS-visible archive opens `/map` on a mid-range phone. The server serializes thousands of marker rows, React builds the map and a large accessible list, and Leaflet mounts thousands of marker/popup trees before the user can interact.
+- Suggested fix: add clustering or viewport/bbox paging, lower the initial render budget, and compute bounds in a single loop rather than spreading large coordinate arrays.
 
-### AGG-C36-08 - Fresh/reconciled DB schema parity is not structurally proven
+### AGG-C37-06 - Public map query has GPS predicates without a map-specific index
 
 - Severity: Medium
 - Confidence: Medium
-- Status: test-depth risk
+- Status: Likely risk needing production-sized `EXPLAIN`
+- Cross-agent agreement: perf-reviewer
+- Source findings: `PERF37-04`
+- Regions: `apps/web/src/app/[locale]/(public)/map/page.tsx:13-15`, `apps/web/src/lib/data.ts:1784-1802`, `apps/web/src/db/schema.ts:49-50`, `apps/web/src/db/schema.ts:123-132`
+- Failure scenario: on a large gallery where most processed images lack public GPS coordinates, MySQL may scan many processed rows and reject them on `latitude` / `longitude` / topic visibility for every fresh `/map` request.
+- Suggested fix: collect `EXPLAIN ANALYZE` on production-like cardinality before changing schema; if confirmed, add a map-specific index and mirror it in migrations/reconcile.
+
+### AGG-C37-07 - Photo-page offline fallback is documented but test-pinned off
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed
 - Cross-agent agreement: verifier
-- Source finding: VER-C36-03
-- Regions: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-225`; `apps/web/scripts/migrate.js:877-897`
-- Failure scenario: a migration changes type/default/nullability/FK/index details while `reconcileLegacySchema` still mentions the same names. Source tripwires pass, fresh DB baselines, and migrated vs reconciled schemas diverge.
-- Suggested fix: add a disposable MySQL parity harness comparing `information_schema` columns, indexes, and FKs for high-risk tables after migrate-vs-reconcile bootstraps.
+- Source findings: `VER37-01`
+- Regions: `CLAUDE.md:458-465`, `apps/web/public/sw.template.js:7-17`, `apps/web/public/sw.template.js:59-64`, `apps/web/public/sw.template.js:555-563`, `apps/web/src/__tests__/sw-template-contract.test.ts:102-147`
+- Failure scenario: a visitor opens `/p/123` while online, then loses network. Docs say the dynamic public photo page has a 24 h offline HTML fallback, but the service worker classifies `/p/:id` as bypassed and never caches or serves that fallback.
+- Suggested fix: pick the contract and align docs, `sw.template.js`, generated `sw.js`, and tests. Either allow public photo pages through `networkFirstHtml`, or document them as revocation-sensitive bypasses.
 
-### AGG-C36-09 - Max-size multipart upload RSS remains unmeasured
-
-- Severity: Medium
-- Confidence: High
-- Status: manual capacity risk
-- Cross-agent agreement: code-reviewer, critic, verifier
-- Source findings: RISK36-02, MAN36-02, VER-C36-04
-- Regions: `CLAUDE.md:657-663`; `apps/web/nginx/default.conf:132-147`; `apps/web/src/app/actions/images.ts:87-262`; `apps/web/src/app/api/admin/lr/upload/route.ts:143-191`
-- Failure scenario: framework multipart buffering plus Sharp processing can exceed container memory during concurrent near-200 MiB uploads even when logical app/nginx limits pass.
-- Suggested fix: run a production-like RSS measurement and tune upload limits, concurrency, or memory from the observed safe envelope.
-
-### AGG-C36-10 - No coverage metric or risk-based ratchet exists
+### AGG-C37-08 - Single-writer guard is advisory and starts after process-local schedulers
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed test strategy gap
-- Cross-agent agreement: critic, test-engineer
-- Source findings: CRT36-05, TE-C36-01
-- Regions: `package.json:17-30`; `apps/web/package.json:13-30`; `apps/web/vitest.config.ts:16-39`; `.github/workflows/quality.yml:54-83`
-- Failure scenario: behavioral coverage around actions, API routes, migrations, restore, upload, or image processing can drop while lint/typecheck/unit/e2e remain green.
-- Suggested fix: add non-blocking coverage reporting, then ratchet changed-code or high-risk module coverage with explicit waivers for exceptional cases.
+- Status: Confirmed topology risk
+- Cross-agent agreement: architect
+- Source findings: `C37-ARCH-02`
+- Regions: `apps/web/src/instrumentation.ts:7-30`, `apps/web/src/lib/single-writer-guard.ts:7-16`, `apps/web/src/lib/single-writer-guard.ts:218-235`, `apps/web/src/lib/single-writer-guard.ts:294-302`
+- Failure scenario: a second web process can start process-local maintenance and image queue work before the singleton guard logs, and both continue after the warning. That weakens assumptions behind in-memory queues, rate limits, buffered view counts, and restore fences.
+- Suggested fix: either enforce single-instance before starting process-local schedulers in production, or move the affected state to shared storage and make the guard explicitly informational.
 
-### AGG-C36-11 - Browser-flow coverage is desktop-Chromium-only and visual checks lack a visual oracle
+### AGG-C37-09 - OpenStreetMap tile dependency is under-documented for a self-hosted/privacy product
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed e2e coverage gap
-- Cross-agent agreement: critic, test-engineer
-- Source findings: MAN36-04, TE-C36-02, TE-C36-03
-- Regions: `apps/web/playwright.config.ts:48-77`; `.github/workflows/quality.yml:75-80`; `apps/web/e2e/nav-visual-check.spec.ts:40-87`; `CLAUDE.md:708-721`
-- Failure scenario: mobile WebKit/Safari, touch, service-worker, focus, color-gamut, or visual hierarchy regressions can pass CI. The nav spec saves screenshots but does not compare them.
-- Suggested fix: add a small mobile WebKit smoke project and either rename the nav spec as geometry-only or add stable screenshot assertions with masks.
+- Status: Confirmed docs/product-contract drift
+- Cross-agent agreement: critic
+- Source findings: `C37-CRIT-02`
+- Regions: `apps/web/src/components/map/map-client.tsx`, `README.md`, `CLAUDE.md`
+- Failure scenario: an operator choosing GalleryKit for self-hosting/privacy enables Map, but public visitors fetch third-party OpenStreetMap tiles without that dependency being clearly documented alongside other operational privacy tradeoffs.
+- Suggested fix: document the OSM tile dependency and privacy implication, or add an operator-configurable tile provider/proxy story.
 
-### AGG-C36-12 - Hydration E2E uses `networkidle` as its readiness oracle
+### AGG-C37-10 - Photo prev/next navigation loses source collection context
+
+- Severity: Medium
+- Confidence: Medium
+- Status: Likely UX issue
+- Cross-agent agreement: critic
+- Source findings: `C37-CRIT-03`
+- Regions: `apps/web/src/components/photo-navigation.tsx`, `apps/web/src/lib/data.ts`, public topic/share/smart-collection photo routes
+- Failure scenario: a visitor enters a photo from a filtered collection, but prev/next uses global adjacency instead of the source set, so navigation exits the collection unexpectedly.
+- Suggested fix: carry source context into adjacency queries or make global navigation explicit in UI copy.
+
+### AGG-C37-11 - Proxy-topology diagnostic consumes semantic-search rate-limit budget
 
 - Severity: Low-Medium
+- Confidence: High
+- Status: Confirmed
+- Cross-agent agreement: critic, test-engineer
+- Source findings: `C37-CRIT-04`, `TE-C37-06`
+- Regions: `scripts/check-proxy-topology.mjs:7-16`, `scripts/check-proxy-topology.mjs:106-134`, `apps/web/src/app/api/search/semantic/route.ts:173-200`, `apps/web/src/lib/rate-limit.ts:415-433`, `apps/web/src/__tests__/cycle12-ops-contracts.test.ts:29-47`
+- Failure scenario: an operator runs the supposedly read-only proxy diagnostic repeatedly and burns semantic-search rate-limit budget because the probe hits the real semantic endpoint.
+- Suggested fix: use a cheap diagnostic endpoint or document and test that the semantic probe is rate-budgeting work.
+
+### AGG-C37-12 - Proxy client-IP rate limits can collapse if deployment topology drifts
+
+- Severity: Medium
 - Confidence: Medium
-- Status: flake/reliability risk
-- Cross-agent agreement: test-engineer
-- Source finding: TE-C36-06
-- Regions: `apps/web/e2e/hydration-photo-page.spec.ts:20-50`; `apps/web/playwright.config.ts:59-67`
-- Failure scenario: hydration warnings can arrive after `networkidle`, or unrelated background requests can make the test slow/flaky.
-- Suggested fix: expose an app-owned hydrated marker and assert console/page errors for a bounded interval after that marker.
+- Status: Risk needing deployment validation
+- Cross-agent agreement: security-reviewer
+- Source findings: `SR37-R1`
+- Regions: `apps/web/src/lib/rate-limit.ts:175-217`, `CLAUDE.md:97-98`, `CLAUDE.md:753`, `apps/web/nginx/default.conf:59-71`, `scripts/check-proxy-topology.mjs:7-16`, `scripts/check-proxy-topology.mjs:131-134`
+- Failure scenario: an operator adds a CDN/LB in front of nginx without matching `TRUST_PROXY` / hop config. App-level per-IP buckets collapse into shared buckets, enabling denial of service against login and public route budgets.
+- Suggested fix: add a deploy/runbook proof for effective client-IP bucketing, or a non-sensitive diagnostic route/check for custom proxy chains.
 
-### AGG-C36-13 - Operator sidecars rely mostly on source-contract tests
+### AGG-C37-13 - Dynamic public page flood protection is edge-only in direct/custom proxy deployments
 
-- Severity: Medium
-- Confidence: Medium-High
-- Status: likely coverage gap
-- Cross-agent agreement: test-engineer
-- Source finding: TE-C36-05
-- Regions: `apps/web/scripts/backfill-alt-text.ts:55-160`; `apps/web/scripts/backfill-cicp-recheck.ts:51-157`; `apps/web/src/__tests__/cycle-71-source-contracts.test.ts:34-53`; `apps/web/src/__tests__/cycle-11-source-contracts.test.ts:20-31`
-- Failure scenario: sidecar behavior can regress around disabled/force gates, restore-maintenance checks, advisory locks, tuple unwrapping, missing originals, queue drains, counters, and exit codes while source text pins stay green.
-- Suggested fix: extract pure runners with injected dependencies and add behavior tests for lock held, disabled setting, `--force`, restore markers, row failures, tuple unwrap, missing originals, and queue drain.
+- Severity: Low
+- Confidence: Medium
+- Status: Risk needing deployment validation
+- Cross-agent agreement: security-reviewer
+- Source findings: `SR37-R2`
+- Regions: `apps/web/src/app/[locale]/(public)/page.tsx:17-19`, `apps/web/src/app/[locale]/(public)/page.tsx:155-178`, `apps/web/nginx/default.conf:1-10`, `apps/web/nginx/default.conf:274-296`, `README.md:175-177`, `scripts/check-proxy-topology.mjs:79-91`
+- Failure scenario: a direct app exposure or custom proxy without the shipped public catch-all limiter allows repeated dynamic page renders to consume DB/SSR work outside app-level route/action limiters.
+- Suggested fix: make the public page limiter deploy-verifiable or add an optional app-layer page limiter for unsupported topologies.
 
-### AGG-C36-14 - Map route loads and hydrates up to 10,000 markers/list items
-
-- Severity: Medium
-- Confidence: High
-- Status: likely performance/architecture issue
-- Cross-agent agreement: perf-reviewer, architect
-- Source findings: PERF-C36-02, ARCH-C36-04
-- Regions: `apps/web/src/lib/data.ts:1766-1816`; `apps/web/src/app/[locale]/(public)/map/page.tsx:13-111`; `apps/web/src/components/map/map-client.tsx:78-142`
-- Failure scenario: a large gallery can force each uncached `/map` request to query, serialize, server-render, hydrate, and keep thousands of markers/list entries resident, hurting mobile responsiveness.
-- Suggested fix: split map shell, viewport/cluster data source, and accessible list. Add bbox/cluster loading or lower the initial cap and defer heavy work.
-
-### AGG-C36-15 - Public image projection ownership is hand-mirrored
+### AGG-C37-14 - Checked-in Atik deployment config can ship as another operator's metadata
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed architectural drift risk
-- Cross-agent agreement: architect
-- Source finding: ARCH-C36-02
-- Regions: `apps/web/src/lib/data.ts:368-475`; `apps/web/src/lib/data-timeline.ts:17-80`
-- Failure scenario: a public-safe field change in the canonical projection can fail to reach timeline/year/on-this-day projections because the guard only rejects sensitive leakage, not parity drift.
-- Suggested fix: share projection construction from one module and add an explicit parity test with documented route-specific omissions.
+- Status: Confirmed distribution risk
+- Cross-agent agreement: product-marketer-reviewer
+- Source findings: `PMR-C37-01`
+- Regions: `apps/web/src/site-config.json:2-10`, `apps/web/src/site-config.example.json:2-11`, `apps/web/scripts/ensure-site-config.mjs:11-42`, `README.md:60-77`, `README.md:118-122`, `README.md:171-172`, `apps/web/src/app/sitemap.ts:14-18`, `apps/web/src/app/sitemap.ts:70-107`
+- Failure scenario: a fresh self-hosting operator skips replacing `site-config.json` because it already exists, then builds a production gallery whose canonical URL, title, author, footer, OpenGraph, and sitemap origin point to Atik.
+- Suggested fix: track only the example config, use production-rejected placeholders, or reject the Atik production URL without an explicit Atik deployment opt-in.
 
-### AGG-C36-16 - Footer and primary navigation hide or break secondary browse routes
+### AGG-C37-15 - Public footer hardwires product/vendor surfaces into every gallery
 
-- Severity: Medium
+- Severity: Low-Medium
 - Confidence: High
-- Status: confirmed UI/IA issue
-- Cross-agent agreement: designer, ui-ux-designer-reviewer, product-marketer-reviewer
-- Source findings: DES-C36-01, DES-C36-02, UIUX-C36-01, UIUX-C36-04, PMR-C36-04
-- Regions: `apps/web/src/components/footer.tsx:41-68`; `apps/web/src/components/nav-client.tsx:91-194`; `apps/web/src/app/[locale]/(public)/map/page.tsx:69-115`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:151-299`
-- Failure scenario: at 320px the footer link row overflows horizontally, and Timeline/Map are footer-only despite being core browse modes. Visitors on long galleries may miss them entirely.
-- Suggested fix: wrap/footer links for 320px and promote Timeline/Map into primary nav or a compact Browse menu, including mobile expanded nav.
+- Status: Confirmed product/UX risk
+- Cross-agent agreement: product-marketer-reviewer
+- Source findings: `PMR-C37-02`
+- Regions: `apps/web/src/components/footer.tsx:32-68`, `apps/web/src/app/[locale]/(public)/about-gallerykit/page.tsx:21-45`, `apps/web/messages/en.json:838-846`, `apps/web/src/app/sitemap.ts:25`, `apps/web/src/app/sitemap.ts:100-107`
+- Failure scenario: a client viewing a photographer's gallery sees GitHub/Admin/GalleryKit product links in the public footer. This may be right for the demo but can dilute a production portfolio's brand and expose operator-focused copy to end viewers.
+- Suggested fix: make public attribution/utility links configurable; keep OSS attribution default but provide a portfolio-safe operator path.
 
-### AGG-C36-17 - Admin mobile UX and SEO field errors are too coarse
-
-- Severity: Medium
-- Confidence: High
-- Status: confirmed/source-backed UI issue
-- Cross-agent agreement: designer, ui-ux-designer-reviewer
-- Source findings: DES-C36-03, UIUX-C36-02, UIUX-C36-03
-- Regions: `apps/web/src/components/image-manager.tsx:427-620`; `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:34-209`; `apps/web/src/app/actions/seo.ts:85-140`
-- Failure scenario: admin image management requires horizontal table scrolling for core actions on mobile/small laptops, and SEO save failures mark every field invalid for one server-side error.
-- Suggested fix: add a responsive image-card/workbench layout below `lg`; return structured field errors from `updateSeoSettings` and mark/focus only affected controls.
-
-### AGG-C36-18 - Future RTL and product-copy affordances are not ready
+### AGG-C37-16 - Search is a core claim but remains easy to miss below large desktop
 
 - Severity: Low
 - Confidence: Medium-High
-- Status: future-locale/product clarity risk
-- Cross-agent agreement: designer, ui-ux-designer-reviewer, product-marketer-reviewer
-- Source findings: DES-C36-04, UIUX-C36-05, PMR-C36-02, PMR-C36-03
-- Regions: `apps/web/src/app/[locale]/layout.tsx:101-107`; `apps/web/src/components/nav-client.tsx:100-180`; `apps/web/src/components/footer.tsx:42-44`; `apps/web/messages/en.json:824-840`; `apps/web/src/components/search.tsx:380-397`
-- Failure scenario: adding an RTL locale can expose physical left/right layout utilities, the footer `GalleryKit` link can surprise portfolio visitors with product-marketing copy, and keyword search is icon-only unless semantic production is enabled.
-- Suggested fix: before adding RTL, replace physical utilities with logical/direction-aware classes and add RTL browser checks. Clarify GalleryKit footer wording and show a compact Search label for all modes where space allows.
+- Status: Likely UX/product-discovery issue
+- Cross-agent agreement: product-marketer-reviewer
+- Source findings: `PMR-C37-03`
+- Regions: `README.md:38-50`, `apps/web/src/components/nav-client.tsx:170-175`, `apps/web/src/components/search.tsx:381-398`, `apps/web/messages/en.json:420-436`
+- Failure scenario: visitor search is advertised as a product capability, but on mobile/tablet the trigger is icon-only unless semantic search is production-enabled, making the feature easier to miss in normal installs.
+- Suggested fix: make search labeling/discovery stronger on smaller breakpoints, or adjust product copy to match the visible affordance.
 
-### AGG-C36-19 - Cycle 35 plan status is stale after signed push
+### AGG-C37-17 - Admin navigation is a flat wrapping strip across unrelated work areas
+
+- Severity: Low-Medium
+- Confidence: High
+- Status: Confirmed UX/IA risk
+- Cross-agent agreement: designer
+- Source findings: `DES37-02`
+- Regions: `apps/web/src/components/admin-nav.tsx:15-49`, `apps/web/src/components/admin-header.tsx:13-27`
+- Failure scenario: ten admin links wrap differently across viewport/language and mix daily publishing, access control, analytics, and database operations at one hierarchy, weakening spatial memory and risk affordance.
+- Suggested fix: group admin navigation into stable sections or a sectioned drawer/menu on narrow widths while preserving 44 px targets and `aria-current`.
+
+### AGG-C37-18 - No coverage metric or changed-code ratchet exists
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed documentation/provenance mismatch
-- Cross-agent agreement: document-specialist
-- Source finding: DOC-C36-01
-- Regions: `.context/plans/run10-cycle35/plan.md:1-3`; `.context/plans/run10-cycle35/plan.md:154-162`; `.context/plans/README.md:34-38`; git commit `c62c8c1e`
-- Failure scenario: the previous plan says signed push/deploy are pending even though the signed push landed. Future planners can duplicate release work or misread the cycle state.
-- Suggested fix: update the status to "implemented, signed push complete, deploy evidence absent/pending" unless deploy evidence is added.
+- Status: Confirmed test-gap
+- Cross-agent agreement: test-engineer
+- Source findings: `TE-C37-01`
+- Regions: `package.json:17-30`, `apps/web/package.json:8-30`, `apps/web/vitest.config.ts:16-39`, `.github/workflows/quality.yml:54-83`
+- Failure scenario: broad tests can pass while new or changed logic lands with no coverage threshold or ratchet, relying entirely on reviewer judgment.
+- Suggested fix: add a coverage report and changed-code or risk-targeted ratchet, tuned to avoid blocking historical low-coverage areas initially.
 
-## Final Sweep Summary
+### AGG-C37-19 - Browser-flow CI is still desktop Chromium only
 
-The review set covered auth/admin boundaries, action-origin and mutation barriers, public route rate limits, upload/restore races, advisory lock ownership, background capacity, semantic search, migrations/reconcile, privacy projections, service worker behavior, Docker/nginx/deploy contracts, CI gate shape, browser/UX surfaces, i18n, and product positioning.
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed risk
+- Cross-agent agreement: test-engineer
+- Source findings: `TE-C37-02`
+- Regions: `apps/web/playwright.config.ts:48-86`, `.github/workflows/quality.yml:75-80`, `CLAUDE.md:708-721`
+- Failure scenario: responsive/mobile/WebKit regressions can ship even though local review history repeatedly finds mobile and visual issues.
+- Suggested fix: add at least mobile Chromium and WebKit smoke projects for core public/admin flows, or document why they remain manual.
 
-No confirmed code-level auth bypass, public PII leak, route-rate-limit miss, migration cursor bug, image derivative corruption race, or restore-over-live-write bug was identified in this cycle.
+### AGG-C37-20 - Nav visual E2E captures screenshots without a visual oracle
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed false-confidence test gap
+- Cross-agent agreement: test-engineer
+- Source findings: `TE-C37-03`
+- Regions: `apps/web/e2e/nav-visual-check.spec.ts:40-87`, `apps/web/playwright.config.ts:63-77`
+- Failure scenario: the test emits screenshots but cannot fail on overlap, missing labels, or layout drift unless a human manually inspects artifacts.
+- Suggested fix: add screenshot assertions or convert the test to structural/accessibility assertions that fail automatically.
+
+### AGG-C37-21 - CLIP production preflight is not required for CLIP-touching changes
+
+- Severity: Medium
+- Confidence: High
+- Status: Confirmed test-gap
+- Cross-agent agreement: test-engineer
+- Source findings: `TE-C37-04`
+- Regions: `apps/web/package.json:21-23`, `apps/web/src/__tests__/clip-offline-load.test.ts:15-65`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-80`, `.github/workflows/quality.yml:69-83`, `.github/workflows/clip-preflight.yml:3-46`, `apps/web/src/__tests__/cycle12-ops-contracts.test.ts:56-65`
+- Failure scenario: CLIP implementation changes can pass normal CI without seeded model proof, leaving offline production-load breakage to be found manually.
+- Suggested fix: trigger the existing preflight workflow or an explicit required manual gate for CLIP-touching changes.
+
+### AGG-C37-22 - Operator sidecars still rely mostly on source-contract tests
+
+- Severity: Medium
+- Confidence: Medium-High
+- Status: Likely test-gap
+- Cross-agent agreement: test-engineer
+- Source findings: `TE-C37-05`
+- Regions: `apps/web/scripts/backfill-alt-text.ts:47-160`, `apps/web/scripts/backfill-cicp-recheck.ts:51-157`, `apps/web/src/__tests__/cycle-71-source-contracts.test.ts:34-53`, `apps/web/src/__tests__/cycle-11-source-contracts.test.ts:20-31`, `apps/web/src/__tests__/advisory-lock-release-contract.test.ts:18-34`
+- Failure scenario: source-string tests can pass while sidecar behavior regresses at runtime, especially around restore guards, batching, and advisory-lock release.
+- Suggested fix: extract sidecar runners into testable modules and add behavior tests around locks, restore maintenance, batching, and failure cleanup.
+
+### AGG-C37-23 - Hydration E2E uses `networkidle` as completion oracle
+
+- Severity: Low-Medium
+- Confidence: Medium
+- Status: Risk
+- Cross-agent agreement: test-engineer
+- Source findings: `TE-C37-07`
+- Regions: `apps/web/e2e/hydration-photo-page.spec.ts:20-50`, `apps/web/playwright.config.ts:59-67`
+- Failure scenario: `networkidle` can be flaky or insufficiently tied to app readiness, causing both false failures and false confidence on hydrated interactions.
+- Suggested fix: replace with explicit UI readiness markers or targeted element/event waits.
+
+## Non-Findings / Confirmed Guardrails
+
+- Code-reviewer found no confirmed product-code issue after full lint, typecheck, build, unit, e2e, audit, and static security lint evidence.
+- Security reviewer found no confirmed auth bypass, CSRF, upload traversal, secret, SQL injection, or privacy leak in the inspected current source.
+- Privacy field guards, migration post-conditions, restore barriers, rate-limit scanners, deploy helper pruning guarantees, and color/HDR public honesty guards remained aligned in the reviewed source.

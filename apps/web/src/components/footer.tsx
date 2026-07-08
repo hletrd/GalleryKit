@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getLocale, getTranslations } from 'next-intl/server';
 import siteConfig from "@/site-config.json";
 import { localizePath } from '@/lib/locale-path';
+import { getGalleryConfig } from '@/lib/gallery-config';
 
 function GithubIcon({ className }: { className?: string }) {
     return (
@@ -24,9 +25,10 @@ function GithubIcon({ className }: { className?: string }) {
 }
 
 export async function Footer() {
-    const [locale, t] = await Promise.all([
+    const [locale, t, config] = await Promise.all([
         getLocale(),
         getTranslations('footer'),
+        getGalleryConfig(),
     ]);
 
     return (
@@ -42,12 +44,16 @@ export async function Footer() {
                     <Link href={localizePath(locale, '/about-gallerykit')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                         {t('about')}
                     </Link>
-                    <Link href={localizePath(locale, '/timeline')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                        {t('timeline')}
-                    </Link>
-                    <Link href={localizePath(locale, '/map')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                        {t('map')}
-                    </Link>
+                    {config.showTimelineNav ? (
+                        <Link href={localizePath(locale, '/timeline')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                            {t('timeline')}
+                        </Link>
+                    ) : null}
+                    {config.showMapNav ? (
+                        <Link href={localizePath(locale, '/map')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                            {t('map')}
+                        </Link>
+                    ) : null}
                     <Link href={localizePath(locale, '/privacy')} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded text-xs text-muted-foreground hover:text-foreground hover:underline transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                         {t('privacy')}
                     </Link>

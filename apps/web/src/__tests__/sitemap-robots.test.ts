@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const TEST_BASE_URL = 'https://gallery.test';
 const STATIC_PUBLIC_PATHS = ['/timeline', '/map', '/privacy', '/about-gallerykit'];
+const DEFAULT_NAV_CONFIG = { showTimelineNav: true, showMapNav: true };
 
 const dataMocks = vi.hoisted(() => ({
     env: (() => {
@@ -13,7 +14,12 @@ const dataMocks = vi.hoisted(() => ({
     getImageIdsForSitemap: vi.fn(),
 }));
 
+const galleryConfigMocks = vi.hoisted(() => ({
+    getGalleryConfig: vi.fn(),
+}));
+
 vi.mock('@/lib/data', () => dataMocks);
+vi.mock('@/lib/gallery-config', () => galleryConfigMocks);
 
 import sitemap from '@/app/sitemap';
 import robots from '@/app/robots';
@@ -29,6 +35,7 @@ describe('sitemap route', () => {
         dataMocks.getImageIdsForSitemap.mockResolvedValue([
             { id: 7, created_at: new Date('2026-01-01T00:00:00Z'), updated_at: new Date('2026-01-04T00:00:00Z') },
         ]);
+        galleryConfigMocks.getGalleryConfig.mockResolvedValue(DEFAULT_NAV_CONFIG);
     });
 
     it('reserves localized homepage/topic URL budget before querying image URLs', async () => {
@@ -67,6 +74,23 @@ describe('sitemap route', () => {
         expect(photoEntry?.lastModified).toEqual(new Date('2026-01-04T00:00:00Z'));
     });
 
+    it('omits disabled timeline and map discovery links from the sitemap', async () => {
+        galleryConfigMocks.getGalleryConfig.mockResolvedValueOnce({
+            showTimelineNav: false,
+            showMapNav: false,
+        });
+
+        const entries = await sitemap();
+        const urls = entries.map((entry) => entry.url);
+
+        for (const locale of LOCALES) {
+            expect(urls).not.toContain(`${TEST_BASE_URL}/${locale}/timeline`);
+            expect(urls).not.toContain(`${TEST_BASE_URL}/${locale}/map`);
+            expect(urls).toContain(`${TEST_BASE_URL}/${locale}/privacy`);
+            expect(urls).toContain(`${TEST_BASE_URL}/${locale}/about-gallerykit`);
+        }
+    });
+
     it('falls back to localized homepages when sitemap data queries fail', async () => {
         dataMocks.getTopicsWithLatestUpdate.mockRejectedValueOnce(new Error('db down'));
 
@@ -86,6 +110,7 @@ describe('sitemap URL budget boundary (WP18 / C2-29)', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         dataMocks.getLatestImageUpdatedAt.mockResolvedValue(new Date('2026-01-03T00:00:00Z'));
+        galleryConfigMocks.getGalleryConfig.mockResolvedValue(DEFAULT_NAV_CONFIG);
     });
 
     it('reserves budget for the global feed row and per-topic feed rows so the image query never overshoots MAX_SITEMAP_URLS', async () => {

@@ -318,6 +318,22 @@ describe('lr upload parity source-contract (cycle 4)', () => {
         expect(LR_SRC).toMatch(/settleTrackerToActual\(true,\s*fileSize\)/);
     });
 
+    it('acquires the restore mutation slot only after multipart parsing and metadata validation', () => {
+        const formDataIndex = LR_SRC.indexOf('formData = await request.formData();');
+        const descriptionLengthIndex = LR_SRC.indexOf('countCodePoints(description) > 5000');
+        const mutationSlotIndex = LR_SRC.indexOf('using mutationSlot = acquireAdminMutationSlot();');
+        const topicSelectIndex = LR_SRC.indexOf('db.select({ slug: topics.slug })');
+
+        expect(formDataIndex).toBeGreaterThan(-1);
+        expect(descriptionLengthIndex).toBeGreaterThan(formDataIndex);
+        expect(mutationSlotIndex).toBeGreaterThan(descriptionLengthIndex);
+        expect(topicSelectIndex).toBeGreaterThan(mutationSlotIndex);
+
+        const slotWindow = LR_SRC.slice(mutationSlotIndex, topicSelectIndex);
+        expect(slotWindow).toContain('settleTrackerToActual(false)');
+        expect(slotWindow).toContain('if (isRestoreMaintenanceActive())');
+    });
+
     it('settles the preclaim if topic lookup throws after upload quota is claimed', () => {
         const topicLookupBlock = LR_SRC.match(
             /try\s*\{\s*\[topicRow\]\s*=\s*await db\.select\(\{ slug: topics\.slug \}\)[\s\S]*?\}\s*catch \(err\) \{[\s\S]*?\n\s{8}\}/,
