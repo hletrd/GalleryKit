@@ -24,6 +24,18 @@ const MAX_AUTHOR_LENGTH = 200;
 const MAX_LOCALE_LENGTH = 10;
 const MAX_OG_IMAGE_URL_LENGTH = 500;
 
+type SeoSettingsField =
+    | 'seo_title'
+    | 'seo_description'
+    | 'seo_nav_title'
+    | 'seo_author'
+    | 'seo_locale'
+    | 'seo_og_image_url';
+
+function fieldError(field: SeoSettingsField, error: string) {
+    return { error, field };
+}
+
 /** @action-origin-exempt: read-only admin getter */
 export async function getSeoSettingsAdmin() {
     const t = await getTranslations('serverActions');
@@ -83,16 +95,16 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     // intentional overlap ensures that a change to either check alone cannot
     // weaken the validation.
     if (typeof settings.seo_title === 'string' && sanitizeAdminString(settings.seo_title).rejected) {
-        return { error: t('seoTitleInvalid') };
+        return fieldError('seo_title', t('seoTitleInvalid'));
     }
     if (typeof settings.seo_description === 'string' && sanitizeAdminString(settings.seo_description).rejected) {
-        return { error: t('seoDescriptionInvalid') };
+        return fieldError('seo_description', t('seoDescriptionInvalid'));
     }
     if (typeof settings.seo_nav_title === 'string' && sanitizeAdminString(settings.seo_nav_title).rejected) {
-        return { error: t('seoNavTitleInvalid') };
+        return fieldError('seo_nav_title', t('seoNavTitleInvalid'));
     }
     if (typeof settings.seo_author === 'string' && sanitizeAdminString(settings.seo_author).rejected) {
-        return { error: t('seoAuthorInvalid') };
+        return fieldError('seo_author', t('seoAuthorInvalid'));
     }
 
     // Validate all provided keys are allowed and all values are strings.
@@ -109,25 +121,25 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     // comparison so supplementary characters (emoji, rare CJK) count as
     // one character each, matching MySQL's utf8mb4 varchar semantics.
     if (sanitizedSettings.seo_title && countCodePoints(sanitizedSettings.seo_title) > MAX_TITLE_LENGTH) {
-        return { error: t('seoTitleTooLong') };
+        return fieldError('seo_title', t('seoTitleTooLong'));
     }
     if (sanitizedSettings.seo_description && countCodePoints(sanitizedSettings.seo_description) > MAX_DESCRIPTION_LENGTH) {
-        return { error: t('seoDescriptionTooLong') };
+        return fieldError('seo_description', t('seoDescriptionTooLong'));
     }
     if (sanitizedSettings.seo_nav_title && countCodePoints(sanitizedSettings.seo_nav_title) > MAX_NAV_TITLE_LENGTH) {
-        return { error: t('seoNavTitleTooLong') };
+        return fieldError('seo_nav_title', t('seoNavTitleTooLong'));
     }
     if (sanitizedSettings.seo_author && countCodePoints(sanitizedSettings.seo_author) > MAX_AUTHOR_LENGTH) {
-        return { error: t('seoAuthorTooLong') };
+        return fieldError('seo_author', t('seoAuthorTooLong'));
     }
     if (sanitizedSettings.seo_locale && countCodePoints(sanitizedSettings.seo_locale) > MAX_LOCALE_LENGTH) {
-        return { error: t('seoLocaleTooLong') };
+        return fieldError('seo_locale', t('seoLocaleTooLong'));
     }
     if (sanitizedSettings.seo_locale && !normalizeOpenGraphLocale(sanitizedSettings.seo_locale)) {
-        return { error: t('seoLocaleInvalid') };
+        return fieldError('seo_locale', t('seoLocaleInvalid'));
     }
     if (sanitizedSettings.seo_og_image_url && countCodePoints(sanitizedSettings.seo_og_image_url) > MAX_OG_IMAGE_URL_LENGTH) {
-        return { error: t('seoOgImageUrlTooLong') };
+        return fieldError('seo_og_image_url', t('seoOgImageUrlTooLong'));
     }
 
     // Validate OG image URL format if provided.
@@ -136,7 +148,7 @@ export async function updateSeoSettings(settings: Record<string, string>) {
     // in every public page's <meta og:image> tag.
     if (sanitizedSettings.seo_og_image_url && sanitizedSettings.seo_og_image_url.trim()) {
         if (!validateSeoOgImageUrl(sanitizedSettings.seo_og_image_url)) {
-            return { error: t('seoOgImageUrlInvalid') };
+            return fieldError('seo_og_image_url', t('seoOgImageUrlInvalid'));
         }
     }
 

@@ -124,32 +124,42 @@ describe('updateSeoSettings — Unicode-formatting rejection (C6L-SEC-01)', () =
     });
 
     it('rejects updateSeoSettings with seoTitleInvalid when seo_title contains a Unicode bidi override (RLO)', async () => {
-        await expect(updateSeoSettings({ seo_title: 'MyGallery‮.gpj' })).resolves.toEqual({ error: 'seoTitleInvalid' });
+        await expect(updateSeoSettings({ seo_title: 'MyGallery‮.gpj' })).resolves.toEqual({ error: 'seoTitleInvalid', field: 'seo_title' });
         expect(transactionMock).not.toHaveBeenCalled();
     });
 
     it('rejects updateSeoSettings with seoDescriptionInvalid when seo_description contains a zero-width space', async () => {
-        await expect(updateSeoSettings({ seo_description: 'A friendly​description' })).resolves.toEqual({ error: 'seoDescriptionInvalid' });
+        await expect(updateSeoSettings({ seo_description: 'A friendly​description' })).resolves.toEqual({ error: 'seoDescriptionInvalid', field: 'seo_description' });
         expect(transactionMock).not.toHaveBeenCalled();
     });
 
     it('rejects updateSeoSettings with seoNavTitleInvalid when seo_nav_title contains a bidi isolate (LRI)', async () => {
-        await expect(updateSeoSettings({ seo_nav_title: 'Nav⁦Title' })).resolves.toEqual({ error: 'seoNavTitleInvalid' });
+        await expect(updateSeoSettings({ seo_nav_title: 'Nav⁦Title' })).resolves.toEqual({ error: 'seoNavTitleInvalid', field: 'seo_nav_title' });
         expect(transactionMock).not.toHaveBeenCalled();
     });
 
     it('rejects updateSeoSettings with seoAuthorInvalid when seo_author contains a zero-width non-joiner (ZWNJ)', async () => {
-        await expect(updateSeoSettings({ seo_author: 'Alice‌Bob' })).resolves.toEqual({ error: 'seoAuthorInvalid' });
+        await expect(updateSeoSettings({ seo_author: 'Alice‌Bob' })).resolves.toEqual({ error: 'seoAuthorInvalid', field: 'seo_author' });
         expect(transactionMock).not.toHaveBeenCalled();
     });
 
     it('rejects updateSeoSettings when seo_title contains a BOM', async () => {
-        await expect(updateSeoSettings({ seo_title: 'Hello﻿World' })).resolves.toEqual({ error: 'seoTitleInvalid' });
+        await expect(updateSeoSettings({ seo_title: 'Hello﻿World' })).resolves.toEqual({ error: 'seoTitleInvalid', field: 'seo_title' });
         expect(transactionMock).not.toHaveBeenCalled();
     });
 
     it('rejects updateSeoSettings when seo_description contains an LRM', async () => {
-        await expect(updateSeoSettings({ seo_description: 'Words‎after' })).resolves.toEqual({ error: 'seoDescriptionInvalid' });
+        await expect(updateSeoSettings({ seo_description: 'Words‎after' })).resolves.toEqual({ error: 'seoDescriptionInvalid', field: 'seo_description' });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
+
+    it('returns a field key for invalid SEO locale values', async () => {
+        await expect(updateSeoSettings({ seo_locale: 'not-a-locale' })).resolves.toEqual({ error: 'seoLocaleTooLong', field: 'seo_locale' });
+        expect(transactionMock).not.toHaveBeenCalled();
+    });
+
+    it('returns a field key for invalid OG image URL values', async () => {
+        await expect(updateSeoSettings({ seo_og_image_url: 'https://third-party.example/og.jpg' })).resolves.toEqual({ error: 'seoOgImageUrlInvalid', field: 'seo_og_image_url' });
         expect(transactionMock).not.toHaveBeenCalled();
     });
 });
