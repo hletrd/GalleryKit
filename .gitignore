@@ -125,4 +125,6 @@ test
 apps/web/.context/
 apps/web/test-results/
 apps/web/playwright-report/
+test-results/
+playwright-report/
 .claude/
