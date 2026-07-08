@@ -1,6 +1,6 @@
 # Run-10 Cycle 29/100 Implementation Plan
 
-Status: IMPLEMENTED - FULL GATES PASSED; SIGNED PUSH/DEPLOY PENDING
+Status: IMPLEMENTED - SIGNED PUSHED; PER-CYCLE DEPLOY/LIVE SMOKES PASSED
 Aggregate: `.context/reviews/run10-cycle29/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `d985f549afa73b23cdccf5d8fea30f4bfc840847`
@@ -58,7 +58,7 @@ Acceptance:
 - Cycle 28 no longer claims signed push is pending.
 - Cycle 29 records current deploy/live-smoke evidence before completion.
 
-Status: pending terminal deploy evidence.
+Status: implemented; first Cycle 29 deploy evidence recorded below. The final report records the redeploy of this terminal-evidence commit.
 
 ### WP3 - Carry-forward register refresh
 
@@ -93,10 +93,10 @@ Deferred this cycle: none.
 - [x] Prompt 2 plan written.
 - [x] WP1 inline server-action scanner coverage.
 - [x] WP3 carry-forward register refresh.
-- [ ] WP2 terminal deploy evidence.
+- [x] WP2 terminal deploy evidence.
 - [x] Required full gates.
-- [ ] Signed commit/push for implementation.
-- [ ] Per-cycle deploy and live smoke.
+- [x] Signed commit/push for implementation.
+- [x] Per-cycle deploy and live smoke.
 
 ## Gate Evidence
 
@@ -110,4 +110,10 @@ Deferred this cycle: none.
 - Full unit suite passed: `npm test --workspace=apps/web` (361 files passed, 2 skipped; 3384 tests passed, 4 skipped).
 - Browser e2e not run: not required for scanner/docs/source-contract changes.
 
-Deploy/live-smoke evidence pending signed push and repo deploy helper run.
+## Terminal Evidence
+
+- Signed implementation commit: `36a79146a7519a267af0c5dbcaf3d9909e727289` (`git log -1 --format='%G?'` reported `G`).
+- Push: `git pull --rebase` reported `Current branch master is up to date`; `git push` updated `master` from `f4faad29` to `36a79146`.
+- Deploy: `npm run deploy` completed successfully from repo root; the helper pulled `36a79146`, rebuilt the remote image, recreated and started `gallerykit-web`, waited for health, and completed the documented Docker cleanup.
+- Live smoke: `curl -fsS https://gallery.atik.kr/api/live` returned `{"status":"ok"}`.
+- Missing-photo smoke: `curl -sS -o /dev/null -w '%{http_code}' https://gallery.atik.kr/uploads/jpeg/__missing-cycle29__.jpg` returned `404`.
