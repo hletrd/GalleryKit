@@ -11,7 +11,7 @@ export default async function CategoriesPage() {
     const topics = await getTopicsWithAliases();
 
     return (
-        <div className="max-w-4xl">
+        <div className="max-w-4xl mx-auto">
             <TopicManager initialTopics={topics} />
         </div>
     );
