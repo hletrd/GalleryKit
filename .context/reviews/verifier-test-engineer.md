@@ -1,126 +1,82 @@
-# Cycle 12 Verifier + Test-Engineer Review
+# Cycle 25 Verifier + Test-Engineer Review
 
-Date: 2026-07-07
-Repo: `/Users/hletrd/flash-shared/gallery`
-Mode: evidence-based correctness and test-coverage review. I did not implement source changes; only this review file was written.
+Date: 2026-07-08 KST
+Scope: whole-repo verifier/test-engineer pass for correctness vs stated behavior, missing tests, flaky-test risk, TDD opportunities, source-contract gaps, false confidence, and quality-gate blind spots. Product code was not edited.
 
 ## Inventory
 
-- Read first: `AGENTS.md`, `CLAUDE.md`, `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
-- Reviewed docs/history: `.context/plan/plan-c12.md`, `.context/plans/README.md`, `.context/reviews/_aggregate.md`, `.context/reviews/test-engineer.md`, `.context/reviews/verifier.md`.
-- Test surface: 347 Vitest files under `apps/web/src/__tests__`; 9 Playwright specs under `apps/web/e2e`.
-- Source-contract density: 156 test files call `readFileSync(...)`; 222 test files match source/string-contract patterns. These are useful tripwires but still leave behavior/browser/database oracles thin in several places.
-- Lightweight checks run:
-  - `rg "\.only\(|describe\.only|it\.only|test\.only" apps/web/src/__tests__ apps/web/e2e ...`: no output, exit 1, so no focused tests found.
-  - `npm run lint:api-auth --workspace=apps/web`: pass, 2 admin routes OK.
-  - `npm run lint:action-origin --workspace=apps/web`: pass, all mutating server actions guarded or explicitly exempted.
-  - `npm run lint:public-route-rate-limit --workspace=apps/web`: pass, public route scanner OK.
-  - `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`: fail, 2 moderate PostCSS findings via Next nested dependency.
-- Not run: full lint/typecheck/build/unit/e2e. This was a review-only lane and the user allowed static review; full e2e/build would be longer and can write generated artifacts.
+- Repo controls/docs inspected: `AGENTS.md`, `CLAUDE.md`, `.github/workflows/quality.yml`, `.github/workflows/clip-preflight.yml`, current `.context/plans/*2026-07-08*` and recent review artifacts.
+- Gate/config files inspected: root `package.json`, `apps/web/package.json`, `apps/web/vitest.config.ts`, `apps/web/playwright.config.ts`.
+- Test surface inventoried: 367 committed Vitest files under `apps/web/src/__tests__`, 12 committed Playwright/e2e files under `apps/web/e2e`.
+- Source surfaces sampled for contract risk: App Router routes/actions, custom lint scripts, migration/reconcile script, semantic-search/CLIP tests, upload/restore e2e helpers, touch-target and visual-navigation tests.
+- Focused validation run: `npm test --workspace=apps/web -- --run src/__tests__/clip-offline-load.test.ts src/__tests__/clip-semantic-integration.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/bottom-sheet-dropdown-portal.test.ts` passed with `2 test files passed | 2 skipped`, `89 passed | 4 skipped`.
+- Focused skip/focus sweep: no `.only` tests found. Skips are limited to local/admin e2e guard branches and the real CLIP model suites.
 
 ## Findings
 
-### VTE-C12-01 - Real CLIP production activation is not proven by required gates
-
-- Severity: High
-- Confidence: High
-- Validation: confirmed
-- Evidence: `apps/web/src/__tests__/clip-offline-load.test.ts:15-41` skips unless `CLIP_OFFLINE_LOAD=1` and seeded weights exist; `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31` skips unless `CLIP_INTEGRATION=1`; `apps/web/package.json:21-23` defines `test:clip:preflight`, but `.github/workflows/quality.yml:66-80` runs only normal unit/e2e/build gates.
-- Failure scenario: a model revision/cache-layout change, ONNX runtime break, or production `CLIP_MODELS_ROOT` mismatch breaks real offline `jina-clip-v2` loading. CI stays green because the real-model suites skip and route tests can mock embeddings.
-- Suggested test/fix: add a scheduled or dependency-change CI preflight that seeds/caches the pinned weights and runs `npm run test:clip:preflight --workspace=apps/web`, or require a recent preflight marker before enabling production semantic mode.
-- Browser-flow coverage required: no; this is model/route integration coverage.
-
-### VTE-C12-02 - Production dependency audit is red and not a blocking quality gate
+### VTE-01 - Migration/reconcile coverage can still pass with structurally wrong schema
 
 - Severity: Medium
 - Confidence: High
-- Validation: confirmed by `npm audit --workspace=apps/web --omit=dev --audit-level=moderate`.
-- Evidence: root override pins top-level PostCSS at `package.json:7-8`, but `package-lock.json:9334-9336` still contains `node_modules/next/node_modules/postcss` at `8.4.31`; the fixed top-level PostCSS is separate at `package-lock.json:9850-9853`. CI has lint/typecheck/test/e2e/build only at `.github/workflows/quality.yml:54-80`.
-- Failure scenario: release confidence reports "all quality gates green" while production audit remains red for GHSA-qx2v-qp2m-jg93 through Next's nested PostCSS copy.
-- Suggested test/fix: add an audit gate with a documented allowlist/expiry if this is intentionally deferred, and close the nested dependency by upgrading Next or proving a lockfile-effective override that does not downgrade Next.
-- Browser-flow coverage required: no.
+- Evidence: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19` explicitly calls the test a source tripwire, not a structural validator. Its main checks assert `migrate.js` creates each table and mentions each column/index name (`apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:86-101`, `157-171`). `prepareLegacyDatabaseIfNeeded` routes fresh DBs through `reconcileLegacySchema` and baselines all journal rows (`apps/web/scripts/migrate.js:877-897`), so reconcile is an authoritative bootstrap path, not just a helper.
+- Failure scenario: a future migration changes type, nullability, default, generated expression, index uniqueness/order, or FK action while `migrate.js` still contains the same column/index/FK names. Unit tests pass because names are present, fresh/rebaselined installs can diverge from migrated installs, and the drift may not surface until a later query depends on the exact metadata.
+- Fix/tests to add: add a disposable-MySQL structural parity test. Build one schema through current migration application and one through the reconcile/baseline path, then compare `information_schema.columns`, `statistics`, and `referential_constraints`. As a smaller TDD step, add a failing fixture around one column default/nullability and one index uniqueness/order before implementing the full parity harness.
+- Existing tracking: overlaps with `.context/plans/cycle-24-2026-07-08-deferred.md:29` (`AGG-C24-19`), but remains open.
 
-### VTE-C12-03 - Browser/device e2e coverage is Chromium-only and screenshots are not visual assertions
-
-- Severity: Medium
-- Confidence: High
-- Validation: confirmed
-- Evidence: `apps/web/playwright.config.ts:72-77` defines only a Desktop Chrome project; CI installs only Chromium at `.github/workflows/quality.yml:72-77`; `apps/web/e2e/nav-visual-check.spec.ts:58`, `:72`, and `:85` write screenshots with `page.screenshot(...)` but never compare with `toHaveScreenshot`.
-- Failure scenario: WebKit mobile touch/dialog behavior, Firefox focus/display-capability behavior, or visual nav drift breaks while desktop Chromium remains green. The nav "visual" test can produce changed PNGs without failing.
-- Suggested test/fix: add a small required matrix rather than duplicating everything: mobile WebKit for nav/search/photo/lightbox/info-sheet and one Firefox/WebKit desktop smoke. Convert nav captures to `expect(page).toHaveScreenshot(...)` baselines or rename the spec as artifact-only.
-- Browser-flow coverage required: yes, especially mobile WebKit and at least one non-Chromium desktop smoke.
-
-### VTE-C12-04 - Important client interactions are still locked by source strings or permissive browser assertions
+### VTE-02 - Mobile bottom-sheet dropdown containment is source-locked, not browser-proven
 
 - Severity: Medium
 - Confidence: High
-- Validation: confirmed
-- Evidence: `apps/web/src/__tests__/photo-viewer-auto-lightbox-source.test.ts:8-14` checks source strings for sessionStorage restoration order; `apps/web/e2e/hydration-photo-page.spec.ts:44-49` accepts either a restored `pinned` button or fallback `info` button; `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:14-26` checks source strings for portal containment while the actual menu lives in `apps/web/src/components/info-bottom-sheet.tsx:558-595`.
-- Failure scenario: auto-lightbox restore silently stops restoring, or the mobile info-sheet download dropdown renders outside the focus-trap subtree. Current tests can stay green because they prove code text, not actual DOM/focus/menu behavior; the hydration e2e does not require the restored state.
-- Suggested test/fix: tighten the hydration spec to require the deterministic restored button state, and add a mobile Playwright flow that opens the info sheet, opens the wide-gamut download dropdown, asserts menu visibility within the dialog subtree, keyboard focus containment, and close/focus return.
-- Browser-flow coverage required: yes.
+- Evidence: `apps/web/src/__tests__/bottom-sheet-dropdown-portal.test.ts:14-26` only reads source and asserts strings for the `DropdownMenuContent` `container` prop and sheet refs. The implementation uses that prop at `apps/web/src/components/info-bottom-sheet.tsx:565-603`. Existing browser tests open the sheet (`apps/web/e2e/test-fixes.spec.ts:56-65`) and verify focus restoration (`apps/web/e2e/focus-restore.spec.ts:34-59`), but neither opens the download dropdown or asserts it is inside the dialog/focus-trap subtree.
+- Failure scenario: a Radix upgrade, ref wiring change, portal wrapper change, or conditional wide-gamut branch drift causes the menu to render under the overlay, outside the focus trap, or unfocusable on mobile. The source strings can remain present and the current e2e sheet/focus tests still pass.
+- Fix/tests to add: add a mobile Playwright test against a deterministic wide-gamut/AVIF fixture: open photo, open Info sheet, expand/open the download menu, assert menu items are visible, are descendants of the sheet dialog or configured portal container, can receive keyboard focus, and close with focus returning to the trigger. Write this as a red test by temporarily omitting `container={sheetElement ?? undefined}`.
+- Existing tracking: overlaps with earlier test-engineer findings and `.context/plans/cycle-24-2026-07-08-deferred.md:29` source-contract carry-forward.
 
-### VTE-C12-05 - Admin UI e2e still covers navigation and a few flows, not first-class admin surfaces
-
-- Severity: Medium
-- Confidence: High
-- Validation: confirmed
-- Evidence: `apps/web/e2e/admin.spec.ts:20-43` mostly navigates to admin pages and asserts tables/inputs; behavior flows cover GPS toggle/topic create/upload at `apps/web/e2e/admin.spec.ts:73-165`. The Lightroom token UI has stateful one-time plaintext/copy/revoke behavior at `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx:70-128` and `:250-325`, while action tests cover server behavior only at `apps/web/src/__tests__/lr-tokens-action.test.ts:85-199`.
-- Failure scenario: token creation fails to show one-time plaintext, copy acknowledgement fails, revoke confirmation fails, or label errors fail to bind/focus in the actual page. Unit/action/source tests can pass because they do not drive the hydrated token page.
-- Suggested test/fix: add admin Playwright flows for token create -> plaintext appears once -> acknowledge/copy -> done -> list row appears -> revoke removes row. Add smaller smokes for SEO validation/save, tags create/delete, users validation, and DB backup listing/download without destructive restore.
-- Browser-flow coverage required: yes.
-
-### VTE-C12-06 - DB restore child-process failure cleanup remains source-only
+### VTE-03 - Browser matrix is Chromium desktop-only despite mobile/touch/product claims
 
 - Severity: Medium
 - Confidence: High
-- Validation: confirmed
-- Evidence: `apps/web/src/__tests__/db-restore.test.ts:47-74` asserts `failRestore` snippets exist; production cleanup behavior is in `apps/web/src/app/[locale]/admin/db-actions.ts:807-817` plus event registrations at `:818-833`. The test does not execute a fake `spawn`, fake `stdin`, fake read stream, or watchdog.
-- Failure scenario: a restore spawn/stdin/read/timeout failure stops killing the child, stops destroying streams, forgets temp cleanup, or loses `keepMaintenance: true`, while source snippets remain present but unreachable or misordered.
-- Suggested test/fix: extract or inject the restore import runner enough to test it with mocked `child_process.spawn`, fake streams, and fake timers. Assert response result, `kill()`, `stdin.destroy()`, read-stream destroy, temp cleanup, and maintenance retention for spawn error, stdin error, read error, timeout, nonzero close, and success.
-- Browser-flow coverage required: no; this needs unit/integration behavior coverage.
+- Evidence: `apps/web/playwright.config.ts:72-77` defines only the `chromium` project using `Desktop Chrome`; `.github/workflows/quality.yml:75-80` installs only Chromium and runs `npm run test:e2e`. The app’s stated quality policy includes mobile/touch concerns (`AGENTS.md:44`, `CLAUDE.md:708-721`), and several e2e specs manually set mobile viewports, but they still run in desktop Chromium engine only.
+- Failure scenario: a WebKit/Safari-specific fixed-position, focus-trap, dialog portal, service-worker, image color/profile, or touch event behavior regresses. CI stays green because no WebKit/mobile-browser project runs. Manual viewport resizing catches some responsive layout issues, but not engine/device behavior.
+- Fix/tests to add: add at least one mobile browser project, preferably `Mobile Safari`/WebKit for public gallery/photo/search/info-sheet smoke, and keep full admin flows Chromium-only if runtime is a concern. If all PRs cannot afford it, run the WebKit/mobile subset on `app/**`, `components/**`, `public/sw.template.js`, and e2e changes.
+- Existing tracking: matches `.context/plans/cycle-24-2026-07-08-deferred.md:30` (`AGG-C24-20`).
 
-### VTE-C12-07 - Lightroom upload route still has untested failure branches
+### VTE-04 - Nav “visual” checks produce artifacts but no visual oracle
 
-- Severity: Medium
+- Severity: Low
 - Confidence: High
-- Validation: confirmed
-- Evidence: current behavior test covers success, HDR rejection, entry restore guard, missing content length, count cap, and low disk at `apps/web/src/__tests__/lr-upload-route-behavior.test.ts:182-370`. Production route still has distinct branches for chunked transfer, total byte cap, per-file size cap, parse-slot saturation, late restore guard, lock denial, topic DB error/missing topic, settings read failure, save/raw failures, GPS-strip fail-closed, and late maintenance cleanup at `apps/web/src/app/api/admin/lr/upload/route.ts:101-158`, `:252-313`, `:346-424`.
-- Failure scenario: an external Lightroom client receives the wrong status/body, quota is not settled, lock release is skipped, or an original is retained after a GPS-strip or late-maintenance failure. Existing tests prove only part of the cleanup matrix.
-- Suggested test/fix: extend the route harness with table-driven cases for each branch, asserting status/body plus tracker settlement, lock release, original cleanup, DB insert/queue absence, and audit absence where appropriate.
-- Browser-flow coverage required: no; handler-level route tests are sufficient.
+- Evidence: `apps/web/e2e/nav-visual-check.spec.ts:40-87` measures target size and overlap, then saves screenshots at lines 58, 72, and 85. There is no `toHaveScreenshot` or baseline comparison. The grep sweep found only `page.screenshot(...)` calls in this spec, no visual assertion.
+- Failure scenario: color, spacing, wrap, z-index, density, or visual hierarchy regresses while the measured buttons remain 44x44 and non-overlapping. CI passes and the screenshots are only artifacts for humans to inspect after the fact.
+- Fix/tests to add: either convert the three screenshots to `await expect(page).toHaveScreenshot(...)` with stable masks/baselines, or rename the spec to clarify it is geometry-only. If visual regression is intended, commit baselines for collapsed mobile, expanded mobile, and desktop nav and treat screenshot diffs as release evidence.
+- Existing tracking: `.context/plans/cycle-24-2026-07-08-deferred.md:30` and older `D25-19` carry this forward.
 
-### VTE-C12-08 - Migration reconcile parity still depends mostly on source tripwires
+### VTE-05 - Real CLIP production coverage is still non-blocking for ordinary code changes
 
-- Severity: Medium
-- Confidence: Medium
-- Validation: risk
-- Evidence: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-20` explicitly says the test is a source tripwire, not a structural validator; it checks table/column/index/FK names in source at `:86-103`, `:157-172`, and `:216-225`. The real reconcile DDL lives in `apps/web/scripts/migrate.js:348-730`. CI initializes a DB at `.github/workflows/quality.yml:69-70`, but there is no committed information_schema diff gate.
-- Failure scenario: reconcile names all expected columns/indexes/FKs but creates the wrong type, nullability, default, collation, FK action, or index column order. Fresh/legacy baselines can diverge from Drizzle while source-name tests stay green.
-- Suggested test/fix: add an opt-in or CI disposable-MySQL parity test that applies the normal migration path and the reconcile/baseline path to separate schemas, then diffs `information_schema` columns, indexes, and foreign keys. Keep source tripwires as fast pre-checks.
-- Browser-flow coverage required: no.
-
-### VTE-C12-09 - There is no coverage report, threshold, or changed-file ratchet
-
-- Severity: Medium
+- Severity: Low-Medium
 - Confidence: High
-- Validation: confirmed
-- Evidence: `apps/web/package.json:13` runs plain `vitest run`; `apps/web/vitest.config.ts:1-39` has include/exclude/timeouts but no coverage configuration; `.github/workflows/quality.yml:66-67` runs unit tests without coverage. A search for `coverage`, `v8`, `istanbul`, `threshold`, or `test:coverage` in package/test/CI config returned no matches.
-- Failure scenario: a new public API route, server action, migration branch, queue failure path, or security helper lands with zero executed behavior coverage. The large source-contract footprint can make the suite look broad while critical lines remain unexecuted.
-- Suggested test/fix: add non-blocking Vitest V8 coverage first, then enforce a changed-file ratchet for critical directories (`src/app/actions`, `src/app/api`, `src/lib`, `scripts/migrate.js`) with explicit reviewed exemptions before considering repo-wide thresholds.
-- Browser-flow coverage required: no, though browser-flow coverage should be separately required for UI-facing changed files.
+- Evidence: the real CLIP suites skip by default unless env/model-weight flags are set (`apps/web/src/__tests__/clip-offline-load.test.ts:15-18`, `32-41`; `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-10`, `30-31`). The focused run in this review produced `2 skipped` CLIP files and `4 skipped` tests. A dedicated preflight workflow exists, but only on schedule/manual dispatch (`.github/workflows/clip-preflight.yml:3-6`) and is separate from the required quality workflow (`.github/workflows/quality.yml:54-83`).
+- Failure scenario: a dependency/model-loader/revision/path change breaks offline loading or semantic ranking. Normal PR/push quality stays green; the weekly/manual CLIP job catches it later, if watched.
+- Fix/tests to add: make `clip-preflight.yml` path-triggered for `clip-*`, `semantic`, `@huggingface/transformers`, `package-lock`, and model-download changes, or add a required lightweight offline-loader contract that does not need full weights. Before touching CLIP production code, start with a red preflight or mocked-loader test that proves the failure mode.
+- Existing tracking: `.context/plans/cycle-24-2026-07-08-deferred.md:31` (`AGG-C24-21`).
 
-## Verified Non-Findings / Fixed Since Prior Reviews
+### VTE-06 - Coverage volume is high, but there is no coverage/changed-file ratchet
 
-- Restore background DB drain hang from the prior aggregate is fixed on current HEAD: `apps/web/src/lib/background-db-writes.ts:95-112` races the drain against a timeout, `apps/web/src/app/[locale]/admin/db-actions.ts:553-557` aborts restore on timeout, and `apps/web/src/__tests__/background-db-writes.test.ts:43-59` covers a never-settling write.
-- Topic route lock release leak from cycle 11 is fixed and tested: `apps/web/src/app/actions/topics.ts:86-98` destroys the connection after `RELEASE_LOCK` failure, and `apps/web/src/__tests__/topics-actions.test.ts:582-605` verifies that behavior.
-- Settings-hash config-path mapper drift is fixed: `apps/web/src/lib/settings-hash.ts:87-97` uses an exhaustive `Record` over `COLOR_IMPACTING_KEYS`, and `apps/web/src/__tests__/settings-hash.test.ts:210-230` starts the per-key flip coverage.
-- No focused tests were found, and the three custom security lint gates passed in the lightweight verification run.
+- Severity: Low-Medium
+- Confidence: High
+- Evidence: root and app test scripts run `vitest run` with no coverage command (`package.json:17-29`, `apps/web/package.json:13-29`), `apps/web/vitest.config.ts:16-39` configures include/exclude/timeouts only, and `.github/workflows/quality.yml:54-83` runs lint/typecheck/security gates/unit/e2e/build without coverage instrumentation.
+- Failure scenario: a new branch in a high-risk action/route/migration path ships with only a source-contract test or no test because the suite’s aggregate size creates false confidence. Reviewers can see test count growth, but CI does not enforce changed-code behavior coverage.
+- Fix/tests to add: start with a changed-file coverage ratchet or module allowlist for high-risk paths (`app/actions`, `app/api`, `scripts/migrate.js`, `lib/rate-limit`, `lib/restore-*`, `lib/process-image`). Do not require global thresholds immediately; require new/changed branches in those paths to carry behavior tests or an explicit review waiver.
+- Existing tracking: `.context/plans/cycle-24-2026-07-08-deferred.md:32` (`AGG-C24-22`).
 
-## Final Missed-Issue Sweep
+## Positive Verification Notes
 
-- Rechecked current e2e scope against browser-flow candidates: token UI, mobile dropdown containment, strict photo-viewer restored state, and cross-browser/mobile coverage are the main browser-flow gaps.
-- Rechecked prior LR upload finding: current HEAD added several behavior branches, so I narrowed the finding to remaining untested branches rather than carrying the old broad claim forward.
-- Rechecked restore background drains and topic lock release before reporting: both prior findings are fixed and were excluded.
-- Rechecked migration coverage: source tripwires are strong and CI runs `npm run init`, but structural parity diff remains absent.
-- Full gates were not run; only lightweight lint/audit/focus checks were executed for this review lane.
+- CI does enable admin e2e in the main quality workflow: `.github/workflows/quality.yml:35-37` provides plaintext e2e admin credentials, and `apps/web/e2e/helpers.ts:28-45` auto-enables admin e2e for local/CI plaintext credentials. The local skip guards in `apps/web/e2e/admin.spec.ts:6-13` are not a CI blind spot under the current workflow.
+- The custom public-route rate-limit scanner is AST-based and includes ordering checks for limiter-before-expensive-work (`apps/web/scripts/check-public-route-rate-limit.ts:391-575`, `578-637`) and ambiguous file-level exemption handling (`apps/web/scripts/check-public-route-rate-limit.ts:909-928`), so I did not file a rate-limit scanner gap.
+- The action-origin scanner is similarly broad: recursive action discovery and explicit admin DB-actions inclusion are present (`apps/web/scripts/check-action-origin.ts:64-115`), and it enforces both same-origin and mutation-barrier contracts.
+
+## Missed-Issue Sweep
+
+- `.only` sweep: none found under `apps/web/src/__tests__` or `apps/web/e2e`.
+- `.skip` sweep: only documented admin/local e2e guards and CLIP env-gated suites were found.
+- I did not run the full lint/typecheck/build/e2e suite in this review lane. The focused validation run was scoped to the findings above.
+- No product-code edits were made. This report file is the only workspace change from this lane.
