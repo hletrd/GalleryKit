@@ -16,7 +16,7 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c29):** Cycle 29 schedules all four newly confirmed findings in `.context/plans/run10-cycle29/plan.md`: the inline `use server` scanner gap, the executable unscanned-module fixture gap, Cycle 28 terminal-ledger closure, and consolidated carry-forward register refresh. No Cycle 29 finding is deferred. Cycle 27 and Cycle 28 deferred rows are now represented in the table with preserved severity/confidence and short exit criteria. No open High-severity row newly crosses the 8-cycle budget without an existing architecture/operator/test-infra deferral rationale; Medium checkpoint handling remains bound to each row's home register.
+**Age-budget check (run-10 c31):** Cycle 31 schedules all three newly confirmed findings in `.context/plans/run10-cycle31/plan.md`: stale active-cycle index state, stale Cycle 30 / loop-B Cycle 10b terminal-status wording, and the carry-forward checkpoint label drift. No Cycle 31 finding is deferred. The table already includes the newer loop-B D10b rows with preserved severity/confidence and short exit criteria; Cycle 31 updates the checkpoint labels so the register no longer appears frozen at Cycle 29. No open High-severity row newly crosses the 8-cycle budget without an existing architecture/operator/test-infra deferral rationale; Medium checkpoint handling remains bound to each row's home register.
 
 **Previous check (run-10 c26):** direct restore-maintenance correctness findings
 `AGG-C26-01` and `AGG-C26-02`, plus bounded UI/accessibility findings
@@ -117,7 +117,7 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 
 ## Open carry-forward rows
 
-| ID | Sev/Conf | Home register | First deferred | Age @ r10c29 | Exit criterion (short) |
+| ID | Sev/Conf | Home register | First deferred | Age @ latest recorded check | Exit criterion (short) |
 |----|---------|---------------|----------------|-------------|------------------------|
 | C96-04 | MED/High | cycle-96-2026-07-01 | c96 | ~12 | Feed maintenance/caching policy decision for restore windows |
 | C96-07 | MED/High | cycle-96-2026-07-01 | c96 | ~12 | nginx template parameterizes the demo domain (operator template pass) |

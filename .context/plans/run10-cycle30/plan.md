@@ -1,6 +1,6 @@
 # Run-10 Cycle 30/100 Implementation Plan
 
-Status: IMPLEMENTED - full gates passed; pending signed push and deploy
+Status: IMPLEMENTED - signed push complete; deploy evidence superseded by Cycle 31
 Aggregate: `.context/reviews/run10-cycle30/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `4bab5270fad3cdce6be288dda94a7322fb6997f1`
@@ -49,8 +49,8 @@ Acceptance:
 - [x] Prompt 2 plan written.
 - [x] WP1 ledger consistency fix.
 - [x] Required full gates.
-- [ ] Signed commit/push.
-- [ ] Per-cycle deploy and live smoke.
+- [x] Signed commit/push.
+- [ ] Per-cycle deploy and live smoke evidence for this exact plan file was not committed before Cycle 31; Cycle 31's per-cycle deploy is scheduled to supersede production state for the pushed history.
 
 ## Gate Evidence
 
@@ -63,3 +63,9 @@ Acceptance:
 - Full unit suite passed: `npm test --workspace=apps/web` (361 files passed, 2 skipped; 3389 tests passed, 4 skipped).
 - Focused boundary gate passed after the concurrent dirty fix: `npm test --workspace=apps/web -- --run src/__tests__/client-server-only-boundary.test.ts` (12 tests passed).
 - Browser e2e not run: Cycle 30 changed review/plan ledgers only; no browser-flow behavior changed.
+
+## Terminal Evidence
+
+- Signed implementation commit: `f4174c7e` (`docs(cycle30): align review ledgers`) is present on `origin/master`.
+- Push: the Cycle 30 implementation commit is in the committed master lineage before Cycle 31 start HEAD `70747008`.
+- Deploy/live smoke: no committed Cycle 30 deploy transcript was found during Cycle 31 review. The current Cycle 31 per-cycle deploy will supersede production evidence for Cycle 30's ledger-only fix and all later pushed history.
