@@ -1,88 +1,83 @@
-# Cycle 23 Test-Engineer Review
+# Cycle 24 Test-Engineer Review
 
 Role: `test-engineer`
 Repo: `/Users/hletrd/flash-shared/gallery`
-Current HEAD at write: `57c1ae33` (`origin/master`)
+Current HEAD at write: `4b43fad7` on `master`
 
 ## Inventory
 
 Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
 
-Test/verification inventory built first:
+Test and verification surfaces inventoried:
 
-- Commands and gates: root `package.json`, `apps/web/package.json`, `.github/workflows/quality.yml`.
-- Test files: 360 Vitest files in `apps/web/src/__tests__`; 9 Playwright specs in `apps/web/e2e`; `apps/web/vitest.config.ts`; `apps/web/playwright.config.ts`.
-- New/changed Cycle 22 tests: `check-action-origin.test.ts`, `pending-file-deletions.test.ts`, `pending-session-revocations.test.ts`, `data-timeline-behavior.test.ts`, `data-timeline.test.ts`.
-- Test-adjacent implementation under review: `check-action-origin.ts`, `pending-file-deletions.ts`, `maintenance-scheduler.ts`, `db-actions.ts`, `process-image.ts`, `upload-paths.ts`, `data-timeline.ts`.
-- Recurring weak-assertion areas: migration/reconcile source contracts, restore child-process source contracts, semantic scan cap source tests, stale client response source tests, browser visual artifacts, hydration timing waits.
+- Vitest: 362 `apps/web/src/__tests__/**/*.test.{ts,tsx}` files; `apps/web/vitest.config.ts:16-39` includes only that tree, excludes `.next`, and uses a 15s default timeout.
+- Playwright: 9 specs in `apps/web/e2e`; `apps/web/playwright.config.ts:48-87` runs one serial Desktop Chrome project against a production standalone build started by `scripts/run-e2e-server.mjs`.
+- Custom lint/source gates: `lint:api-auth`, `lint:action-origin`, `lint:public-route-rate-limit`, `check:js-scripts`, `tracked-secrets.test.ts`, touch-target/focus scanners, migration journal/reconcile scanners, source-contract suites.
+- CI: `.github/workflows/quality.yml:54-83` runs lint, typecheck, security lint gates, production `npm audit`, Vitest, DB init, Playwright, then build. `.github/workflows/clip-preflight.yml:3-45` runs CLIP preflight on schedule/manual.
+- Source-contract density: full-tree scan found 107 likely source-reading contract tests. These are useful tripwires, but they are a recurring false-confidence class for behavior, timing, and DB/child-process semantics.
+- Production areas inspected with tests: auth actions/rate limits, semantic/similar routes, migration/reconcile, DB backup/restore contracts, e2e harness/seed path, Playwright visual/hydration specs, CLIP preflight tests/workflows, package scripts/configs.
 
 ## Findings
 
-### TE-C23-01 - Pending file-deletion drain tests do not cover the highest-risk acceptance cases
+### TE-C24-01 - Auth rollback source test inspects the wrong catch block
+
+- Severity: High
+- Confidence: High
+- Status: Confirmed issue / false confidence
+- Files/regions: `apps/web/src/__tests__/auth-rate-limit-rollback.test.ts:24-44`, `apps/web/src/__tests__/auth-rate-limit-rollback.test.ts:61-120`, `apps/web/src/app/actions/auth.ts:261-271`, `apps/web/src/app/actions/auth.ts:483-498`
+- Problem: `extractOuterCatchBody()` starts at a function header, but its first scan runs to end-of-file and never computes the target function end. A probe of the helper showed the `login` test chooses the `updatePassword` catch at `auth.ts:483`, not the `login` outer catch at `auth.ts:261`.
+- Failure scenario: a future edit can reintroduce `rollbackLoginRateLimit(...)` inside the `login` verification catch while leaving `updatePassword` unchanged; `auth-rate-limit-rollback.test.ts` still passes because the login assertion checks the later catch body.
+- Suggested fix: replace this source parser with a behavior test around `login()` that mocks `db.select()` or `argon2.verify()` to throw after rate-limit pre-increment and asserts no rollback helpers are called. If keeping the parser temporarily, make it brace-match the named function body and add a self-test proving `login` resolves to the catch near `auth.ts:261`.
+
+### TE-C24-02 - Critical runtime contracts still rely on source tripwires rather than behavior
 
 - Severity: Medium
 - Confidence: High
-- Status: Confirmed test gap
-- Files/regions: `.context/plans/cycle-22-2026-07-08-plan.md:53-61`, `apps/web/src/__tests__/pending-file-deletions.test.ts:111-158`, `apps/web/src/lib/pending-file-deletions.ts:46-71`, `apps/web/src/lib/maintenance-scheduler.ts:26-49`, `apps/web/src/app/[locale]/admin/db-actions.ts:655-678`
-- Weakness: the new drain test mocks both strict filesystem helpers and covers only all-success, permanent failure, and limit normalization. It does not test transient failure followed by success, already-missing files through the real strict helpers, restore-active suppression, or post-restore marker ordering as executable behavior.
-- Failure scenario: a future change can break the restore guard or leave stale restored rows undrained while the current drain unit test still passes because it never crosses the scheduler/restore boundary.
-- Suggested test: add cases for `mockRejectedValueOnce()` then success, real temp-directory missing-file cleanup, mocked `isRestoreMaintenanceActive() === true` preventing scheduler drain, and a small extracted post-restore sequencing helper that asserts `endDurableRestoreMaintenance()` precedes drain.
+- Status: Likely issue with one confirmed exemplar above
+- Files/regions: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19`, `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-101`, `apps/web/src/__tests__/db-restore.test.ts:47-74`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:1-17`, `apps/web/src/__tests__/search-stale-response.test.ts:8-10`, `apps/web/src/app/api/search/semantic/route.ts:270-279`, `apps/web/src/app/api/search/similar/[id]/route.ts:181-190`
+- Problem: several high-risk guarantees are asserted by string presence or source ordering. `migrate-reconcile-coverage` explicitly says it is not a structural validator; `db-restore.test.ts` string-pins cleanup/failure paths; semantic scan caps are protected by `.limit(SEMANTIC_SCAN_LIMIT)` source regex because route mocks do not assert the terminal `.limit()` argument.
+- Failure scenario: a refactor can preserve the searched strings while changing transaction sequencing, child-process settlement, or query execution. The auth finding proves this is not hypothetical: a source helper can pass while testing a different region.
+- Suggested fix: keep source tripwires as cheap lint, but add TDD behavior harnesses for the top risks: disposable MySQL schema-diff after `reconcileLegacySchema`, fake `mysql`/`mysqldump` child-process restore failure tests, and DB-chain mocks that record `.limit(SEMANTIC_SCAN_LIMIT)` on semantic and similar scans.
 
-### TE-C23-02 - Cleanup tests miss the successful-scan debug noise path
-
-- Severity: Low
-- Confidence: High
-- Status: Confirmed test gap with confirmed behavior
-- Files/regions: `apps/web/src/lib/process-image.ts:576-588`, `apps/web/src/lib/process-image.ts:118-127`, `apps/web/src/__tests__/process-image-variant-scan.test.ts:24-84`, `apps/web/src/__tests__/pending-file-deletions.test.ts:73-82`
-- Weakness: `process-image-variant-scan.test.ts` asserts files are deleted but does not spy on `console.debug`; `pending-file-deletions.test.ts` mocks `deleteImageVariantsStrict`, so it cannot catch helper-level logging.
-- Failure scenario: every successful `sizes=[]` derivative scan can log `ERR_DIR_CLOSED`, and tests still pass because they assert filesystem outcome only.
-- Suggested test: add a no-debug assertion around `deleteImageVariantsStrict(tempDir, 'missing-or-existing.jpg', [])`, or add a focused `safeCloseDirHandle`/full-scan test after changing the helper to ignore `ERR_DIR_CLOSED`.
-
-### TE-C23-03 - Safety-critical coverage is still heavily source-contract based
-
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed recurring gap
-- Files/regions: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:28-37`, `apps/web/src/__tests__/db-restore.test.ts:12-136`, `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:19-77`, `apps/web/src/__tests__/search-stale-response.test.ts:13-35`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts:5-45`
-- Weakness: repo-wide scan found 167 unit test files using source-read/source-index patterns. Some are useful lint-like tripwires, but several high-risk runtime contracts still lean on string shape rather than behavior.
-- Failure scenario: migration reconcile semantics, restore child-process settlement, semantic scan caps, stale response suppression, or delete-ledger wiring can preserve expected imports/strings while changing runtime behavior.
-- Suggested test strategy: keep source tripwires, but add behavior harnesses for the highest-risk classes: disposable MySQL/reconcile diff tests, fake `mysqldump`/`mysql` child-process settlement, route-level semantic scan cap tests, and jsdom/RTL stale-search cancellation tests.
-
-### TE-C23-04 - Browser coverage remains Chromium-only with screenshot artifacts rather than visual assertions
+### TE-C24-03 - Browser and visual coverage is narrow and partly artifact-only
 
 - Severity: Medium
 - Confidence: High
 - Status: Manual-validation risk
-- Files/regions: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/e2e/hydration-photo-page.spec.ts:20-49`
-- Weakness: CI installs only Chromium, Playwright defines only a Desktop Chrome project, and nav visual tests write screenshots without comparing them. Hydration readiness still uses `networkidle`.
-- Failure scenario: mobile WebKit touch issues, Firefox display-gamut behavior, PWA/offline regressions, visual layout drift, or hydration flakes escape automated gates.
-- Suggested test: add tagged smoke projects for mobile WebKit/mobile Chromium/PWA offline and convert stable screenshots to `toHaveScreenshot()`; replace `networkidle` with an app-level readiness condition.
+- Files/regions: `apps/web/playwright.config.ts:48-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/e2e/hydration-photo-page.spec.ts:36-49`
+- Problem: Playwright defines one Desktop Chrome project and CI installs/runs only Chromium. The nav "visual" tests save screenshots at `nav-visual-check.spec.ts:58`, `:72`, and `:85`, but do not compare them to baselines. Hydration waits on `networkidle`, which is a known flaky readiness proxy for modern apps.
+- Failure scenario: WebKit/mobile viewport regressions, Firefox media-query/display-gamut differences, PWA/service-worker issues, or visual spacing/color regressions can ship green. A hydration warning emitted after `networkidle`, or suppressed by timing, can also evade the current assertion.
+- Suggested fix: add small tagged smoke projects for mobile WebKit and mobile Chromium, and convert stable nav screenshots to `expect(locator).toHaveScreenshot()` with masked dynamic regions. Replace `networkidle` with an app-level hydration-ready marker or a bounded console-error collection window after a concrete UI-ready assertion.
 
-### TE-C23-05 - Cycle 22 quality-gate evidence is not reconciled with the pushed HEAD/deploy requirement
+### TE-C24-04 - Main quality workflow does not exercise production CLIP preflight
 
-- Severity: Medium
+- Severity: Low-Medium
 - Confidence: High
-- Status: Confirmed evidence gap
-- Files/regions: `.context/plans/cycle-22-2026-07-08-plan.md:135-175`, `.context/plans/README.md:34-37`, commit `57c1ae33`
-- Weakness: the commit body for `57c1ae33` records all blocking local gates as green, but the committed Cycle 22 plan still lists WP6 open and says commit/push/deploy pending. No deploy/smoke evidence is recorded for the pushed recovery commit.
-- Failure scenario: a later test/release lane may assume Cycle 22 is complete from commit history or incomplete from plan history, and production verification remains ambiguous.
-- Suggested test/process fix: add a lightweight ledger consistency check for active plans: if HEAD is pushed and gate evidence exists, the plan must either record deploy evidence or explicitly mark deploy superseded/pending with a blocking reason.
+- Status: Risk needing manual/scheduled validation
+- Files/regions: `apps/web/src/__tests__/clip-offline-load.test.ts:15-18`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-10`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:30-31`, `.github/workflows/quality.yml:54-83`, `.github/workflows/clip-preflight.yml:3-45`
+- Problem: default Vitest skips real CLIP loading/ranking unless model env and weights are present. The dedicated preflight exists, but it is only `workflow_dispatch` plus weekly schedule, not part of the PR/push quality workflow.
+- Failure scenario: a PR that changes `clip-model.ts`, manifest/download behavior, transformer setup, or semantic production routing can pass the main quality workflow while breaking production semantic search until the weekly preflight or an operator run catches it.
+- Suggested fix: trigger `clip-preflight.yml` on PRs/pushes that touch CLIP model/download/semantic production files, or add a required lightweight non-weighted contract plus an optional required preflight label/check for CLIP-touching changes.
 
-## Evidence Commands
+### TE-C24-05 - No coverage report or threshold exists for regression visibility
 
-```bash
-find apps/web/src/__tests__ -maxdepth 1 -name '*.test.ts' | wc -l
-find apps/web/e2e -maxdepth 1 -name '*.spec.ts' | wc -l
-rg -l "readFileSync|fs\\.readFileSync|extractFunctionBody|source\\.indexOf|source\\.includes" apps/web/src/__tests__ | wc -l
-npm run lint:action-origin --workspace=apps/web
-npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/pending-file-deletions.test.ts src/__tests__/pending-session-revocations.test.ts src/__tests__/data-timeline-behavior.test.ts
-npm test --workspace=apps/web -- --run src/__tests__/process-image-variant-scan.test.ts src/__tests__/upload-paths.test.ts
-```
+- Severity: Low-Medium
+- Confidence: High
+- Status: Test strategy gap
+- Files/regions: `package.json:17-29`, `apps/web/package.json:13-29`, `apps/web/vitest.config.ts:16-39`, `.github/workflows/quality.yml:54-83`
+- Problem: scripts run many tests, but there is no coverage command, changed-file coverage signal, or threshold. This is especially risky in a repo with 107 source-contract tests because raw test count can look strong while behavior coverage for new branches remains absent.
+- Failure scenario: a new failure branch in an admin action, route, restore path, or image pipeline lands with only a source pin or no test at all; CI has no objective signal that executable coverage dropped.
+- Suggested fix: add a non-blocking coverage report first, then ratchet changed-file or high-risk-directory thresholds. Exclude fixture/source-scanner files deliberately so the metric does not reward more string-only tests.
 
-Results: targeted tests and `lint:action-origin` passed. Full gates and live deploy were not rerun in this review lane.
+## Evidence
 
-## Final Missed-Issue Sweep / Uninspected
+- Full inventory commands used: `find apps/web/src/__tests__ -type f -name '*.test.*'`, `find apps/web/e2e -type f -name '*.spec.ts'`, `find .github -maxdepth 4 -type f`, package/config reads, and repo-wide `rg` for skips/source contracts.
+- Counts observed: 362 Vitest files, 9 Playwright specs, 4008 `describe`/`it`/`test` call sites, 107 likely source-reading contract tests.
+- Confirmed parser false-confidence with a read-only Node probe: both `extractOuterCatchBody(authSource, 'export async function login')` and the updatePassword call select the catch beginning at `auth.ts:483`.
+- No full test suite, Playwright suite, build, typecheck, or deploy was run in this review lane.
 
-- No `test.only` sweep beyond the targeted `rg` inventory was run.
-- Full unit suite, full Playwright suite, build, typecheck, and all lint gates were not rerun.
-- Real browser matrix, live production, nginx/proxy topology, and CLIP model preflight remain manual/uninspected here.
+## Final Sweep
+
+- Examined file categories: root/app package scripts, Vitest config, Playwright config, GitHub workflows, e2e helper/server/seed scripts, all test file names, skip/only/todo patterns, custom lint gates, source-contract tests, auth/semantic/restore/migration production regions, CLIP gated tests, and existing carry-forward test-infra registers.
+- Checked common misses: `test.only`/`describe.only` none found; intentional skips are CLIP env gates and admin/local e2e gates; admin e2e auto-enables in CI through local origin plus plaintext `E2E_ADMIN_PASSWORD`; `.next` test discovery is excluded; Playwright serializes admin login to avoid rate-limit flakes.
+- Remaining manual validation: non-Chromium browsers, real CLIP weights outside scheduled preflight, live nginx/proxy topology, production deploy smoke, and full gate execution.

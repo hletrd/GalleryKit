@@ -1,91 +1,86 @@
-# Cycle 23 Verifier Review
+# Cycle 24 Verifier Review
 
 Role: `verifier`
 Repo: `/Users/hletrd/flash-shared/gallery`
-Current HEAD at write: `57c1ae33` (`origin/master`)
-Reviewed scope: Cycle 22 recovery implementation and current verification surface.
+Mode: review-only; no source code edited.
+Date: 2026-07-08 KST
 
 ## Inventory
 
-Required guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`.
+Guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, and the local `code-review` skill.
 
-Test/verification inventory built before findings:
+Review-relevant inventory was built before judging findings. The repo currently has 624 TypeScript/JavaScript/SQL/JSON/shell/YAML files in the reviewed source, script, migration, deploy, and test directories:
 
-- Gate definitions: root `package.json`, `apps/web/package.json`, `.github/workflows/quality.yml`.
-- Unit/browser surfaces: 360 Vitest files under `apps/web/src/__tests__`; 9 Playwright specs under `apps/web/e2e`; `apps/web/vitest.config.ts`; `apps/web/playwright.config.ts`.
-- Cycle 22 implementation and ledger files: `.context/plans/cycle-22-2026-07-08-plan.md`, `.context/plans/cycle-22-2026-07-08-deferred.md`, `.context/plans/README.md`, `.context/reviews/_aggregate.md`, `CLAUDE.md`.
-- Mutation-barrier scanner and fixtures: `apps/web/scripts/check-action-origin.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`, current `apps/web/src/app/actions/**` slot shapes.
-- Pending deletion drain and restore wiring: `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, related tests.
-- Timeline parser-backed grouping: `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/mysql-datetime.ts`, `apps/web/src/__tests__/data-timeline*.test.ts`.
-- Remaining test-infra risks: source-contract-heavy tests, Playwright project matrix, screenshot/manual artifact tests, hydration readiness waits.
+- Auth and admin API enforcement: `apps/web/scripts/check-api-auth.ts`, `apps/web/src/lib/api-auth.ts`, admin API routes, and `apps/web/src/__tests__/check-api-auth.test.ts`.
+- Server-action origin and mutation barrier: `apps/web/scripts/check-action-origin.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, all `apps/web/src/app/actions/**`, `apps/web/src/app/[locale]/admin/db-actions.ts`, and related tests.
+- Public route rate limits: `apps/web/scripts/check-public-route-rate-limit.ts`, every `apps/web/src/app/**/route.ts(x)` handler, rate-limit helpers, and route-rate tests.
+- Privacy projections: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, public semantic/similar routes, map query paths, and privacy tests.
+- Migrations and reconcile: `apps/web/src/db/schema.ts`, all `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, and migration coverage tests.
+- Restore maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, restore durable marker helpers, recovery script, restore SQL scanner, drain checklist, queue/background-drain helpers, and restore tests.
+- Queue/backfill locks: image queue, admin color backfill runner, color/CLIP sidecar scripts, advisory-lock helpers, upload-processing contract lock, and lock/backfill/queue tests.
+- Deploy and cache/PWA: root deploy wrapper, `apps/web/deploy.sh`, Dockerfile/Compose/nginx config, service worker template/generated worker, SW cache helper, proxy admin-render marker, and deploy/SW/cache tests.
+- Docs and plan rules: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, `README.md`, and `apps/web/README.md`.
 
 ## Findings
 
-### VER-C23-01 - Cycle 22 terminal release ledger is still stale after the pushed recovery commit
+No confirmed code correctness findings were found in this verifier pass.
 
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed
-- Files/regions: `.context/plans/cycle-22-2026-07-08-plan.md:1-6`, `.context/plans/cycle-22-2026-07-08-plan.md:135-163`, `.context/plans/README.md:34-37`, commit `57c1ae33`
-- Contract: Project policy requires the per-cycle plan to carry terminal gate, push, and deploy evidence. Cycle 22 WP6 explicitly schedules full gates, signed commit/push, and `npm run deploy`.
-- Evidence: current HEAD is `57c1ae33` and is already `origin/master`, and the commit body records all local gates as tested. The Cycle 22 plan still says `Status: IMPLEMENTED - GATES PENDING`, WP6 says `commit/push/deploy pending`, and the WP6 checkbox remains open. No tracked deploy/live-smoke evidence for `57c1ae33` is present in the Cycle 22 ledger.
-- Failure scenario: Cycle 23+ agents cannot tell from committed ledgers whether `57c1ae33` was deployed, superseded, or only pushed locally, so production-state assumptions drift from source-state evidence.
-- Suggested fix: append terminal Cycle 22 evidence with exact commit hash, push state, deploy result or superseding deploy, and smoke result; then move Cycle 22 out of active plans.
+No likely issues are being reported. The source and tests I examined provide executable enforcement for the claimed invariants in scope: admin API wrappers, action-origin checks, restore mutation barriers, public route rate limits, privacy omissions, migration/reconcile mirrors, restore maintenance fences, queue/backfill locks, deployment disk-safety claims, and PWA/cache behavior.
 
-### VER-C23-02 - Successful full-scan derivative cleanup emits a false debug error
+## Evidence
 
-- Severity: Low
-- Confidence: High
-- Status: Confirmed
-- Files/regions: `apps/web/src/lib/process-image.ts:576-588`, `apps/web/src/lib/process-image.ts:118-127`, `apps/web/src/lib/pending-file-deletions.ts:82-88`
-- Contract: pending deletion cleanup and restored stale rows should quietly treat absent files as already clean unless storage actually refuses cleanup.
-- Evidence: `deleteImageVariantsStrict(..., [])` full-scans a directory with `for await (const entry of dirHandle)` and then calls `safeCloseDirHandle(dirHandle)` in `finally`. Node closes the `Dir` handle at iterator completion; the second close throws `ERR_DIR_CLOSED`, which `safeCloseDirHandle()` logs because it ignores only `ENOENT`. A direct probe from `apps/web` showed `deleteImageVariantsStrict missing: resolved` while logging `[safeCloseDirHandle] Failed to close directory handle: Error [ERR_DIR_CLOSED]`.
-- Failure scenario: ordinary image deletion or maintenance drains can produce debug noise for successful derivative scans, making real cleanup failures harder to spot.
-- Suggested fix: treat `ERR_DIR_CLOSED` as benign or remove the explicit close after `for await`; add a regression test that a successful `sizes=[]` scan does not call `console.debug`.
-
-### VER-C23-03 - Pending deletion recovery is partly behavior-backed, but restore suppression remains source-only
-
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed test/evidence gap
-- Files/regions: `apps/web/src/lib/maintenance-scheduler.ts:26-49`, `apps/web/src/app/[locale]/admin/db-actions.ts:655-678`, `apps/web/src/__tests__/pending-file-deletions.test.ts:111-158`, `apps/web/src/__tests__/pending-session-revocations.test.ts:101-116`
-- Contract: Cycle 22 WP2 acceptance requires the drain not to run during restore maintenance and restored rows to retry after the restore marker clears.
-- Evidence: implementation wires the drain through `runMaintenanceTask()` and post-restore cleanup. The executable `pending-file-deletions.test.ts` covers success, permanent failure, and limit normalization, but not restore-active suppression or post-marker ordering as behavior. Those claims are currently asserted only by string/index checks in `pending-session-revocations.test.ts`.
-- Failure scenario: a future refactor can preserve the strings while moving the drain before marker clear, dropping the scheduler guard, or letting a maintenance sweep delete files mid-import; current behavior tests would stay green.
-- Suggested fix: add a mocked `isRestoreMaintenanceActive()` maintenance test that proves the drain is skipped while active, plus a restore-action harness or extracted helper test proving post-restore drains run only after `endDurableRestoreMaintenance()`.
-
-### VER-C23-04 - Browser-flow verification still leaves non-Chromium, PWA, and visual regressions manual
-
-- Severity: Medium
-- Confidence: High
-- Status: Manual-validation risk
-- Files/regions: `apps/web/playwright.config.ts:72-77`, `.github/workflows/quality.yml:75-80`, `apps/web/e2e/nav-visual-check.spec.ts:40-86`, `apps/web/e2e/hydration-photo-page.spec.ts:20-49`
-- Contract: browser-flow verification should prove user-visible behavior, not only produce artifacts.
-- Evidence: Playwright defines one `chromium` project and CI installs only Chromium. The nav visual checks write screenshots with `page.screenshot()` but do not compare baselines. The hydration page still waits on `networkidle`, a timing proxy that can be affected by background requests.
-- Failure scenario: mobile WebKit touch behavior, Firefox color/display differences, PWA/offline paths, or visual spacing regress while CI remains green.
-- Suggested fix: add a small tagged browser matrix for mobile WebKit/mobile Chromium/PWA smoke and convert stable visual checks to `toHaveScreenshot()` or mark current screenshots as manual artifacts.
-
-## Confirmed Closures / No Finding
-
-- The Cycle 22 positive mutation-slot scanner bypass is closed: `apps/web/scripts/check-action-origin.ts:647-675` rejects later sibling mutations after a positive acquired guard, and `apps/web/src/__tests__/check-action-origin.test.ts:657-675` covers the regression.
-- Runtime year-in-review grouping now uses `parseMySqlDateTimeParts()` at `apps/web/src/lib/data-timeline.ts:248-266`, with a mocked query-chain behavior test in `apps/web/src/__tests__/data-timeline-behavior.test.ts:65-80`.
-- The strict original and derivative helpers treat missing files as success in direct probes, so the `CLAUDE.md:437` missing-file claim is true at runtime; the residual is the noisy close path in VER-C23-02.
-
-## Evidence Commands
+Fresh checks run in this lane:
 
 ```bash
-git rev-parse --short HEAD
-git log --oneline --decorate -n 12
-git diff --name-status 8b795862079b0e5318242a09390b4cdff1dc2058..HEAD
+npm run lint:api-auth --workspace=apps/web
 npm run lint:action-origin --workspace=apps/web
-npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/pending-file-deletions.test.ts src/__tests__/pending-session-revocations.test.ts src/__tests__/data-timeline-behavior.test.ts
-npm test --workspace=apps/web -- --run src/__tests__/process-image-variant-scan.test.ts src/__tests__/upload-paths.test.ts
+npm run lint:public-route-rate-limit --workspace=apps/web
+npm test --workspace=apps/web -- src/__tests__/check-api-auth.test.ts src/__tests__/check-action-origin.test.ts src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/api-auth-response-headers.test.ts src/__tests__/request-origin.test.ts src/__tests__/privacy-fields.test.ts src/__tests__/search-route-privacy.test.ts src/__tests__/map-privacy.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/db-restore.test.ts src/__tests__/sql-restore-scan.test.ts src/__tests__/restore-maintenance.test.ts src/__tests__/restore-maintenance-recovery-mjs.test.ts src/__tests__/restore-upload-lock.test.ts src/__tests__/restore-drain-checklist.test.ts src/__tests__/admin-mutation-barrier.test.ts src/__tests__/auth-mutation-barrier-source.test.ts src/__tests__/image-queue-quiesce.test.ts src/__tests__/advisory-lock-release.test.ts src/__tests__/advisory-lock-release-contract.test.ts src/__tests__/admin-backfill-concurrency-cap.test.ts src/__tests__/admin-backfill-runner-batching.test.ts src/__tests__/admin-backfill-runner-leak.test.ts src/__tests__/backfill-color-pipeline.test.ts src/__tests__/backfill-clip-embeddings-reembed.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/nginx-config.test.ts src/__tests__/sw-cache.test.ts src/__tests__/sw-template-contract.test.ts src/__tests__/serve-upload.test.ts
+npm run typecheck --workspace=apps/web
+npm run lint --workspace=apps/web
 ```
 
-Results: targeted tests passed; `lint:action-origin` passed. I did not rerun the full blocking suite in this review lane.
+Results:
 
-## Final Missed-Issue Sweep / Uninspected
+- `lint:api-auth`: passed; both admin API route exports are wrapped by `withAdminAuth(...)`.
+- `lint:action-origin`: passed; mutating server actions are guarded by same-origin checks and restore mutation slots or explicit exemptions.
+- `lint:public-route-rate-limit`: passed; public mutating/expensive route handlers have pre-increment rate limits or explicit exemptions.
+- Targeted invariant suite: 32 test files passed, 616 tests passed.
+- `typecheck`: passed for app route types and scripts.
+- `lint`: passed.
 
-- Full `lint`, `api-auth`, `public-route-rate-limit`, `typecheck`, `build`, full unit, and full Playwright gates were not rerun; Cycle 22 commit text claims them green.
-- Live production deploy, host nginx, proxy topology, and real CLIP model weights were not dynamically inspected.
-- I did not inspect every historical plan archive; current active/deferred/index artifacts and recent review aggregates were inspected.
+## Confirmed Enforcement
+
+- Admin API wrappers are executable, not just convention: `apps/web/scripts/check-api-auth.ts` rejects unwrapped exports, spoofed imports, star re-exports, and alias/export shapes; `apps/web/src/__tests__/check-api-auth.test.ts` covers those cases. Runtime `withAdminAuth` in `apps/web/src/lib/api-auth.ts` applies same-origin admin-cookie auth and scoped token auth with no-store/nosniff defaults.
+- Action origin and mutation barrier are enforced by scanner and runtime primitives: `apps/web/scripts/check-action-origin.ts` requires `requireSameOriginAdmin()` or the approved auth guard and also requires `using ... = acquireAdminMutationSlot()` for mutating actions. The current tests include nested/sibling mutation, auth-before-origin, imported side-effect helper, revalidation-before-origin, public action rate-limit, and barrier-spoofing cases.
+- Public routes are rate-limited before expensive work: `apps/web/scripts/check-public-route-rate-limit.ts` scans public App Router routes, recognizes approved pre-increment helpers, rejects protected work before limiter calls, and treats upload helper routes and cheap health/live routes through documented exemptions.
+- Privacy fields have symmetric compile/test guards: `apps/web/src/lib/data.ts` derives public selectors from admin selectors by omitting sensitive fields, defines `_PrivacySensitiveKeys`, and map GPS exposure is isolated to `getMapImages()` with `topics.map_visible = true`. `privacy-fields.test.ts`, `data-viewer-select-fields.test.ts`, `search-route-privacy.test.ts`, and map privacy tests pin these contracts.
+- Migration/reconcile invariants are executable: journal tags match files, new `when` values are monotonic after the documented historical inversion, `migrate.js` has a silent-skip post-condition, and `migrate-reconcile-coverage.test.ts` checks schema table/column/index/FK/drop coverage against executable reconcile code.
+- Restore maintenance is fenced across process and durable markers: restore writes a durable marker before drains/import, drains image queue/background DB writes/maintenance/admin mutation slots, holds restore/upload/backfill advisory locks, and keeps maintenance active on import/migration failure. Restore SQL scanning blocks dangerous or unknown-table writes and is covered across chunk-boundary cases.
+- Queue/backfill locks are source- and behavior-backed: image processing uses per-image advisory locks with destroy-on-release-failure discipline; restore quiesce clears queued work before `onIdle()`; admin color backfill and sidecar share the color backfill lock; semantic backfill uses its own restore-serialized lock; pooled raw `RELEASE_LOCK` call sites are allowlisted and tested.
+- Deployment claims are enforced: root deploy target is env-file driven, deploy/runtime env files are permission-checked before sourcing/Compose, `apps/web/deploy.sh` waits for health before Docker prune, and tests pin no `docker volume prune -a`, narrow bind mounts, immutable assets in the image, and no recursive chown of bind-mounted data.
+- PWA/cache claims are pinned: the service worker bypasses admin routes, caches only same-origin derivative paths for image SWR with a 50 MB LRU, uses offline-only HTML fallback with the `x-gk-admin-render` marker from `proxy.ts`, and source-contract tests compare template/generated worker behavior.
+
+## Manual Validation Gaps
+
+No source finding is attached to these gaps, but they still require operator or browser validation outside this review lane:
+
+- I did not run a production deploy or modify production infrastructure. Deploy behavior was verified through scripts and tests only.
+- I did not perform a real database restore/import against a live MySQL instance; restore behavior was verified through source inspection and unit/source-contract tests.
+- I did not run the real CLIP preflight or seed model weights. The runbook remains operator-gated in `CLAUDE.md`, and source/tests verify the gating/backfill paths.
+- I did not run Playwright or manual PWA browser flows in this lane; PWA/cache assertions are source-contract and unit-test backed.
+
+## Final Sweep
+
+Checked common missed issue classes:
+
+- New admin API route without `withAdminAuth(...)`: not found; scanner passed.
+- Mutating server action without same-origin return-early or restore mutation slot: not found; scanner passed.
+- Public mutating or expensive route doing work before rate-limit pre-increment: not found; scanner passed.
+- Admin-only or upload/color/HDR/GPS fields leaking through public selectors, search enrichment, timeline, or map paths: not found in inspected selectors/routes/tests.
+- New migration missing journal entry, stale `when`, missing reconcile mirror, or silent-skip post-condition: not found in inspected journal/reconcile tests.
+- Restore marker clear before import/migration failure, missing drain, or raw pooled advisory-lock release leak: not found in inspected restore and lock paths.
+- Deployment docs claiming data safety without script/test backing: not found; deploy docs/scripts/tests agree on bind mounts and prune-after-health.
+- PWA/cache claims drifting between TS helper, template, generated worker, and proxy marker: not found; contract tests cover the duplicated worker surface.
+
+Concurrent note: `.context/reviews/code-reviewer.md` already had unrelated working-tree changes during this lane. I did not edit it.

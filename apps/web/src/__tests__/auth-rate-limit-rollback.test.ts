@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as ts from 'typescript';
 
 /**
  * Plan 333 / C1F-CR-04 / C1F-SR-01.
@@ -43,6 +44,19 @@ describe('auth rate-limit rollback — C1F-CR-04 / C1F-SR-01 invariants', () => 
         expect(outerCatchBody!).not.toMatch(/rollbackPasswordChangeRateLimit\s*\(/);
     });
 
+    it('source parser scopes each outer catch to the requested function body', () => {
+        const loginOuterCatchBody = extractOuterCatchBody(authSource, 'export async function login');
+        const updatePasswordOuterCatchBody = extractOuterCatchBody(authSource, 'export async function updatePassword');
+
+        expect(loginOuterCatchBody, 'login outer catch body must be findable').toBeTruthy();
+        expect(updatePasswordOuterCatchBody, 'updatePassword outer catch body must be findable').toBeTruthy();
+        expect(loginOuterCatchBody).not.toBe(updatePasswordOuterCatchBody);
+        expect(loginOuterCatchBody).toContain('Login verification failed');
+        expect(loginOuterCatchBody).not.toContain('Failed to update password');
+        expect(updatePasswordOuterCatchBody).toContain('Failed to update password');
+        expect(updatePasswordOuterCatchBody).not.toContain('Login verification failed');
+    });
+
     it('rollback imports exist for the tooManyAttempts early-return paths', () => {
         // The rollback helpers must still be imported — they are used in the
         // pre-auth tooManyAttempts rejection path where rolling back is correct
@@ -59,107 +73,21 @@ describe('auth rate-limit rollback — C1F-CR-04 / C1F-SR-01 invariants', () => 
  * being the outermost one (not nested inside inner try/catches).
  */
 function extractOuterCatchBody(source: string, fnHeader: string): string | null {
-    const headerIdx = source.indexOf(fnHeader);
-    if (headerIdx === -1) return null;
+    const functionName = fnHeader.match(/function\s+(\w+)/)?.[1];
+    if (!functionName) return null;
 
-    // Find the function body start
-    const openBrace = source.indexOf('{', headerIdx);
-    if (openBrace === -1) return null;
+    const sourceFile = ts.createSourceFile(authPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const fn = sourceFile.statements.find((statement): statement is ts.FunctionDeclaration => (
+        ts.isFunctionDeclaration(statement) && statement.name?.text === functionName
+    ));
+    if (!fn?.body) return null;
 
-    // C1-LOW (cycle 1 RPF): the original loop tracked a brace `depth`
-    // counter that was never read. Removed the dead counter to silence the
-    // @typescript-eslint/no-unused-vars warning. The string/comment skipping
-    // remains necessary so braces inside strings/comments don't perturb the
-    // later `}\\s*catch\\s*\\(` regex scan over `source.slice(headerIdx, fnEnd)`.
-    let i = openBrace;
-    let inString: '"' | "'" | '`' | null = null;
-    let inLineComment = false;
-    let inBlockComment = false;
+    const outerTryStatements = fn.body.statements.filter((statement): statement is ts.TryStatement => (
+        ts.isTryStatement(statement) && Boolean(statement.catchClause)
+    ));
+    const outerTry = outerTryStatements.at(-1);
+    const catchBlock = outerTry?.catchClause?.block;
+    if (!catchBlock) return null;
 
-    while (i < source.length) {
-        const ch = source[i];
-        const next = source[i + 1];
-
-        if (inLineComment) {
-            if (ch === '\n') inLineComment = false;
-        } else if (inBlockComment) {
-            if (ch === '*' && next === '/') {
-                inBlockComment = false;
-                i++;
-            }
-        } else if (inString) {
-            if (ch === '\\') {
-                i++;
-            } else if (ch === inString) {
-                inString = null;
-            }
-        } else if (ch === '/' && next === '/') {
-            inLineComment = true;
-            i++;
-        } else if (ch === '/' && next === '*') {
-            inBlockComment = true;
-            i++;
-        } else if (ch === '"' || ch === "'" || ch === '`') {
-            inString = ch;
-        }
-        i++;
-    }
-
-    // Now scan backward from end of function to find the outer catch block.
-    // Look for the pattern: `} catch (` near the end of the function.
-    const fnEnd = i;
-    const catchPattern = /}\s*catch\s*\(\s*\w*\s*\)\s*\{/g;
-    let lastCatch: RegExpExecArray | null = null;
-    let match: RegExpExecArray | null;
-    while ((match = catchPattern.exec(source.slice(headerIdx, fnEnd))) !== null) {
-        lastCatch = match;
-    }
-    if (!lastCatch) return null;
-
-    const catchOpenBrace = source.indexOf('{', headerIdx + lastCatch.index + lastCatch[0].length - 1);
-    if (catchOpenBrace === -1 || catchOpenBrace >= fnEnd) return null;
-
-    // Extract the catch block body using brace depth
-    let catchDepth = 1;
-    let j = catchOpenBrace + 1;
-    inString = null;
-    inLineComment = false;
-    inBlockComment = false;
-
-    while (j < fnEnd) {
-        const ch = source[j];
-        const next = source[j + 1];
-
-        if (inLineComment) {
-            if (ch === '\n') inLineComment = false;
-        } else if (inBlockComment) {
-            if (ch === '*' && next === '/') {
-                inBlockComment = false;
-                j++;
-            }
-        } else if (inString) {
-            if (ch === '\\') {
-                j++;
-            } else if (ch === inString) {
-                inString = null;
-            }
-        } else if (ch === '/' && next === '/') {
-            inLineComment = true;
-            j++;
-        } else if (ch === '/' && next === '*') {
-            inBlockComment = true;
-            j++;
-        } else if (ch === '"' || ch === "'" || ch === '`') {
-            inString = ch;
-        } else if (ch === '{') {
-            catchDepth++;
-        } else if (ch === '}') {
-            catchDepth--;
-            if (catchDepth === 0) {
-                return source.slice(catchOpenBrace + 1, j);
-            }
-        }
-        j++;
-    }
-    return null;
+    return source.slice(catchBlock.getStart(sourceFile) + 1, catchBlock.end - 1);
 }

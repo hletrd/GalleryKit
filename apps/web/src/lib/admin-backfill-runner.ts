@@ -123,9 +123,9 @@ export const BACKFILL_RESERVED_LIVE_CONNECTIONS = (poolLimit: number): number =>
  * At LIMIT = 10, RESERVED = max(3, 5) = 5, so the cap is floor((10−5−1)/2) =
  * floor(4/2) = 2 — a backfill pins at most 1 (lock) + 2×2 = 5 connections,
  * leaving ≥ 5 for live traffic (≥ one full getImage fan-out plus slack).
- * Operators who raise ADMIN_BACKFILL_CONCURRENCY above the cap are silently
- * clamped DOWN to it so a background maintenance op can never pin the pool and
- * 500 live requests. The cap never drops below 1.
+ * Operators who raise ADMIN_BACKFILL_CONCURRENCY above the cap are clamped DOWN
+ * to it with a warning so a background maintenance op can never pin the pool
+ * and 500 live requests. The cap never drops below 1.
  */
 export function resolveBackfillConcurrency(
     requested: number,

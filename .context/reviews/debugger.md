@@ -1,73 +1,114 @@
-# Cycle 23 Debugger Review
+# Cycle 24 Debugger Review
 
 Role lane: debugger
 Date: 2026-07-08 KST
 Repository: `/Users/hletrd/flash-shared/gallery`
-Reviewed HEAD: `7054f94f2f2c7b3c339e8fd08fe4990f876e4833`
-Status: review-only; no fixes implemented.
+Reviewed HEAD: `4b43fad7ab471287b82fe5c8dac85c05c511220a`
+Status: review-only; no source fixes implemented.
 
-## Failure-Mode Inventory
+## Bug-Prone Inventory Built First
 
-Bug-prone files and paths inspected:
+I inventoried failure-prone surfaces before inspecting details, then inspected the relevant files rather than sampling within those surfaces.
 
-- Restore lifecycle: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/maintenance-scheduler.ts`.
-- Session/logout recovery: `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/pending-session-revocations.ts`, `apps/web/src/__tests__/pending-session-revocations.test.ts`.
-- Pending filesystem cleanup: `apps/web/src/lib/pending-file-deletions.ts`, deletion actions, scheduler, migration/reconcile files, SQL restore scanner, pending deletion tests.
-- Admin page read paths: admin root/protected layouts, dashboard/settings/analytics/users/tokens/categories/tags/seo/password/db pages, `apps/web/src/proxy.ts`, `apps/web/src/lib/api-auth.ts`.
-- Public route and background behavior during restore: public page/action restore guards, view-count buffering, queue/backfill/background write modules.
-- Schema/runtime contracts: Drizzle schema, migration journal, reconcile mirror, deploy scripts, docker/nginx topology, planning/deferred registers.
+- Large request admission and cleanup: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/next.config.ts`, upload contract locks, pending file deletion cleanup, restore scanner, `mysqldump`/`mysql` child process handling.
+- Restore, maintenance, and state reset paths: `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/pending-session-revocations.ts`, `apps/web/src/lib/background-db-writes.ts`, protected admin layout, public restore guards.
+- Background concurrency and retry paths: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/background-db-writes.ts`, DB pool setup, queue retry/failure cleanup, bootstrap paths.
+- Public dynamic runtime surfaces: public Server Actions, semantic search route, smart collection compiler, map page/client, search and similar-photo clients, service worker, view-count buffering, rate-limit helpers.
+- Deploy, migration, and operational failure modes: migration journal/reconcile mirror, `apps/web/scripts/migrate.js`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, Docker compose/deploy health checks, backup/restore shell integration.
+- Regression context checked: Cycle 23 plan/deferred registers, prior debugger findings, current Cycle 24 peer reviews in `.context/reviews/`, and the project rules in `CLAUDE.md` plus `.context/plans/README.md`.
 
-Validation run during review:
+## Confirmed Issues
 
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm test --workspace=apps/web -- pending-file-deletions pending-session-revocations check-action-origin migration-journal migrate-reconcile-coverage` passed: 7 files, 225 tests.
-- `npm run typecheck --workspace=apps/web` passed.
-
-## Findings
-
-### DBG-C23-01 - A restored admin session can be valid after restore maintenance has reopened
+### DBG-C24-01 - Large Server Action uploads can exhaust app memory before app-level guards run
 
 - Severity: High
 - Confidence: High
-- Status: Confirmed source-ordering bug; manual race reproduction not run.
-- File/region: `apps/web/src/app/[locale]/admin/db-actions.ts:650-679`; `apps/web/src/lib/pending-session-revocations.ts:62-86`; `apps/web/src/app/actions/auth.ts:286-315`; `apps/web/src/lib/session.ts:136-150`; `apps/web/src/__tests__/pending-session-revocations.test.ts:101-110`.
+- Status: Confirmed source-level failure mode; live RSS/load reproduction not run.
+- File/region: `apps/web/next.config.ts:111-119`; `apps/web/src/app/actions/images.ts:87-106`, `154-159`, `197-221`; `apps/web/src/app/[locale]/admin/db-actions.ts:745-767`; safer route contrast at `apps/web/src/app/api/admin/lr/upload/route.ts:101-187`.
 
-Failure scenario:
+Problem:
 
-1. Admin logout happens during restore, so `logout()` cannot delete the session row and queues `hashSessionToken(token)`.
-2. Restore imports a backup containing that same session row.
-3. Restore `finally` clears the durable/process maintenance marker at `db-actions.ts:657`.
-4. Only after the app is reopened does it call `flushPendingSessionRevocations()` at `db-actions.ts:671`.
-5. Any request with the stale token in that gap, or after a failed flush that returns `0`, passes `verifySessionToken()` because `session.ts:136-150` sees the restored row.
+The browser upload path and DB restore path are Server Actions. The configured Server Action body limit is sized to the restore surface at `next.config.ts:111-119`, but the framework has to accept and parse the multipart body before the action code reaches its own lock, quota, file-size, and disk-budget checks. In `uploadImages`, the first application code runs at `actions/images.ts:87`, reads `formData.getAll('files')` at `actions/images.ts:106`, and only later obtains the upload contract lock at `actions/images.ts:154-159` and claims quota at `actions/images.ts:197-221`. In `runRestore`, the action receives `FormData` and then streams the uploaded file to a temp path at `db-actions.ts:745-767`, but the multipart body has already crossed the Server Action parser boundary before that streaming loop begins.
+
+Concrete failure scenario:
+
+Two admins, a buggy browser retry, or a tab restore submit large multipart bodies near the 250 MiB action limit while restore or upload locks are already held. The requests can consume Node/Next memory and parser work before the code can reject them for restore maintenance, lock contention, content-length, quota, disk space, or per-file policy. On the disk-constrained single-host deployment this can produce 413/500 churn, process OOM, health-check failure during deploy, or request starvation for unrelated traffic. The Lightroom route shows the safer shape: it rejects chunked uploads, checks `Content-Length`, claims quota, and enters a parse semaphore before `request.formData()` at `api/admin/lr/upload/route.ts:101-187`.
 
 Suggested fix:
 
-Flush pending session revocations after the import succeeds but before `endDurableRestoreMaintenance()`. In the restore path, make a failed non-empty flush observable and fail closed by keeping maintenance active or returning a recovery state. Update `pending-session-revocations.test.ts:101-110` so it guards the safer ordering instead of the current one.
+Move browser upload and DB restore ingestion off Server Actions and into Node route handlers that can reject on headers before parsing, share the existing upload/restore locks, require `Content-Length`, enforce a pre-parse semaphore, and stream to temp files before expensive image or SQL work. Keep the current Server Actions as thin form submit shims if needed, but the multipart parser boundary should sit behind the same early-admission controls already present in the Lightroom route.
 
-### DBG-C23-02 - Admin protected pages can throw or render non-authoritative state during restore
+### DBG-C24-02 - Background DB/CPU budgets are split across queues and can still overrun the shared pool under mixed load
+
+- Severity: High
+- Confidence: Medium-High
+- Status: Confirmed architectural failure surface; exact saturation threshold needs load validation.
+- File/region: DB pool `apps/web/src/db/index.ts:31-41`; image queue budget `apps/web/src/lib/image-queue.ts:121-153`, `447-456`; admin backfill budget `apps/web/src/lib/admin-backfill-runner.ts:97-143`, `716-727`; analytics/background writes `apps/web/src/lib/background-db-writes.ts:3-10`, `42-64`; CLIP inference budget `apps/web/src/lib/clip-model.ts:53-72`, `156-173`.
+
+Problem:
+
+The repository has several local concurrency controls, but they do not compose into one process-wide DB/CPU admission budget. The MySQL pool is 10 connections with a queue limit of 20 at `db/index.ts:31-41`. The image queue resolves its own concurrency from pool capacity at `image-queue.ts:121-153` and tracks active jobs at `image-queue.ts:447-456`. The admin backfill runner independently resolves backfill concurrency at `admin-backfill-runner.ts:97-143` and can run its work loop at `admin-backfill-runner.ts:716-727`. Analytics writes have their own queue and two-worker concurrency at `background-db-writes.ts:3-10`, `42-64`. CLIP inference has a separate CPU queue at `clip-model.ts:53-72`, `156-173`. Each limiter is locally reasonable, but none reserves against the others at runtime.
+
+Concrete failure scenario:
+
+An operator starts a color/metadata backfill while the image queue is processing a fresh upload batch, public view analytics are being written, and semantic embedding generation is enabled. Every subsystem believes it is inside its own cap, but the combined DB and CPU pressure can fill the 10-connection pool and 20-entry wait queue. User-visible reads then wait behind maintenance work, retry timers begin to fire, image jobs are retried or marked failed, and restore/drain paths have more outstanding background work to settle. This is a latent regression surface because future increases to any single cap can silently invalidate the assumptions in the other queues.
+
+Suggested fix:
+
+Introduce one shared process-wide admission controller for DB-pinning background work, with named budgets for image processing, backfill, analytics, semantic indexing, and restore drains. Make foreground/admin request reserve explicit, expose queue depth/active counts in diagnostics, and add a mixed-load stress test that runs upload processing, backfill, analytics writes, and CLIP jobs against a small pool to prove foreground reads and restore drains stay bounded.
+
+## Likely Issues
+
+### DBG-C24-03 - Public map can still create a browser/runtime failure at the current 10,000-marker cap
 
 - Severity: Medium
-- Confidence: High for source gap; Likely failure mode; manual browser validation not run.
-- Status: Confirmed missing guard.
-- File/region: `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:12-17`; `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27`; `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx:13-17`; `apps/web/src/app/[locale]/admin/(protected)/analytics/page.tsx:24-35`; `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx:11-13`; public contrast at `apps/web/src/app/[locale]/(public)/page.tsx:155-160`; scheduler contrast at `apps/web/src/lib/maintenance-scheduler.ts:26-46`.
+- Confidence: High for scale risk; manual browser trace not run.
+- Status: Likely user-visible failure mode on large GPS-enabled galleries.
+- File/region: data cap `apps/web/src/lib/data.ts:1766-1816`; map page serialization/list duplication `apps/web/src/app/[locale]/(public)/map/page.tsx:42-66`, `89-110`; Leaflet render/fitting `apps/web/src/components/map/map-client.tsx:77-94`, `120-141`.
 
-Failure scenario:
+Problem:
 
-An authenticated admin opens a protected SSR page while restore maintenance is active. The protected layout checks only `isAdmin()` and then renders children. Dashboard/settings/analytics/users pages execute normal DB reads while restore import may be replacing rows, rebuilding tables, or reconciling schema. Expected symptoms are intermittent 500s, stale/mixed admin state, or extra DB work in the recovery window. This is especially risky around restore completion because DBG-C23-01 temporarily reopens auth before queued revocations are proven.
+The server-side query now has a hard cap, but the cap is still 10,000 full markers. `getMapImages()` intentionally returns up to `MAP_MAX_MARKERS = 10000` rows at `data.ts:1766-1816`. `MapPage` serializes those markers to the client at `map/page.tsx:42-66`, renders the full interactive map at `map/page.tsx:89-96`, and also renders a duplicate accessible list for every marker at `map/page.tsx:98-110`. `MapClient` then computes `Math.min(...lats)` / `Math.max(...lats)` over every marker at `map-client.tsx:77-94` and mounts one Leaflet `Marker`/`Popup` subtree per marker at `map-client.tsx:120-141`.
+
+Concrete failure scenario:
+
+A gallery with thousands of map-visible GPS photos opens `/map` on a mobile browser. The page ships a large RSC/client payload, creates thousands of list nodes, computes global bounds over large arrays, and mounts thousands of Leaflet marker/popup components. Even though the server avoids an unbounded query, the browser can hit long main-thread stalls, memory pressure, hydration timeouts, or tab reloads. The truncated notice appears only after the expensive payload has already been produced.
 
 Suggested fix:
 
-Gate protected admin SSR pages on `isRestoreMaintenanceActive()` before rendering children. Return a small maintenance view that does not touch application tables, with any DB restore progress page handled as an explicit exception. Add a regression test that activates restore maintenance and proves protected admin children/data accessors are not invoked.
+Lower the default public marker cap for the current all-at-once renderer, or add viewport-bounded fetching/clustering before allowing 10,000 markers. Keep the accessible list paginated or virtualized, and add a Playwright/browser performance regression with a synthetic high-marker fixture to assert hydration and interaction remain within a practical budget.
+
+## Risks Needing Manual Validation
+
+### DBG-C24-04 - Edge limiter and trusted-client-IP behavior depend on manually applied nginx topology
+
+- Severity: Medium
+- Confidence: Medium
+- Status: Manual validation risk, not a confirmed source bug.
+- File/region: limiter key caveat `apps/web/nginx/default.conf:1-29`; public limiter application `apps/web/nginx/default.conf:274-311`; deploy does not apply nginx config `apps/web/deploy.sh:51-58`; app IP fallback `apps/web/src/lib/rate-limit.ts:175-216`.
+
+Problem:
+
+The nginx file documents that all `limit_req_zone` keys use `$binary_remote_addr` and that load-balanced deployments need real-IP or PROXY protocol configuration at `nginx/default.conf:20-28`. The public SSR limiter is applied in the catch-all location at `nginx/default.conf:274-311`, but the same comments state this file is config-only and must be manually applied/reloaded. The deploy helper builds and starts Docker containers at `deploy.sh:51-58`; it does not validate or reload host nginx. At the app layer, `getClientIp()` has to choose from forwarded headers and socket metadata at `rate-limit.ts:175-216`, so runtime correctness depends on the external proxy chain matching the documented trust assumptions.
+
+Concrete failure scenario:
+
+If nginx has not been reloaded with the current config, expensive public SSR pages may have no edge flood cap. If the site is later placed behind another load balancer without real-IP configuration, all visitors can share one nginx limiter bucket and receive false 429s, while the app may see a different client-IP key than nginx. Either mismatch makes rate-limit behavior hard to reason about during traffic spikes or incident response.
+
+Suggested fix:
+
+Add an operator validation step that captures the live nginx config, confirms `nginx -T` contains the expected limiter zones/location, verifies whether real-IP or PROXY protocol is configured for the actual topology, and compares nginx and app-observed client IPs with a known forwarded request. If this topology remains expected, automate a non-destructive deploy-time check that fails before traffic is shifted when the host config is stale.
 
 ## Confirmed Non-Findings / Regression Checks
 
-- The previous pending-file-deletion retry gap is fixed at the source level: `drainPendingFileDeletions()` exists and is used by both maintenance and post-restore cleanup.
-- The final admin-auth sweep found the protected layout at `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:12-17`; protected pages are not relying only on `proxy.ts` cookie-shape checks.
-- The action-origin, public route rate-limit, API-auth, migration journal, reconcile coverage, pending deletion, and pending revocation targeted checks all passed in this review.
-- Known deferred items from Cycle 22 were not duplicated unless a new Cycle 23 failure mode was confirmed.
+- The Cycle 23 restore-session ordering bug appears fixed at source level: `restoreDatabase()` now holds maintenance through the strict pending session revocation flush at `apps/web/src/app/[locale]/admin/db-actions.ts:656-673` and only then clears maintenance/resumes queues at `db-actions.ts:674-695`.
+- The Cycle 23 protected-admin restore gap appears fixed at source level: the protected admin layout checks `isRestoreMaintenanceActive()` before rendering children at `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:20-25`.
+- The Lightroom upload route already follows the safer pre-parse admission pattern and was used as the contrast for DBG-C24-01, not flagged as broken.
+- I did not find new missing `finally` cleanup in the inspected delete, restore, upload, queue retry, backfill, or CLIP inference paths. Existing catch/finally paths release upload locks, advisory locks, retry timers, pending deletion records, and inference waiters in the inspected regions.
+- I did not find a new confirmed auth-wrapper, action-origin, or public route rate-limit scanner bypass in production route/action files during this static debugger pass.
 
 ## Final Missed-Issues Sweep
 
-After drafting findings, I rechecked restore marker ownership, queued cleanup ownership, admin route layering, migration mirrors, deploy topology, scanner coverage, and current deferred registers. I did not find additional confirmed debugger findings beyond the two restore/admin recovery defects listed above.
+Final sweep covered restore marker ownership, queued cleanup ownership, session revocation replay, admin route layering, multipart upload/restore admission, child process timeout paths, queue retry cleanup, async abort/request-id handling in search/similar-photo clients, map hydration scale, semantic search request bounds, smart collection AST validation, public route limiters, migration/reconcile coupling, deploy health checks, nginx topology assumptions, and current deferred registers.
+
+No additional confirmed debugger findings were identified beyond the two confirmed failure-mode issues, one likely browser-runtime scale issue, and one manual topology validation risk above.

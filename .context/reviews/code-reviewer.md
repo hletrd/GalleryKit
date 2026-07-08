@@ -1,84 +1,175 @@
-# Cycle 23 Code Reviewer Report
+# Cycle 24 Code Reviewer Report
 
 Date: 2026-07-08 KST
-Role: `code-reviewer`
-Review HEAD: `57c1ae33c0b9a0dd483cfdf58750b81d42a7d775`
-Base reviewed: Cycle 22 implementation range `8b795862..HEAD`
-Scope: review-only. No implementation changes made.
+Review HEAD: `0f3e48e044bf0e6a8019f8910dd649d706a9e91b`
+Role: code-reviewer lane
+Scope: full repository review from code quality, logic, SOLID, maintainability, cross-file correctness, data flow, and edge-case angles. No source code was edited.
 
-## Inventory
+## Inventory Built
 
-Guidance read first:
-- `AGENTS.md`
-- `CLAUDE.md`
-- `.context/plans/README.md`
-- `code-review` skill instructions at `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+Review-relevant inventory, excluding generated/runtime payloads (`node_modules`, `.next`, `test-results`, upload/resource/data directories), contained 3,957 files.
 
-Review-relevant changed files inventoried before findings:
-- 28 files changed in `8b795862..HEAD`.
-- Runtime/scripts/tests: `apps/web/scripts/check-action-origin.ts`, `apps/web/src/__tests__/check-action-origin.test.ts`, `apps/web/src/__tests__/data-timeline-behavior.test.ts`, `apps/web/src/__tests__/pending-file-deletions.test.ts`, `apps/web/src/__tests__/pending-session-revocations.test.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/lib/pending-file-deletions.ts`, `CLAUDE.md`.
-- Review/plan docs: `.context/plans/README.md`, `.context/plans/cycle-21-2026-07-08-plan.md`, `.context/plans/cycle-22-2026-07-08-plan.md`, `.context/plans/cycle-22-2026-07-08-deferred.md`, `.context/plans/deferred-carry-forward.md`, and top-level review artifacts under `.context/reviews/`.
+High-risk categories examined:
 
-Connected files examined for cross-file interactions:
-- Pending deletion schema/migration/reconcile surface: `apps/web/src/db/schema.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`, `apps/web/scripts/migrate.js`.
-- Filesystem delete semantics: `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/process-image.ts`.
-- Delete action writers: `apps/web/src/app/actions/images.ts`.
-- Timeline parser and grouping: `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/mysql-datetime.ts`.
-- Maintenance/restore source-contract tests: `apps/web/src/__tests__/maintenance-scheduler-source.test.ts`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts`.
+- App Router pages, layouts, route handlers, and server actions under `apps/web/src/app` (80 files).
+- UI components under `apps/web/src/components` (61 files).
+- Shared libraries under `apps/web/src/lib` (115 files), with deep reads of upload, auth, restore, queue, semantic search, image processing, data projection, privacy, and cache paths.
+- Database schema and connection layer under `apps/web/src/db` (3 files).
+- Drizzle migrations and metadata under `apps/web/drizzle` (31 files).
+- Operational scripts under `apps/web/scripts` (28 files).
+- Unit and e2e tests under `apps/web/src/__tests__` and `apps/web/e2e` (373 files total).
+- Root/package/deploy/config docs and plans, including `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, current cycle plan/deferred files, Docker, Compose, Next config, and deploy scripts.
 
-Validation evidence:
-- `npm test --workspace=apps/web -- --run src/__tests__/check-action-origin.test.ts src/__tests__/pending-file-deletions.test.ts src/__tests__/pending-session-revocations.test.ts src/__tests__/data-timeline-behavior.test.ts` passed: 4 files, 124 tests.
-- `npm run lint:action-origin --workspace=apps/web` passed on current source.
-- Synthetic scanner repro with `npx tsx -e ... checkActionSource(...)` confirmed `src/app/actions/settings.ts` can pass when a slot is acquired inside an inner branch and a later outer `db.update(...).set(...)` is outside that slot's scope.
-- `git diff --check 8b795862..HEAD` failed on trailing whitespace in changed review docs.
+Current validation evidence:
 
-## Findings
+- `npm run lint --workspace=apps/web` passed.
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm run typecheck --workspace=apps/web` passed.
+- `git diff --check` passed.
 
-### CR23-01 - Mutation-barrier scanner accepts a nested slot that does not fence later outer mutations
+## Confirmed Issues
 
-- Severity: High
-- Confidence: High
-- Status: Confirmed
-- Region: `apps/web/scripts/check-action-origin.ts:687-735`, especially `blockHasApprovedSlot` returning true for any visited block at `698-725` and the nested-block traversal at `728-735`; `apps/web/src/__tests__/check-action-origin.test.ts:624-675`; `CLAUDE.md:434`.
-- Problem: `bodyAcquiresAdminMutationSlot()` walks every non-function block and returns true when any block contains `using mutationSlot = acquireAdminMutationSlot()` followed by an acquired-state gate. It does not prove that the discovered block dominates later mutating statements in the exported action body. Cycle 22 fixed same-block sibling mutations after a positive guard, but a slot inside an `if`/loop/try block can still satisfy the scanner while a later mutation in the outer function runs without holding a slot.
-- Failure scenario: a future action is written as:
-  ```ts
-  if (input.skip) {
-      using mutationSlot = acquireAdminMutationSlot();
-      if (!mutationSlot.acquired) return { error: 'restore in progress' };
-  }
-  await db.update(settings).set(input);
-  ```
-  `checkActionSource()` returns `OK`, but when `input.skip` is false the DB write runs without a restore-mutation slot. A restore can drain zero foreground slots and then import while that mutation is still allowed to commit.
-- Suggested fix: make the scanner reason at the exported action body boundary, not at any nested block. Either require the mutation slot/gate to be in the same top-level statement list that owns all later protected mutations, or compute the lexical region protected by the slot and require every protected write to be inside it. Add negative fixtures for slots inside `if`, `for`, `try`, and nested blocks followed by outer `db.*`, `logAuditEvent`, and revalidation calls.
+### CR24-01: Browser and Lightroom upload ingestion still duplicate the same critical pipeline
 
-### CR23-02 - Pending-deletion restore-suppression and missing-file behavior are under-tested compared with the plan contract
+Severity: Medium
+Confidence: High
+Status: Confirmed maintainability issue
 
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed test-design risk; runtime wiring is source-confirmed
-- Region: `.context/plans/cycle-22-2026-07-08-plan.md:51-64`; `apps/web/src/__tests__/pending-file-deletions.test.ts:111-158`; `apps/web/src/__tests__/maintenance-scheduler-source.test.ts:28-33`; `apps/web/src/lib/maintenance-scheduler.ts:26-47`; `apps/web/src/lib/pending-file-deletions.ts:105-139`.
-- Problem: the Cycle 22 plan explicitly required behavior tests for "missing-file idempotency" and "restore-active suppression" (`cycle-22...plan.md:53-56`). The added behavior test covers success, persistent failure, and limit clamping only. Restore suppression is still source-pinned in `maintenance-scheduler-source.test.ts`, and missing-file idempotency is inferred from strict helper implementations rather than tested through the pending-deletion drain.
-- Failure scenario: a later refactor could call `drainPendingFileDeletions()` outside `runMaintenanceTask`, or change strict delete helper ENOENT handling, while the new behavior test suite remains green. That would re-open the exact restore-window and stale-row classes Cycle 22 intended to close.
-- Suggested fix: add executable tests that mock `isRestoreMaintenanceActive()` and prove `runMaintenanceSweep()` does not invoke the drain while active, plus temp-dir based tests where every referenced original/variant is already absent and the pending row is deleted. Keep the source-contract tests only as secondary tripwires.
+Code region:
 
-### CR23-03 - Changed review artifacts contain trailing whitespace that fails `git diff --check`
+- `apps/web/src/app/actions/images.ts:87-610`
+- `apps/web/src/app/api/admin/lr/upload/route.ts:84-633`
 
-- Severity: Low
-- Confidence: High
-- Status: Confirmed
-- Region: `.context/reviews/_aggregate.md:3-5`; `.context/reviews/designer.md:3-5`, `26-27`, `52-53`, `78-79`, `111-118`; `.context/reviews/ui-ux-designer-reviewer.md:3-4`, `28-29`, `53-54`, `77-78`, `100-107`; `.context/reviews/product-marketer-reviewer.md:33-34`.
-- Problem: several changed Markdown review artifacts carry trailing spaces. This is not a runtime bug, but it makes the changed range fail a standard patch hygiene check and creates noisy diffs.
-- Failure scenario: if `git diff --check` is added to CI or used by a release reviewer, the cycle docs fail despite runtime gates being green. The noise also makes future review artifact edits harder to inspect.
-- Suggested fix: trim trailing whitespace in the changed review artifacts and avoid Markdown hard-break spaces in committed review files unless there is a rendering requirement.
+The browser upload action and Lightroom token route each implement their own full ingest pipeline: restore maintenance fencing, upload processing contract locking, quota claim/settle, topic validation, config snapshotting, disk preflight, original save, HDR/GPS policy, EXIF/color extraction, image insert shape, queue job shape, audit, and revalidation. The LR route contains many comments explicitly documenting fixes made to "mirror the browser path" (`route.ts:204-211`, `route.ts:327-340`, `route.ts:398-407`, `route.ts:421-427`, `route.ts:560-586`), which is evidence that parity has already drifted multiple times and had to be patched manually.
 
-## Non-Findings / Verified Areas
+Why this is a problem:
 
-- Pending-file deletion rows are selected oldest-first, bounded to 1..100 rows, and retry failures are retained with `attempts + 1` plus `last_error` (`apps/web/src/lib/pending-file-deletions.ts:95-139`).
-- Missing original/variant files appear intended to be idempotent through `deleteOriginalUploadFileStrict()` ENOENT handling and `deleteImageVariantsStrict()`/`strictUnlink()` behavior (`apps/web/src/lib/upload-paths.ts:90-118`, `apps/web/src/lib/process-image.ts:552-640`).
-- Restore completion drains pending deletions after clearing the durable marker (`apps/web/src/app/[locale]/admin/db-actions.ts:655-678`), and hourly/startup maintenance invokes the drain behind restore-active checks (`apps/web/src/lib/maintenance-scheduler.ts:35-47`).
-- Timeline grouping now uses `parseMySqlDateTimeParts()` and skips invalid capture dates (`apps/web/src/lib/data-timeline.ts:244-266`); the added test exercises that path.
+The current behavior appears intentionally aligned now, but the design relies on future contributors remembering to update two large, independently ordered implementations whenever upload policy changes. The duplicated insert and enqueue payloads are especially risky because they carry privacy, color/HDR, processing settings, and audit semantics.
+
+Concrete failure scenario:
+
+A future change adds a new admin upload-time processing setting or a new admin-only metadata column to the browser path's `insertValues` / `enqueueImageProcessing` payload (`images.ts:397-516`) but misses the LR route's parallel payload (`route.ts:454-587`). Browser uploads then honor the setting while LR publishes do not, producing rows with inconsistent processing snapshots or missing privacy-relevant metadata until a later backfill.
+
+Suggested fix:
+
+Extract a shared ingest service that starts after route-specific authentication/form parsing and owns: config snapshot, topic verification, disk preflight contract, original save, HDR/GPS gates, EXIF/color metadata normalization, image insert value construction, queue job construction, and post-commit bookkeeping inputs. Keep the server action and LR route as thin adapters for auth, request parsing, localization/error shaping, and response status. Add parity tests that assert browser and LR adapters produce the same insert/enqueue contract for representative JPEG, HDR-rejected, GPS-stripped, and RAW-rejected cases.
+
+### CR24-02: `lib/data.ts` mixes analytics buffering, public privacy contracts, listing, search, sitemap, and map queries in one 1,897-line module
+
+Severity: Low
+Confidence: High
+Status: Confirmed maintainability issue
+
+Code region:
+
+- `apps/web/src/lib/data.ts:13-249` implements shared-group view-count buffering and flushing.
+- `apps/web/src/lib/data.ts:251-506` defines admin/public/map select fields plus privacy guards.
+- `apps/web/src/lib/data.ts:514-1820` implements topic accessors, listing pagination, feed/sitemap helpers, search, map queries, and cached exports.
+
+Why this is a problem:
+
+The module now owns unrelated responsibilities with different failure modes: side-effecting analytics writes, data-projection privacy policy, public query composition, SEO/feed helpers, search result shaping, and map GPS exposure. The project has strong local guards, but the file's size and responsibility mix make future cross-file review harder and increase the chance that a change meant for one surface accidentally affects another.
+
+Concrete failure scenario:
+
+A contributor adding a new public listing/search field works in the same file as the canonical privacy omit blocks and may update one projection but miss a sibling projection or query helper. The compile-time guards reduce the chance of a sensitive-key leak (`data.ts:458-488`, `data.ts:1616-1626`), but the reviewer still has to reason across a long module containing analytics side effects and multiple public result shapes.
+
+Suggested fix:
+
+Split by responsibility while preserving exported APIs: for example `data/select-fields.ts` for admin/public/map field contracts and type guards, `data/listings.ts` for gallery pagination, `data/search.ts` for search result queries, `data/map.ts` for GPS/map-visible queries, `data/feed.ts` for feed/sitemap helpers, and `data/view-counts.ts` for the shared-group analytics buffer. Move tests with the contracts they protect, especially the privacy guard fixtures.
+
+## Risks Needing Manual Validation
+
+### CR24-03: Background DB/CPU budgets are calculated independently and can over-subscribe the shared host under combined load
+
+Severity: Medium
+Confidence: Medium
+Status: Risk needing manual validation
+
+Code region:
+
+- `apps/web/src/db/index.ts:21-42`
+- `apps/web/src/lib/image-queue.ts:121-153`
+- `apps/web/src/lib/admin-backfill-runner.ts:97-143`
+- `apps/web/src/lib/clip-model.ts:53-72`
+
+The DB pool is fixed at 10 connections with a queue limit of 20 (`db/index.ts:31-42`). The image queue independently reserves about half the pool for live traffic and caps itself at 2 workers on the default pool (`image-queue.ts:121-153`). The admin backfill runner uses similar independent arithmetic and also caps itself at 2 workers while holding one whole-run advisory-lock connection (`admin-backfill-runner.ts:97-143`). CLIP inference has a separate in-process queue and up to 4 inference slots (`clip-model.ts:53-72`).
+
+Why this is a problem:
+
+Each subsystem's local budget is sensible in isolation, but none of the caps accounts for the other background subsystem already running. Queue workers, backfill workers, semantic scans, and CLIP inference can overlap on the same process and database pool. The comments in `db/index.ts:21-30` and `admin-backfill-runner.ts:113-125` reason about one background lane at a time, not combined queue plus backfill plus semantic traffic.
+
+Concrete failure scenario:
+
+An operator starts an admin color/semantic backfill while uploads are still processing and visitors issue semantic/similar searches. Backfill can pin up to 5 DB connections, image queue can pin up to 4 more, and live/semantic requests still need transient connections. The pool can queue or timeout requests even though each lane individually believes it reserved live headroom. In the same window, CLIP inference can consume CPU/RAM independently of the DB pool cap, raising latency further.
+
+Suggested fix:
+
+Introduce a shared background resource budget for DB-pinning work, or make backfill and queue concurrency mutually aware. A minimal step is to drop image queue concurrency while an admin backfill is active, or make both lanes acquire permits from a common semaphore whose capacity is derived once from `POOL_CONNECTION_LIMIT`. Validate with a stress test or production trace that combines uploads, backfill, semantic search, and normal photo-page requests before raising any concurrency defaults.
+
+## Docs / Source Mismatches
+
+### CR24-04: Cycle 23 plan index still marks Cycle 23 active/pending even though the fix commit is current HEAD history
+
+Severity: Low
+Confidence: High
+Status: Confirmed docs/source mismatch
+
+Code region:
+
+- `.context/plans/cycle-23-2026-07-08-plan.md:1-7`
+- `.context/plans/README.md:34-38`
+
+The Cycle 23 implementation plan says `Status: IMPLEMENTED - GATES PASSED; PUSH/DEPLOY PENDING` (`cycle-23-2026-07-08-plan.md:3`), and the plan index still lists Cycle 23 under "Active Current-Cycle Plans" (`README.md:34-38`). Current git history is already at `0f3e48e0 fix(cycle23): harden restore and review findings`, so the docs no longer match the committed source state.
+
+Why this is a problem:
+
+This is not a runtime code defect, but it can mislead later review-plan-fix lanes. Agents may re-plan already committed Cycle 23 work, misclassify deferred findings as the active cycle, or assume push/deploy evidence is still pending when the repository has advanced to Cycle 24.
+
+Concrete failure scenario:
+
+A later planner reads only `.context/plans/README.md:34-38`, treats Cycle 23 as the active implementation ledger, and schedules duplicate work or stale deploy verification instead of using Cycle 24's review aggregate as the current source of truth.
+
+Suggested fix:
+
+Update the plan index and Cycle 23 plan status after the orchestrator records final push/deploy evidence, moving Cycle 23 into the recently completed section and making the current Cycle 24 artifacts the active ledger.
+
+## No Confirmed Runtime / Security Defects Found
+
+I did not find a new confirmed runtime correctness, auth, privacy, SQL-injection, restore-race, or upload-cleanup defect in this cycle.
+
+Evidence from the sweep:
+
+- Admin API route exports are guarded by `withAdminAuth`, confirmed by `lint:api-auth`.
+- Mutating server actions enforce same-origin provenance or carry explicit approved exemptions, confirmed by `lint:action-origin`.
+- Public mutating/expensive route handlers have pre-increment rate-limit coverage or explicit approved exemptions, confirmed by `lint:public-route-rate-limit`.
+- Public JSON-LD call sites use safe serialization helpers in the public home/topic/photo pages.
+- Public field projections have compile-time privacy guards, and public map GPS exposure is constrained to `map_visible` topics with a runtime assertion.
+- Restore maintenance paths keep mutation fencing, strict session revocation flushing, queue pause/resume, and pending-file-deletion drainage in the expected order.
+- Drizzle migration metadata and `migrate.js` reconciliation mirror the pending-file-deletion table shape.
+- Route handlers touching filesystem/database paths are pinned to Node runtime where required.
+- Searches for `.only`, broad type escapes in non-test source, raw SQL string assembly, `dangerouslySetInnerHTML`, and unchecked public projections did not reveal a new actionable defect.
 
 ## Final Sweep
 
-Swept for missed issues across raw SQL and Drizzle calls in changed code, restore-maintenance ordering, pending-deletion row lifecycle, strict filesystem delete semantics, action-origin scanner control-flow, source-contract versus behavior-test coverage, docs/ledger status, `.only` tests, and changed-file whitespace. I did not inspect binary screenshot artifacts, `.next`, `node_modules`, live MySQL, live nginx, production deployment state, uploaded runtime files, or CLIP model weights.
+File categories examined:
+
+- Source: App Router pages/routes/actions, components, shared libraries, DB schema/connection, image processing, queue/backfill, auth/session, restore, semantic search, service-worker registration, and public data projection paths.
+- Tests: unit privacy/auth/restore/upload/search/action-origin/rate-limit tests and e2e admin/public/origin flows.
+- Operations: Dockerfile, Compose, deploy scripts, migration scripts, package scripts, Next config, and lint guard scripts.
+- Documentation/plans: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, active/deferred cycle ledgers, and prior review artifact.
+
+Common missed issue classes checked:
+
+- Admin API exports missing auth wrappers.
+- Mutating server actions admitted without same-origin guards.
+- Public route handlers missing rate-limit pre-increment gates.
+- PII/internal fields leaking through public selects, map selects, search results, timeline/feed helpers, or JSON-LD.
+- Unsafe raw SQL interpolation and `dangerouslySetInnerHTML` usage.
+- Restore maintenance windows admitting writes or clearing maintenance before required drains.
+- Upload quota claims leaking on early exits, saved originals orphaning on DB failures, and browser/LR ingest drift.
+- DB route handlers accidentally running on Edge runtime.
+- Test focus markers (`.only`) and broad non-test `any` escapes.
+- Generated/runtime payload directories were excluded from manual review as non-source artifacts.

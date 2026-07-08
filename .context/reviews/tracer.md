@@ -1,91 +1,91 @@
-# Cycle 23 Tracer Review
+# Cycle 24 Tracer Review
 
-Scope: PROMPT 1 review only. This trace lane follows suspicious causal flows and records competing hypotheses, evidence, suggested validation, and current status. It does not implement fixes.
+Scope: causal tracing review only. I examined the requested end-to-end flows for upload/browser+PAT, image queue/backfill, restore maintenance, session/logout revocation, pending file deletion, public search/share/view analytics, semantic search, service-worker caching, and deployment/migration. I did not edit source code.
 
-## Trace Inventory
+## Inventory
 
-- Upload causality: `apps/web/src/app/actions/images.ts`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/process-image.ts`.
-- Background contention causality: `apps/web/src/db/index.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/app/api/search/semantic/route.ts`.
-- Browser responsiveness causality: `apps/web/src/lib/data.ts`, `apps/web/src/app/[locale]/(public)/map/page.tsx`, `apps/web/src/components/map/map-client.tsx`.
-- Query-shape causality: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/db/schema.ts`.
-- Cache causality: `apps/web/public/sw.template.js`, `apps/web/src/lib/sw-cache.ts`.
-- Context checked: `CLAUDE.md`, `.context/plans/README.md`, `.context/plans/deferred-carry-forward.md`.
+- Governing context: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, `.context/plans/cycle-23-2026-07-08-plan.md`, `.context/plans/cycle-23-2026-07-08-deferred.md`.
+- Upload and PAT ingest: `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/admin-tokens.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/process-image.ts`.
+- Queue/backfill: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/instrumentation.ts`.
+- Restore/session/delete maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/scripts/restore-maintenance-recovery.mjs`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/restore-drain-checklist.ts`, `apps/web/src/lib/pending-session-revocations.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/lib/maintenance-scheduler.ts`.
+- Public/search/share/analytics: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/analytics.ts`, `apps/web/src/lib/analytics-data.ts`, `apps/web/src/lib/view-retention.ts`, public pages under `apps/web/src/app/[locale]/(public)/`.
+- Semantic search: `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/lib/clip-inference.ts`, `apps/web/src/lib/clip-model.ts`.
+- Service worker: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/src/lib/sw-cache.ts`, `apps/web/scripts/build-sw.ts`, `apps/web/src/components/register-service-worker.tsx`, `apps/web/src/__tests__/sw-template-contract.test.ts`.
+- Deploy/migration: `package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/scripts/entrypoint.sh`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/drizzle/0030_pending_file_deletions.sql`, `apps/web/src/db/index.ts`.
 
-## Causal Traces
+## Findings
 
-### TRC-C23-01 - Upload RSS spike or slow ingest
+### Confirmed Issue - Large multipart ingress can exceed the intended application backpressure boundary
 
-- Linked finding: PERF-C23-01
 - Severity: High
 - Confidence: Medium-high
-- Status: Likely/manual-validation.
-- Primary hypothesis: Browser server-action multipart parsing materializes bodies before application-level backpressure. Evidence: the action starts from `FormData` and enumerates `files` at `apps/web/src/app/actions/images.ts:87-106`; upload lock admission happens later at `apps/web/src/app/actions/images.ts:154-159`; only after that does `saveOriginalAndGetMetadata()` stream the already-created `File` to disk at `apps/web/src/lib/process-image.ts:882-888`.
-- Competing hypothesis A: Sharp processing causes the RSS spike after enqueue. Counter-evidence: heavy derivative generation is deferred through `enqueueImageProcessing()` at `apps/web/src/app/actions/images.ts:484-510`; global Sharp cache/concurrency controls exist at `apps/web/src/lib/process-image.ts:36-57`. This remains plausible for post-upload CPU/RSS, but not for RSS before DB insert/enqueue.
-- Competing hypothesis B: Client intentionally serializes browser uploads, so no real concurrency. Evidence for mitigation: one-file loop at `apps/web/src/components/upload-dropzone.tsx:289-296`. Counter-evidence: this only governs this UI; the server action still accepts multi-file `FormData` and concurrent calls from multiple tabs or non-UI callers.
-- Distinguishing validation: Capture process RSS, request count, and DB insert timestamps during concurrent browser uploads. If RSS rises before first insert, parse/materialization is the cause. If RSS rises only after queue starts, derivative processing is the cause. Compare against Lightroom route behavior, which has pre-parse slot/Content-Length gates at `apps/web/src/app/api/admin/lr/upload/route.ts:60-74`, `apps/web/src/app/api/admin/lr/upload/route.ts:101-128`, and `apps/web/src/app/api/admin/lr/upload/route.ts:152-187`.
-- Suggested fix: Route browser upload through a Node route handler with pre-parse admission and streaming multipart parsing; keep cumulative quota and upload-processing contract semantics.
+- Status: Confirmed source shape; live RSS/OOM impact needs host measurement.
+- Evidence: Browser upload begins after Next has already provided `FormData`; application quota/lock work starts at `apps/web/src/app/actions/images.ts:106-143` and `apps/web/src/app/actions/images.ts:154-227`. The UI sends one file per server-action call (`apps/web/src/components/upload-dropzone.tsx:240-297`), but framework parsing still precedes the action. The restore action also receives `FormData` before it can inspect the `File` (`apps/web/src/app/[locale]/admin/db-actions.ts:421-427`, `apps/web/src/app/[locale]/admin/db-actions.ts:745-756`). The PAT route has better pre-parse admission, but still calls `request.formData()` after `Content-Length` and one parser slot (`apps/web/src/app/api/admin/lr/upload/route.ts:101-128`, `apps/web/src/app/api/admin/lr/upload/route.ts:152-187`). The configured framework cap is one max upload/restore body plus overhead, not the rolling 2 GiB app budget (`apps/web/src/lib/upload-limits.ts:1-6`, `apps/web/next.config.ts:111-119`).
+- Why this is a problem: The most important admission controls are application-level, but the high-memory multipart parse path happens before those controls can reject, serialize, or spill. The code comments correctly stream the already-created `File` to disk, but that does not prove the framework did not already allocate materially.
+- Failure scenario: Two admins or tabs submit large browser uploads while a restore upload is also posted. Before the upload tracker, mutation barrier, restore lock, or PAT parser slot can reject work, the runtime accepts and parses large multipart bodies. On a disk-constrained single host, this can cause RSS pressure or OOM before the app-level safety logic runs.
+- Suggested fix: Move browser upload and restore ingress to explicit Node route handlers with pre-parse `Content-Length`, admission slots, and streaming multipart-to-temp-file behavior. Keep the existing upload tracker, restore maintenance, and upload-processing contract semantics behind that shared ingress. Short-term, add an on-host RSS trace around browser upload, PAT upload, and restore to validate the actual memory slope.
 
-### TRC-C23-02 - Foreground latency during background work
+### Confirmed Issue - Background producers still have no shared DB/CPU budget
 
-- Linked finding: PERF-C23-02
 - Severity: High
-- Confidence: High
-- Status: Confirmed source shape; likely under load.
-- Primary hypothesis: Independent background queues over-admit against the same MySQL pool. Evidence: pool has 10 connections and queueLimit 20 at `apps/web/src/db/index.ts:31-41`; image queue reserves live capacity locally at `apps/web/src/lib/image-queue.ts:121-153`; backfill reserves live capacity separately at `apps/web/src/lib/admin-backfill-runner.ts:97-143`; analytics separately permits two writes and up to 1000 pending at `apps/web/src/lib/background-db-writes.ts:3-10` and `apps/web/src/lib/background-db-writes.ts:42-64`.
-- Competing hypothesis A: CPU saturation from Sharp/libvips is the dominant cause, not DB waits. Evidence for plausibility: `processImageFormats()` fans WebP/AVIF/JPEG with `Promise.allSettled()` at `apps/web/src/lib/process-image.ts:1411-1418`; wide-gamut rgb16 paths can double resize memory at `apps/web/src/lib/process-image.ts:1236-1262`. Counter-evidence: Sharp has global thread/cache limits at `apps/web/src/lib/process-image.ts:36-57`, so CPU is bounded per process but not shared across all background producers.
-- Competing hypothesis B: CLIP inference queue is the main foreground blocker. Evidence for bounded but separate queue: `apps/web/src/lib/clip-model.ts:53-72` and `apps/web/src/lib/clip-model.ts:156-173`. This can add CPU pressure, but it does not explain DB pool waits unless combined with semantic scans.
-- Distinguishing validation: Add temporary timing around DB acquire/query duration, image queue active count, backfill active count, analytics active/pending, semantic scan row count, and process CPU. A DB-wait signature will show increased pool wait before query execution; CPU saturation will show high event-loop lag/libvips activity even when DB wait is low.
-- Suggested fix: Shared DB/CPU background-budget semaphores plus metrics. Foreground requests should bypass background tokens while background producers share one admission controller.
+- Confidence: High for source shape; live impact needs load data.
+- Status: Confirmed architecture risk.
+- Evidence: The shared MySQL pool is fixed at 10 connections with queue limit 20 (`apps/web/src/db/index.ts:31-41`). The image queue caps itself independently (`apps/web/src/lib/image-queue.ts:121-153`). In-app color backfill separately budgets against the DB pool (`apps/web/src/lib/admin-backfill-runner.ts:97-143`). Analytics writes have their own concurrency and backlog (`apps/web/src/lib/background-db-writes.ts:3-10`, `apps/web/src/lib/background-db-writes.ts:42-64`). Real CLIP inference has a separate queue (`apps/web/src/lib/clip-model.ts:53-72`, `apps/web/src/lib/clip-model.ts:156-173`). CLAUDE documents the single-process/process-local topology and weakened guarantees under scale-out (`CLAUDE.md:244-249`).
+- Why this is a problem: Each subsystem is locally bounded, but their combined worst case can still consume the same DB pool, CPU, libvips, and model-inference budget at once. Local caps prevent runaway inside one producer; they do not guarantee foreground page or admin latency when queue processing, re-encode backfill, semantic queries, analytics writes, and maintenance sweeps overlap.
+- Failure scenario: A photographer starts a color backfill while uploads enqueue image jobs, a semantic backfill or query is active, and public traffic records views. The foreground photo/admin pages share the same 10 DB connections and CPU-bound encoders. Requests queue behind background work even though every individual subsystem is "under its cap."
+- Suggested fix: Add a process-wide background budget/admission controller for DB-heavy and CPU-heavy work, with foreground bypass and metrics for pool wait time, active queue jobs, backfill active count, analytics backlog, semantic scan rows, and event-loop delay.
 
-### TRC-C23-03 - Public map page jank
+### Likely Issue - Semantic search is recency-capped brute force, so old relevant photos can be invisible
 
-- Linked finding: PERF-C23-03
 - Severity: Medium
 - Confidence: High
-- Status: Likely/manual-validation.
-- Primary hypothesis: Browser marker/list rendering dominates. Evidence: server returns up to 10000 markers at `apps/web/src/lib/data.ts:1766-1816`; the page maps all returned rows into client props and a full fallback list at `apps/web/src/app/[locale]/(public)/map/page.tsx:50-66` and `apps/web/src/app/[locale]/(public)/map/page.tsx:98-110`; the client allocates latitude/longitude arrays and renders one Leaflet `<Marker>` per row at `apps/web/src/components/map/map-client.tsx:77-94` and `apps/web/src/components/map/map-client.tsx:120-141`.
-- Competing hypothesis A: DB query latency dominates. Evidence for plausibility: GPS predicates are `IS NOT NULL` and there is no dedicated `(processed, topic/map_visible, latitude, longitude)` index in `apps/web/src/db/schema.ts:123-132`. Counter-evidence: query is capped at 10001 rows and the severe user-visible freeze would align more directly with hydration/Leaflet marker creation.
-- Competing hypothesis B: tile-network latency dominates. Counter-evidence: tile loading is independent of marker count, while the code creates marker components synchronously before tile interactions matter.
-- Distinguishing validation: Record server timing for `getMapImages()` and a Chrome Performance trace for hydration/marker creation on a seeded 5k/10k GPS dataset. If server timing is small but main-thread tasks are long, the browser-marker hypothesis wins.
-- Suggested fix: Cluster or viewport-page markers and virtualize/paginate the list. Add server timing and client marker-count telemetry before choosing thresholds.
+- Status: Likely behavior issue; manually validate against corpus size and relevance expectations.
+- Evidence: Semantic search scans only the most recent embeddings for the active model (`apps/web/src/app/api/search/semantic/route.ts:263-279`) and scores all scanned vectors in JS (`apps/web/src/app/api/search/semantic/route.ts:292-311`). Similar-photo search follows the same shape in the sibling route (`apps/web/src/app/api/search/similar/[id]/route.ts:177-214`). The hard caps are bounded in `apps/web/src/lib/clip-embeddings.ts:36-48`, and the schema/reconcile path only provides a `(model_version, updated_at)` style recency index (`apps/web/scripts/migrate.js:702-715`).
+- Why this is a problem: Recency is not a semantic candidate strategy. A highly relevant older image outside `SEMANTIC_SCAN_LIMIT` cannot be returned, while increasing the cap increases BLOB reads, decode time, and JS scoring cost.
+- Failure scenario: A gallery has 20k embedded images and the user searches for an old event. If that event's embeddings are older than the configured scan window, search returns weaker recent photos or no result even though the correct images are embedded.
+- Suggested fix: Add request timing for embedding wait, scan rows/time, decode+score time, and result age distribution. Longer term, use ANN/vector indexing or a preloaded normalized matrix service rather than `ORDER BY updated_at DESC LIMIT N` plus per-request JS scoring.
 
-### TRC-C23-04 - Semantic search latency or surprising misses
+### Risk Needing Manual Validation - Restore recovery depends on an operator restart when cleared out-of-process
 
-- Linked finding: PERF-C23-04
 - Severity: Medium
 - Confidence: High
-- Status: Likely/manual-validation.
-- Primary hypothesis: Candidate selection is recency-capped brute force. Evidence: cap defaults/hard max are at `apps/web/src/lib/clip-embeddings.ts:36-48`; candidates are selected by `modelVersion` and `updatedAt DESC` at `apps/web/src/app/api/search/semantic/route.ts:263-279`; every selected BLOB is decoded and scored in JS at `apps/web/src/app/api/search/semantic/route.ts:292-311`; schema has a recency index but no vector-distance index at `apps/web/src/db/schema.ts:314-326`.
-- Competing hypothesis A: Text embedding queue wait dominates latency. Evidence: query embedding calls `embedTextReal()` before DB scan at `apps/web/src/app/api/search/semantic/route.ts:247-254`; CLIP queue limits and timeouts are in `apps/web/src/lib/clip-model.ts:53-72`. This explains latency under concurrent semantic requests, not old-photo misses.
-- Competing hypothesis B: Result enrichment query dominates. Evidence: enrichment only runs after top-k IDs are chosen at `apps/web/src/app/api/search/semantic/route.ts:317-330`, so it scales with result count rather than scan limit.
-- Distinguishing validation: Log per-request embedding wait, DB scan rows/time, decode+score time, top-k age distribution, and enrichment time. Misses with old relevant photos plus low embedding wait point to recency cap; slow high-concurrency requests point to CLIP queue.
-- Suggested fix: Add vector index/ANN or preloaded normalized matrix search; short-term metrics should separate encoder wait from DB scan and JS scoring.
+- Status: Documented operational risk, not a source-code correctness defect.
+- Evidence: Failed restore paths can keep maintenance active (`apps/web/src/app/[locale]/admin/db-actions.ts:646-695`). The queue pause/resume state is process-local (`apps/web/src/lib/image-queue.ts:1285-1345`), and the durable marker recovery script clears only the marker file (`apps/web/scripts/restore-maintenance-recovery.mjs:76-85`). CLAUDE explicitly says that if recovery is run from a separate shell/process after the live web process entered maintenance, the operator must restart/redeploy `gallerykit-web` so the process-local flag resets (`CLAUDE.md:435`).
+- Why this matters: The documented runbook is correct, but the failure mode is easy to miss during incident response. Clearing the durable marker alone can make `status` look recovered while the running web process still has process-local maintenance/queue state.
+- Failure scenario: A restore fails and an operator runs the recovery script from a sidecar shell, sees the marker cleared, but does not restart the web container. Uploads or processing remain blocked/paused in the live process until a restart.
+- Suggested fix: Make the recovery command print a stronger post-clear warning when it detects a production-like environment, and add an optional status endpoint or health check that reports both durable marker and process-local maintenance/queue state. Do not auto-restart from the script without explicit operator authority.
 
-### TRC-C23-05 - On-this-day scale cliff
+### Risk Needing Manual Validation - Host nginx protections are inert until applied outside deploy
 
-- Linked finding: PERF-C23-05
-- Severity: Low-medium
+- Severity: Medium
 - Confidence: High
-- Status: Confirmed source shape, scale-dependent.
-- Primary hypothesis: Function predicates prevent index seek. Evidence: code documents the non-sargable tradeoff at `apps/web/src/lib/data-timeline.ts:103-110`; the predicate uses `MONTH(capture_date)` and `DAY(capture_date)` at `apps/web/src/lib/data-timeline.ts:121-131`; schema indexes include `processed, capture_date, created_at` but no generated date-part index at `apps/web/src/db/schema.ts:123-132`.
-- Competing hypothesis: The `limit(6)` prevents meaningful cost. Counter-evidence: MySQL must find matching month/day rows before the limit can terminate efficiently; without date-part index, the limit does not imply a six-row seek.
-- Distinguishing validation: `EXPLAIN ANALYZE` with realistic gallery row counts. Watch rows examined for today-like common days versus sparse days.
-- Suggested fix: Generated month/day columns or calendar index table.
+- Status: Operator/live-host validation risk.
+- Evidence: Project deploy runs `scripts/deploy-remote.sh` (`package.json:29`), which SSHes and runs the configured remote deploy command (`scripts/deploy-remote.sh:31-53`, `scripts/deploy-remote.sh:87-93`). The remote deploy pulls and rebuilds Docker (`apps/web/deploy.sh:10-56`) but does not install/reload host nginx. CLAUDE explicitly states host nginx changes are not applied by deploy and require `nginx -t`, reload, and burst validation (`CLAUDE.md:511-523`). Public page rate limiting is documented as an edge/nginx responsibility (`CLAUDE.md:247`).
+- Why this matters: Source-level limiter config can be present and reviewed while production still runs an older host config. Public SSR pages are intentionally not app-layer throttled, so stale edge config leaves that traffic unprotected.
+- Failure scenario: A Cycle changes `apps/web/nginx/default.conf` or assumes an existing limiter is live. The code is committed/deployed, but host nginx is not reloaded. A same-IP burst against public SSR pages reaches Next directly instead of returning edge 429s.
+- Suggested fix: Keep nginx apply/verify as an explicit release checklist item. Record date, zone, burst command, 429 evidence, and normal-load non-429 evidence in the current plan/ledger after each host-nginx change.
 
-### TRC-C23-06 - Service-worker navigation stutter from HTML eviction
+### Risk Needing Manual Validation - Service-worker HTML cache maintenance remains bounded but synchronous
 
-- Linked finding: PERF-C23-06
 - Severity: Low
 - Confidence: High
-- Status: Confirmed, bounded.
-- Primary hypothesis: HTML eviction reads every cached HTML response header when over cap. Evidence: `MAX_HTML_ENTRIES = 50` at `apps/web/public/sw.template.js:31-39`; over-cap path calls `keys()`, `match()` for every key, sorts, and deletes at `apps/web/public/sw.template.js:147-164`.
-- Competing hypothesis A: Image HEAD revalidation is the real SW responsiveness problem. Counter-evidence: image stale probe is bounded by 300 ms at `apps/web/public/sw.template.js:35-39`, and image metadata mutations are serialized through `withMetaMutation()` at `apps/web/public/sw.template.js:99-145`.
-- Distinguishing validation: On a low-end mobile browser, seed 51+ HTML entries and profile service-worker task duration during navigation. If stutter appears only on over-cap HTML writes, eviction is the cause; if image views stutter, inspect HEAD probe and image LRU instead.
-- Suggested fix: Store HTML recency metadata separately, mirroring the image LRU structure, so over-cap eviction does not need per-response `match()` reads.
+- Status: Bounded performance risk; no correctness issue found.
+- Evidence: HTML fallback entries are capped at 50 (`apps/web/public/sw.template.js:31-39`), and eviction reads every cached HTML response header, sorts entries, then deletes overflow (`apps/web/public/sw.template.js:147-164`). The navigation path schedules the put and eviction via `event.waitUntil` rather than blocking the response (`apps/web/public/sw.template.js:446-480`). Revocable public object pages bypass offline HTML caching to avoid stale share/photo/delete state (`apps/web/public/sw.template.js:555-563`). Contract tests pin the generated worker, admin marker, revocable bypass, and stale image behavior (`apps/web/src/__tests__/sw-template-contract.test.ts:59-112`, `apps/web/src/__tests__/sw-template-contract.test.ts:400-461`).
+- Why this matters: The correctness risks I expected to find, stale revoked share pages and admin-session HTML caching, are explicitly guarded. The remaining concern is a small background maintenance cost on navigation once the HTML cache reaches the cap.
+- Failure scenario: On a low-end device with many navigations, background cache work reads and sorts up to 51 HTML entries after a navigation. It should not block first response, but it can still consume service-worker time.
+- Suggested fix: Leave as low priority unless a browser performance trace implicates `evictHtmlCacheIfNeeded()`. If revisited, track HTML LRU metadata rather than scanning response headers.
 
-## Cross-Trace Stop Conditions
+## Flow Notes With Negative Evidence
 
-- Confirmed implementation bugs: none changed in this review lane.
-- Findings needing manual validation before fix priority: upload RSS, combined background pool starvation, map jank, semantic latency/recall.
-- Low bounded residuals: on-this-day date-part scan and HTML SW eviction.
-- Final missed-issues sweep: repo search covered upload parsing, queue/concurrency, locks, sharp fan-out, cache keys/matches, scan limits, map markers, non-sargable date functions, offsets, grouping, and prior carry-forward plans. No additional higher-severity causal chain was found.
+- Upload/browser+PAT: Browser uploads are serialized client-side (`apps/web/src/components/upload-dropzone.tsx:289-297`) and fenced server-side by restore checks, same-origin/admin checks, a mutation slot, upload tracker, disk-space check, upload-processing contract lock, HDR rejection, GPS stripping, late restore cleanup, DB insert, queue enqueue, and audit/revalidation (`apps/web/src/app/actions/images.ts:87-610`). PAT upload mirrors the same controls with token scope auth, pre-parse `Content-Length`, parser slot, late restore check, upload contract lock, HDR/GPS parity, DB insert, PAT usage marking only after committed upload, and post-commit JSON success handling (`apps/web/src/app/api/admin/lr/upload/route.ts:84-620`; auth wrapper at `apps/web/src/lib/api-auth.ts:76-120`).
+- Image queue/backfill: Queue claims use per-image advisory locks plus conditional `processed = false` updates and deleted-mid-processing cleanup (`apps/web/src/lib/image-queue.ts:737-1098`). Restore quiesce pauses and clears queue state before import (`apps/web/src/lib/image-queue.ts:1285-1328`). Color backfill uses a shared backfill advisory lock and per-image cleanup on delete-mid-reencode (`apps/web/src/lib/admin-backfill-runner.ts:12-44`; `apps/web/scripts/backfill-color-pipeline.ts:119-188`). Semantic backfill checks durable restore maintenance and holds the semantic backfill lock (`apps/web/scripts/backfill-clip-embeddings.ts:57-64`, `apps/web/scripts/backfill-clip-embeddings.ts:317-320`).
+- Restore/session/logout: Current code flushes pending logout revocations before clearing durable maintenance on a verified restore, and fails closed if that flush cannot be proven (`apps/web/src/app/[locale]/admin/db-actions.ts:656-688`). Logout queues a hashed token if the mutation barrier or DB delete blocks revocation, while still clearing the browser cookie (`apps/web/src/app/actions/auth.ts:275-328`). The queue is bounded, process-local, and explicitly documented as residual risk (`apps/web/src/lib/pending-session-revocations.ts:4-24`, `apps/web/src/lib/pending-session-revocations.ts:46-81`).
+- Pending file deletion: Deletes insert durable pending rows before deleting DB image rows, then clean files after commit; failures remain in `pending_file_deletions` for hourly or post-restore retry (`apps/web/src/app/actions/images.ts:677-727`, `apps/web/src/lib/pending-file-deletions.ts:34-139`, schema at `apps/web/drizzle/0030_pending_file_deletions.sql:1-19`). Strict original deletion rejects unsafe paths and treats missing files as clean (`apps/web/src/lib/upload-paths.ts:90-118`, `apps/web/src/lib/pending-file-deletions.ts:82-100`).
+- Public search/share/view analytics: Public view writes validate target existence/share key/expiry and re-check restore before insert (`apps/web/src/app/actions/public.ts:443-559`). Analytics writes are lossy and bounded by design (`apps/web/src/lib/background-db-writes.ts:42-81`), and shared-group `view_count` is documented approximate state (`CLAUDE.md:249`). Share creation/revocation uses same-origin/admin guards, mutation slots, conditional share-key updates, and transactions for group links (`apps/web/src/app/actions/sharing.ts:92-423`).
+- Deployment/migration: Deploy is config-driven and checks env-file permissions before SSH (`scripts/deploy-remote.sh:55-93`); remote deploy checks runtime env permissions, rebuilds with Compose, waits for health, and prunes only after a healthy container is live (`apps/web/deploy.sh:15-56`, `apps/web/deploy.sh:73-104`). Migrations reconcile fresh/legacy schema, refuse unsafe DML baselines, distinguish pending migrations above the cursor, and assert every journal hash is recorded after Drizzle runs (`apps/web/scripts/migrate.js:777-860`, `apps/web/scripts/migrate.js:877-993`).
+
+## Final Sweep
+
+- Confirmed issues checked and not found: browser/PAT GPS/HDR drift; PAT `last_used_at` marked before committed upload; delete-before-pending-row race; restored session row reopened before queued logout revocation flush; pending deletion drain during active restore; revocable share/photo pages cached offline; generated `sw.js` drift from template; Drizzle journal post-condition missing.
+- Common missed issues checked: process-local coordination boundaries, advisory-lock release on dedicated sessions, DB pool over-subscription, restore marker/process-state split, stale public analytics writes during restore, deleted-mid-processing/backfill cleanup, unsafe original filename/path deletion, semantic model-version mixing, service-worker admin HTML caching, host-nginx deploy gap, and migration baseline swallowing.
+- No destructive commands were run. No source files were edited.
