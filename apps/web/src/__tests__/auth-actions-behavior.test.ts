@@ -263,6 +263,21 @@ describe('auth server-action behavior locks', () => {
         expect(dbTransactionMock).not.toHaveBeenCalled();
     });
 
+    it('updatePassword short-circuits restore maintenance before session or password DB work', async () => {
+        getRestoreMaintenanceMessageMock.mockReturnValue('restore in progress');
+
+        await expect(updatePassword(null, form({
+            currentPassword: 'old-password-value',
+            newPassword: 'new-password-value',
+            confirmPassword: 'new-password-value',
+        }))).resolves.toEqual({ error: 'restore in progress' });
+
+        expect(verifySessionTokenMock).not.toHaveBeenCalled();
+        expect(dbSelectMock).not.toHaveBeenCalled();
+        expect(argonVerifyMock).not.toHaveBeenCalled();
+        expect(dbTransactionMock).not.toHaveBeenCalled();
+    });
+
     // AGG8b-21 / TEST8-01 (run-10 c8b): behavioral locks for the C7-01
     // pending-revocation wiring — every skipped/failed DB-side session
     // delete MUST queue the token hash; a successful delete must NOT.

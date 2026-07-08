@@ -35,12 +35,12 @@ export async function triggerBackfill(): Promise<TriggerBackfillResult> {
     const t = await getTranslations('serverActions');
     const originError = await requireSameOriginAdmin();
     if (originError) return { ok: false, status: 'error', error: originError };
-    if (!(await isAdmin())) {
-        return { ok: false, status: 'error', error: t('unauthorized') };
-    }
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { ok: false, status: 'unavailable', error: maintenanceError };
+    }
+    if (!(await isAdmin())) {
+        return { ok: false, status: 'error', error: t('unauthorized') };
     }
     using mutationSlot = acquireAdminMutationSlot();
     if (!mutationSlot.acquired) {
@@ -113,6 +113,10 @@ export interface BackfillStatusResult {
 /** @action-origin-exempt: read-only status check (no DB writes, no mutations). */
 export async function getBackfillStatus(): Promise<BackfillStatusResult> {
     const t = await getTranslations('serverActions');
+    const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
+    if (maintenanceError) {
+        return { ok: false, running: false, candidateCount: 0, error: maintenanceError };
+    }
     if (!(await isAdmin())) {
         return { ok: false, running: false, candidateCount: 0, error: t('unauthorized') };
     }

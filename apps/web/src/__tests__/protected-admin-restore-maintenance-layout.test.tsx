@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
     isAdmin: vi.fn(),
+    getCurrentUser: vi.fn(),
     isRestoreMaintenanceActive: vi.fn(),
     redirect: vi.fn((target: string) => {
         throw new Error(`redirect:${target}`);
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/app/actions/auth', () => ({
     isAdmin: mocks.isAdmin,
+    getCurrentUser: mocks.getCurrentUser,
 }));
 
 vi.mock('@/lib/restore-maintenance', () => ({
@@ -25,12 +27,14 @@ vi.mock('next-intl/server', () => ({
 }));
 
 import ProtectedLayout from '@/app/[locale]/admin/(protected)/layout';
+import AdminLayout from '@/app/[locale]/admin/layout';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 
 describe('protected admin restore-maintenance layout gate', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.isAdmin.mockResolvedValue(true);
+        mocks.getCurrentUser.mockResolvedValue({ id: 1, username: 'admin' });
         mocks.isRestoreMaintenanceActive.mockReturnValue(false);
     });
 
@@ -74,5 +78,16 @@ describe('protected admin restore-maintenance layout gate', () => {
         expect(result.type).toBe(PublicRestoreMaintenance);
         expect(mocks.isAdmin).not.toHaveBeenCalled();
         expect(mocks.redirect).not.toHaveBeenCalled();
+    });
+
+    it('parent admin layout skips current-user lookup while restore maintenance is active', async () => {
+        mocks.isRestoreMaintenanceActive.mockReturnValue(true);
+        const child = <div data-testid="admin-child" />;
+
+        const result = await AdminLayout({ children: child });
+
+        expect(result.props.children[0]).toBeNull();
+        expect(result.props.children[1].props.children).toBe(child);
+        expect(mocks.getCurrentUser).not.toHaveBeenCalled();
     });
 });

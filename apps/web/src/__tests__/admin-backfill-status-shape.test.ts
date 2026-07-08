@@ -10,28 +10,14 @@
  * and `errors` directly, never reconstructed).
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ADMIN_BACKFILL_ACTION_SRC = fs.readFileSync(
-    path.resolve(__dirname, '..', 'app', 'actions', 'admin-backfill.ts'),
-    'utf8',
-);
-
-vi.mock('@/app/actions/auth', () => ({
+const mocks = vi.hoisted(() => ({
     isAdmin: vi.fn(async () => true),
     getCurrentUser: vi.fn(async () => ({ id: 1, username: 'admin' })),
-}));
-
-vi.mock('next-intl/server', () => ({
-    getTranslations: vi.fn(async () => (k: string) => k),
-}));
-
-// The action imports getAdminBackfillCandidateCount + readAdminBackfillState
-// from the runner module. Mock both; readAdminBackfillState returns a fully
-// populated state so we can assert every field is forwarded.
-vi.mock('@/lib/admin-backfill-runner', () => ({
+    getRestoreMaintenanceMessage: vi.fn((): string | null => null),
     getAdminBackfillCandidateCount: vi.fn(async () => 3),
     readAdminBackfillState: vi.fn(() => ({
         running: false,
@@ -49,9 +35,43 @@ vi.mock('@/lib/admin-backfill-runner', () => ({
     })),
 }));
 
+const ADMIN_BACKFILL_ACTION_SRC = fs.readFileSync(
+    path.resolve(__dirname, '..', 'app', 'actions', 'admin-backfill.ts'),
+    'utf8',
+);
+
+vi.mock('@/app/actions/auth', () => ({
+    isAdmin: mocks.isAdmin,
+    getCurrentUser: mocks.getCurrentUser,
+}));
+
+vi.mock('next-intl/server', () => ({
+    getTranslations: vi.fn(async () => (k: string) => k),
+}));
+
+// The action imports getAdminBackfillCandidateCount + readAdminBackfillState
+// from the runner module. Mock both; readAdminBackfillState returns a fully
+// populated state so we can assert every field is forwarded.
+vi.mock('@/lib/admin-backfill-runner', () => ({
+    getAdminBackfillCandidateCount: mocks.getAdminBackfillCandidateCount,
+    readAdminBackfillState: mocks.readAdminBackfillState,
+}));
+
+vi.mock('@/lib/restore-maintenance', () => ({
+    getRestoreMaintenanceMessage: mocks.getRestoreMaintenanceMessage,
+}));
+
 import { getBackfillStatus } from '@/app/actions/admin-backfill';
 
 describe('AGG-6: getBackfillStatus forwards the extended runner-state shape', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mocks.isAdmin.mockResolvedValue(true);
+        mocks.getCurrentUser.mockResolvedValue({ id: 1, username: 'admin' });
+        mocks.getRestoreMaintenanceMessage.mockReturnValue(null);
+        mocks.getAdminBackfillCandidateCount.mockResolvedValue(3);
+    });
+
     it('returns processed + errors + failure/skip counters + lastError', async () => {
         const res = await getBackfillStatus();
 
@@ -75,23 +95,40 @@ describe('AGG-6: getBackfillStatus forwards the extended runner-state shape', ()
     });
 
     it('returns an unauthorized error shape when not admin', async () => {
-        const auth = await import('@/app/actions/auth');
-        vi.mocked(auth.isAdmin).mockResolvedValueOnce(false);
+        mocks.isAdmin.mockResolvedValueOnce(false);
         const res = await getBackfillStatus();
         expect(res.ok).toBe(false);
         expect(res.error).toBeTruthy();
+    });
+
+    it('short-circuits restore maintenance before auth or candidate counting', async () => {
+        mocks.getRestoreMaintenanceMessage.mockReturnValueOnce('restoreInProgress');
+
+        const res = await getBackfillStatus();
+
+        expect(res).toEqual({
+            ok: false,
+            running: false,
+            candidateCount: 0,
+            error: 'restoreInProgress',
+        });
+        expect(mocks.isAdmin).not.toHaveBeenCalled();
+        expect(mocks.getAdminBackfillCandidateCount).not.toHaveBeenCalled();
+        expect(mocks.readAdminBackfillState).not.toHaveBeenCalled();
     });
 
     it('triggerBackfill is fenced by restore maintenance and the admin mutation barrier', () => {
         const functionIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('export async function triggerBackfill');
         expect(functionIndex).toBeGreaterThanOrEqual(0);
         const maintenanceIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('const maintenanceError = getRestoreMaintenanceMessage', functionIndex);
+        const adminIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('if (!(await isAdmin()))', functionIndex);
         const slotIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('using mutationSlot = acquireAdminMutationSlot();', maintenanceIndex);
         const triggerIndex = ADMIN_BACKFILL_ACTION_SRC.indexOf('const result = await triggerAdminBackfill();', slotIndex);
 
         expect(ADMIN_BACKFILL_ACTION_SRC).toContain("from '@/lib/admin-mutation-barrier'");
         expect(ADMIN_BACKFILL_ACTION_SRC).toContain("from '@/lib/restore-maintenance'");
         expect(maintenanceIndex).toBeGreaterThan(functionIndex);
+        expect(adminIndex).toBeGreaterThan(maintenanceIndex);
         expect(slotIndex).toBeGreaterThan(maintenanceIndex);
         expect(triggerIndex).toBeGreaterThan(slotIndex);
     });

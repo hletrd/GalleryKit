@@ -65,6 +65,8 @@ describe('cycle 22 source contracts', () => {
         expect(layout).toContain('try {');
         expect(layout).toContain('currentUser = await getCurrentUser()');
         expect(layout).toContain("console.error('Admin layout: failed to resolve current user', err)");
+        expect(page.indexOf('isRestoreMaintenanceActive()')).toBeLessThan(page.indexOf('alreadyAdmin = await isAdmin()'));
+        expect(page).toContain('<PublicRestoreMaintenance');
         expect(page).toContain('alreadyAdmin = await isAdmin()');
         expect(page).toContain("console.error('Admin login: failed to check current admin session', err)");
         expect(page).toContain('return <LoginForm />');

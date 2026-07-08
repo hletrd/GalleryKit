@@ -337,13 +337,14 @@ export async function updatePassword(prevState: { error?: string; success?: bool
         return { error: t('unauthorized') };
     }
 
-    const currentUser = await getCurrentUser();
-    if (!currentUser) {
-        return { error: t('unauthorized') };
-    }
     const maintenanceError = getRestoreMaintenanceMessage(t('restoreInProgress'));
     if (maintenanceError) {
         return { error: maintenanceError };
+    }
+
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+        return { error: t('unauthorized') };
     }
 
     using mutationSlot = acquireAdminMutationSlot();
