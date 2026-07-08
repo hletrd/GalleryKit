@@ -121,6 +121,12 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // shadcn <Button>, so the FORBIDDEN regex does not match every size.
     // Re-open: any new compact lightbox control must keep a 44 px hit target.
     'components/lightbox.tsx': 0,
+    // Compact tag remove-× in the dense admin tag editor (upload form +
+    // inline image editor). Uses a 24 px (WCAG 2.5.8 AA) target instead of the
+    // 44 px AAA floor so tag chips aren't 44 px tall in dense lists; the editor
+    // is a keyboard-primary desktop admin surface (type + Enter to add, remove
+    // via a focus-visible ×). Re-open: if admin becomes mobile-primary.
+    'components/tag-input.tsx': 1,
     // shadcn ui primitives are decorative wrappers; touch-target rule
     // applies at the consumer site, not the primitive.
     'components/ui/button.tsx': 0,
