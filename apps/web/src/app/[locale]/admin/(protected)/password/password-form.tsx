@@ -48,7 +48,7 @@ export function PasswordForm() {
     };
 
     return (
-        <form action={handleSubmit} className="space-y-4 max-w-md">
+        <form action={handleSubmit} className="space-y-4 max-w-md mx-auto">
             {state?.error && (
                 <Alert variant="destructive">
                     <AlertDescription>{state.error}</AlertDescription>
