@@ -166,6 +166,8 @@ describe('color settings hash (P4-E2)', () => {
             semanticSearchMode: 'disabled',
             allowHdrIngest: false,
             forceShowColorChips: false,
+            showTimelineNav: true,
+            showMapNav: true,
         });
         expect(configHash).toBe(rawHash);
     });
@@ -200,6 +202,8 @@ describe('color settings hash (P4-E2)', () => {
             semanticSearchMode: 'disabled',
             allowHdrIngest: false,
             forceShowColorChips: false,
+            showTimelineNav: true,
+            showMapNav: true,
         });
         expect(configHash).not.toBe(rawInvalidHash);
         // The config hash should match what the raw hash would be with the validated value.
@@ -242,6 +246,8 @@ describe('color settings hash (P4-E2)', () => {
             semanticSearchMode: 'disabled',
             allowHdrIngest: false,
             forceShowColorChips: false,
+            showTimelineNav: true,
+            showMapNav: true,
         };
         const baseHash = await getColorSettingsHash(base);
 

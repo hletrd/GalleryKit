@@ -34,6 +34,8 @@ const FAKE_CONFIG = {
     forceSrgbDerivatives: false,
     allowHdrIngest: false,
     forceShowColorChips: false,
+    showTimelineNav: true,
+    showMapNav: true,
     wideGamutJpegChroma: '4:4:4' as const,
     avifEffort: 6,
     sdrJpegChroma: '4:2:0' as const,

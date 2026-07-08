@@ -88,6 +88,10 @@ export interface GalleryConfig {
 
     // C2-A6 / C2-INT-MED-1: max source pixel count before WI-15 downscale
     wideGamutMaxSourcePixels: number;
+
+    // Nav: show/hide the Timeline and Map browse links (admin-toggleable, default true)
+    showTimelineNav: boolean;
+    showMapNav: boolean;
 }
 
 /**
@@ -137,6 +141,16 @@ function buildGalleryConfig(map: Map<string, string>): GalleryConfig {
         forceShowColorChips: (() => {
             const raw = getSetting(map, 'force_show_color_chips');
             if (!isValidSettingValue('force_show_color_chips', raw)) return DEFAULTS.force_show_color_chips === 'true';
+            return raw === 'true';
+        })(),
+        showTimelineNav: (() => {
+            const raw = getSetting(map, 'show_timeline_nav');
+            if (!isValidSettingValue('show_timeline_nav', raw)) return DEFAULTS.show_timeline_nav === 'true';
+            return raw === 'true';
+        })(),
+        showMapNav: (() => {
+            const raw = getSetting(map, 'show_map_nav');
+            if (!isValidSettingValue('show_map_nav', raw)) return DEFAULTS.show_map_nav === 'true';
             return raw === 'true';
         })(),
         wideGamutJpegChroma: (() => {

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { CalendarDays, ChevronUp, ChevronDown, MapPinned, Sun, Moon, Monitor, Circle } from "lucide-react";
+import { ChevronUp, ChevronDown, Sun, Moon, Monitor, Circle } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "next-themes";
 
@@ -26,11 +26,13 @@ interface NavClientProps {
     navTitle: string;
     imageSizes: number[];
     semanticSearchMode?: string;
+    showTimelineNav?: boolean;
+    showMapNav?: boolean;
 }
 
 const MD_BREAKPOINT = 768;
 
-export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = 'disabled' }: NavClientProps) {
+export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = 'disabled', showTimelineNav = true, showMapNav = true }: NavClientProps) {
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const locale = useLocale();
@@ -42,8 +44,8 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     const currentTheme = (mounted ? (theme ?? 'system') : 'system') as StoredTheme;
     const nextThemeValue = nextTheme(currentTheme);
     const browseLinks = [
-        { href: localizePath(locale, '/timeline'), label: t('footer.timeline'), icon: CalendarDays },
-        { href: localizePath(locale, '/map'), label: t('footer.map'), icon: MapPinned },
+        ...(showTimelineNav ? [{ href: localizePath(locale, '/timeline'), label: t('footer.timeline') }] : []),
+        ...(showMapNav ? [{ href: localizePath(locale, '/map'), label: t('footer.map') }] : []),
     ];
     const hasExpandableMobileContent = topics.length > 0 || browseLinks.length > 0;
     const themeAriaLabel = t('aria.cycleTheme', {
@@ -117,7 +119,6 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                 )}>
                     {browseLinks.map((link) => {
                         const isActive = stripLocalePrefix(pathname) === stripLocalePrefix(link.href);
-                        const Icon = link.icon;
                         return (
                             <Link
                                 key={link.href}
@@ -130,7 +131,6 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                                 )}
                             >
-                                <Icon className="h-4 w-4" aria-hidden="true" />
                                 <span>{link.label}</span>
                             </Link>
                         );

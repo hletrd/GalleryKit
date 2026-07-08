@@ -116,6 +116,8 @@ describe('PhotoPage public/admin image fetch behavior', () => {
             imageSizes: [640, 1536, 2048],
             slideshowIntervalSeconds: 5,
             forceShowColorChips: false,
+            showTimelineNav: true,
+            showMapNav: true,
             forceSrgbDerivatives: false,
             semanticSearchMode: 'disabled',
         });

@@ -31,7 +31,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, RefreshCcw } from 'lucide-react';
+import { Save, ChevronLeft, ImageIcon, Shield, Loader2, Play, Brain, Search, RefreshCcw, Compass } from 'lucide-react';
 import { getSemanticSearchSelectValue, getWritableSemanticSearchModeFromSelect, STORED_SEMANTIC_PRODUCTION_INACTIVE } from '@/lib/semantic-search-settings-ui';
 import Link from 'next/link';
 import { localizePath } from '@/lib/locale-path';
@@ -872,6 +872,50 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                             {t('settings.semanticSearchProductionWarning')}
                         </p>
                     )}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <Compass className="h-5 w-5" />
+                        {t('settings.navigationTitle')}
+                    </CardTitle>
+                    <CardDescription>{t('settings.navigationDesc')}</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                            <Label htmlFor="show-timeline-nav">{t('settings.showTimelineNav')}</Label>
+                            <p id="show-timeline-nav-help" className="text-xs text-muted-foreground">
+                                {t('settings.showTimelineNavHint')}
+                            </p>
+                        </div>
+                        <Switch
+                            id="show-timeline-nav"
+                            className="shrink-0"
+                            checked={settings.show_timeline_nav !== 'false'}
+                            onCheckedChange={(checked) => handleChange('show_timeline_nav', checked ? 'true' : 'false')}
+                            aria-describedby="show-timeline-nav-help"
+                            aria-label={t('settings.showTimelineNav')}
+                        />
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                            <Label htmlFor="show-map-nav">{t('settings.showMapNav')}</Label>
+                            <p id="show-map-nav-help" className="text-xs text-muted-foreground">
+                                {t('settings.showMapNavHint')}
+                            </p>
+                        </div>
+                        <Switch
+                            id="show-map-nav"
+                            className="shrink-0"
+                            checked={settings.show_map_nav !== 'false'}
+                            onCheckedChange={(checked) => handleChange('show_map_nav', checked ? 'true' : 'false')}
+                            aria-describedby="show-map-nav-help"
+                            aria-label={t('settings.showMapNav')}
+                        />
+                    </div>
                 </CardContent>
             </Card>
 

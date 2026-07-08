@@ -14,12 +14,21 @@ export async function Nav() {
         getGalleryConfig().catch(() => ({
             imageSizes: DEFAULT_IMAGE_SIZES,
             semanticSearchMode: 'disabled',
+            showTimelineNav: true,
+            showMapNav: true,
         })),
     ]);
 
     return (
         <Suspense>
-            <NavClient topics={topics} navTitle={seo.nav_title} imageSizes={config.imageSizes} semanticSearchMode={config.semanticSearchMode} />
+            <NavClient
+                topics={topics}
+                navTitle={seo.nav_title}
+                imageSizes={config.imageSizes}
+                semanticSearchMode={config.semanticSearchMode}
+                showTimelineNav={config.showTimelineNav}
+                showMapNav={config.showMapNav}
+            />
         </Suspense>
     );
 }

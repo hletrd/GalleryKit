@@ -64,6 +64,10 @@ export const GALLERY_SETTING_KEYS = [
     // C2-A6 / C2-INT-MED-1: pixel-count cap above which wide-gamut sources are
     // downscaled before the rgb16 pipeline (memory cap; WI-15).
     'wide_gamut_max_source_pixels',
+
+    // Nav: show/hide the Timeline and Map browse links (default true = shown)
+    'show_timeline_nav',
+    'show_map_nav',
 ] as const;
 
 export type GallerySettingKey = typeof GALLERY_SETTING_KEYS[number];
@@ -139,6 +143,10 @@ const DEFAULTS: Record<GallerySettingKey, string> = {
 
     // C2-A6: default 50 MP — historical hardcoded WIDE_GAMUT_MAX_SOURCE_PIXELS
     wide_gamut_max_source_pixels: '50000000',
+
+    // Nav browse-link visibility: default on (shown), admin-toggleable
+    show_timeline_nav: 'true',
+    show_map_nav: 'true',
 };
 
 export const MAX_IMAGE_SIZE_COUNT = 8;
@@ -207,6 +215,10 @@ const VALIDATORS: Record<GallerySettingKey, (value: string) => boolean> = {
         const n = Number(v);
         return Number.isInteger(n) && n >= 10_000_000 && n <= 200_000_000;
     },
+
+    // Nav browse-link visibility: boolean toggles
+    show_timeline_nav: (v) => v === 'true' || v === 'false',
+    show_map_nav: (v) => v === 'true' || v === 'false',
 };
 
 /** Validate a setting value. Returns true if valid. */
