@@ -1,6 +1,6 @@
 # Run-10 Cycle 36/100 Implementation Plan
 
-Status: IMPLEMENTED - local gates green; signed push and per-cycle deploy pending
+Status: IMPLEMENTED + PUSHED - per-cycle deploy pending
 Aggregate: `.context/reviews/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `bc73c02293f2568d23602ab498f12346a37fadf1`
@@ -134,7 +134,7 @@ No confirmed security, data-loss, or authz finding is deferred in this plan. The
 - [x] WP3 SEO field-specific errors implemented.
 - [x] WP4 Cycle 35 provenance/index repaired.
 - [x] Full configured gates run green.
-- [ ] Signed commit pushed.
+- [x] Signed commit pushed.
 - [ ] Per-cycle deploy run and production smoke evidence recorded.
 
 ## Verification Plan
@@ -170,6 +170,7 @@ Additional focused checks:
 - `npm test --workspace=apps/web` — passed, 361 files passed, 2 skipped; 3400 tests passed, 4 skipped.
 - `npm run test:e2e --workspace=apps/web` — passed, 45 passed, 2 skipped.
 - `git diff --check` — passed.
+- Signed commit/push evidence: pushed `f85e6591` (tracer/document review), `40b7720c` (verifier/test review), `bc73c022` (security/debugger review), `759ec371` (root Playwright runtime hygiene), `1f4d6b39` (nav/footer browse discoverability), `30670e84` (SEO field errors), and `8aafcf79` (cycle 36 plan/review provenance) to `origin/master`.
 
 Deployment and production smoke after green gates and pushed commits:
 
