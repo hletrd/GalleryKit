@@ -114,6 +114,62 @@ function discoverActionFiles(): string[] {
     return found.sort();
 }
 
+function hasTopLevelUseServerDirective(file: string): boolean {
+    const content = fs.readFileSync(file, 'utf-8');
+    const sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+
+    for (const statement of sourceFile.statements) {
+        if (
+            ts.isExpressionStatement(statement)
+            && ts.isStringLiteral(statement.expression)
+        ) {
+            if (statement.expression.text === 'use server') return true;
+            continue;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+function discoverAppSourceFiles(root: string): string[] {
+    const out: string[] = [];
+    const stack: string[] = [root];
+    while (stack.length > 0) {
+        const dir = stack.pop() as string;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                stack.push(full);
+                continue;
+            }
+            if (!entry.isFile()) continue;
+            const parsed = path.parse(entry.name);
+            if (!ACTION_FILE_EXTENSIONS.has(parsed.ext)) continue;
+            out.push(full);
+        }
+    }
+    return out;
+}
+
+function checkForUnscannedUseServerFiles(actionFiles: string[]): void {
+    const approved = new Set(actionFiles.map((file) => path.resolve(file)));
+    const appDir = path.join(REPO_SRC, 'app');
+    const unscanned = discoverAppSourceFiles(appDir)
+        .filter((file) => hasTopLevelUseServerDirective(file))
+        .filter((file) => !approved.has(path.resolve(file)))
+        .sort();
+
+    for (const file of unscanned) {
+        const relative = path.relative(process.cwd(), file);
+        console.error(
+            `UNSCANNED SERVER ACTION MODULE: ${relative} has a top-level 'use server' directive but is outside the approved lint:action-origin scan set. ` +
+            `Move it under src/app/actions/, add an explicit scanner entry with review, or keep the module free of server-action exports.`,
+        );
+        failed = true;
+    }
+}
+
 function getLeadingText(node: ts.Node, source: string): string {
     const start = node.getFullStart();
     const end = node.getStart();
@@ -1643,6 +1699,7 @@ function checkActionFile(file: string) {
 const isCliEntry = require.main === module || (typeof require === 'undefined' && import.meta?.url?.includes('check-action-origin'));
 if (isCliEntry) {
     const actionFiles = discoverActionFiles();
+    checkForUnscannedUseServerFiles(actionFiles);
     for (const file of actionFiles) {
         checkActionFile(file);
     }

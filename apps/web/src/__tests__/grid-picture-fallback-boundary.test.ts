@@ -12,7 +12,8 @@ describe('grid picture delegated fallback', () => {
         expect(gridPictureSource).not.toContain("'use client'");
         expect(gridPictureSource).not.toMatch(/useState|onError=/);
         expect(gridPictureSource).toContain('data-grid-picture');
-        expect(gridPictureSource).toContain('data-fallback-src');
+        expect(gridPictureSource).toContain('fallbackSrc?: string');
+        expect(gridPictureSource).toContain('data-fallback-src={fallbackSrc ?? src}');
     });
 
     it('has one delegated error boundary that removes source rows before JPEG fallback', () => {
@@ -31,6 +32,19 @@ describe('grid picture delegated fallback', () => {
         ]) {
             const source = readFileSync(resolve(repoSrc, rel), 'utf8');
             expect(source).toContain('GridPictureFallbackBoundary');
+        }
+    });
+
+    it('uses sized JPEG derivatives as the normal grid fallback before base-JPEG recovery', () => {
+        for (const rel of [
+            'components/masonry-card.tsx',
+            'app/[locale]/(public)/g/[key]/page.tsx',
+            'app/[locale]/(public)/timeline/page.tsx',
+            'app/[locale]/(public)/year/[year]/page.tsx',
+        ]) {
+            const source = readFileSync(resolve(repoSrc, rel), 'utf8');
+            expect(source, rel).toContain("sizedImageUrl('/uploads/jpeg'");
+            expect(source, rel).toContain('fallbackSrc={imageUrl(`/uploads/jpeg/');
         }
     });
 });

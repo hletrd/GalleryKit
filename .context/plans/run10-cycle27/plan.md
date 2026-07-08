@@ -1,6 +1,6 @@
 # Run-10 Cycle 27/100 Implementation Plan
 
-Status: IMPLEMENTED - FULL LOCAL GATES PASSED; SIGNED PUSH/DEPLOY PENDING
+Status: COMPLETED - SIGNED PUSHED; DEPLOY EVIDENCE ABSENT AND SUPERSEDED BY CYCLE 28
 Aggregate: `.context/reviews/run10-cycle27/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `cff8d59f0301df8f64e030adc0fb2d65e825903a`
@@ -67,7 +67,7 @@ Acceptance:
 - No current plan/index line falsely says Cycle 26 source commit/push is pending.
 - Cycle 27 records full gate and deploy evidence.
 
-Status: implemented through local gate evidence; signed push and per-cycle deploy remain pending.
+Status: implemented. Signed commit `8753b939a780984b2c988fb6b75ed23ebad98ec9` is present on `origin/master`; no Cycle 27 deploy transcript was committed before Cycle 28, so Cycle 28's per-cycle deploy supersedes production evidence for this work.
 
 ## Finding Disposition Map
 
@@ -79,7 +79,8 @@ Deferred in `deferred.md`: `AGG-C27-02`, `AGG-C27-04`, `AGG-C27-05`.
 
 - [x] WP1 restore-maintenance fast-paths and focused tests.
 - [x] WP2 ledger closure and full local gates.
-- [ ] Signed push, deploy, live smoke.
+- [x] Signed push.
+- [x] Deploy/live-smoke disposition recorded: no Cycle 27 deploy transcript was committed before Cycle 28; superseded by Cycle 28's required per-cycle deploy.
 
 ## Gate Evidence
 
@@ -92,3 +93,9 @@ Deferred in `deferred.md`: `AGG-C27-02`, `AGG-C27-04`, `AGG-C27-05`.
 - Production build passed: `npm run build --workspace=apps/web`.
 - Full unit suite passed: `npm test --workspace=apps/web` (361 files passed, 2 skipped; 3378 tests passed, 4 skipped).
 - E2E not run: changes are server-action/admin maintenance ordering plus source-contract coverage; no browser-only flow changed.
+
+## Terminal Evidence
+
+- Signed commit: `8753b939a780984b2c988fb6b75ed23ebad98ec9` (`fix(cycle27): 🐛 gate restore maintenance earlier`), GPG good signature from `Jiyong Youn <01@0101010101.com>`.
+- Push state: Cycle 28 started with `8753b939a780984b2c988fb6b75ed23ebad98ec9` at `origin/master`.
+- Deploy evidence: no committed Cycle 27 deploy transcript was found before Cycle 28. Cycle 28's per-cycle deploy is the production-closure evidence for the current pushed history.

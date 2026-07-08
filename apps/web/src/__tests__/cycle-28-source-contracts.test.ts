@@ -26,6 +26,31 @@ describe('cycle 28 source contracts', () => {
 
     it('short-circuits DB-backed public pages while restore maintenance is active', () => {
         const publicPages = [
+            { path: 'app/[locale]/(public)/page.tsx', firstWorkMarker: 'getSeoSettings()' },
+            { path: 'app/[locale]/(public)/[topic]/page.tsx', firstWorkMarker: 'getTopicBySlugCached(topic)' },
+            { path: 'app/[locale]/(public)/p/[id]/page.tsx', firstWorkMarker: 'getImageCached(imageId)' },
+            { path: 'app/[locale]/(public)/g/[key]/page.tsx', firstWorkMarker: 'isShareLookupRateLimited()' },
+            { path: 'app/[locale]/(public)/s/[key]/page.tsx', firstWorkMarker: 'isShareLookupRateLimited()' },
+            { path: 'app/[locale]/(public)/c/[slug]/page.tsx', firstWorkMarker: 'getSmartCollectionBySlugCached(slug)' },
+            { path: 'app/[locale]/(public)/map/page.tsx', firstWorkMarker: 'getMapImages()' },
+            { path: 'app/[locale]/(public)/timeline/page.tsx', firstWorkMarker: 'getTimelineYears()' },
+            { path: 'app/[locale]/(public)/year/[year]/page.tsx', firstWorkMarker: 'getYearInReviewImages(yearNum)' },
+        ];
+
+        for (const page of publicPages) {
+            const source = readSrc(page.path);
+            const body = source.slice(source.indexOf('export default'));
+            const maintenanceIndex = body.indexOf('isRestoreMaintenanceActive()');
+            const workIndex = body.indexOf(page.firstWorkMarker);
+            expect(maintenanceIndex, page.path).toBeGreaterThanOrEqual(0);
+            expect(body, page.path).toContain('<PublicRestoreMaintenance');
+            expect(workIndex, `${page.path} should contain ${page.firstWorkMarker}`).toBeGreaterThanOrEqual(0);
+            expect(maintenanceIndex, page.path).toBeLessThan(workIndex);
+        }
+    });
+
+    it('keeps DB-backed public pages dynamically fresh', () => {
+        for (const page of [
             'app/[locale]/(public)/page.tsx',
             'app/[locale]/(public)/[topic]/page.tsx',
             'app/[locale]/(public)/p/[id]/page.tsx',
@@ -35,13 +60,17 @@ describe('cycle 28 source contracts', () => {
             'app/[locale]/(public)/map/page.tsx',
             'app/[locale]/(public)/timeline/page.tsx',
             'app/[locale]/(public)/year/[year]/page.tsx',
-        ];
-
-        for (const page of publicPages) {
-            const source = readSrc(page);
-            expect(source).toContain('isRestoreMaintenanceActive');
-            expect(source).toContain('<PublicRestoreMaintenance');
+        ]) {
+            expect(readSrc(page), page).toContain('export const revalidate = 0;');
         }
+    });
+
+    it('fails closed on unscanned top-level server action modules under app routes', () => {
+        const scanner = readRoot('scripts/check-action-origin.ts');
+
+        expect(scanner).toContain("path.join(REPO_SRC, 'app')");
+        expect(scanner).toContain('UNSCANNED SERVER ACTION MODULE');
+        expect(scanner).toContain("hasTopLevelUseServerDirective(file)");
     });
 
     it('keeps dense admin image tables horizontally scrollable with stable columns', () => {

@@ -7,6 +7,7 @@ type GridPictureSource = {
 type GridPictureProps = {
     sources: GridPictureSource[];
     src: string;
+    fallbackSrc?: string;
     alt: string;
     width: number;
     height: number;
@@ -19,6 +20,7 @@ type GridPictureProps = {
 export function GridPicture({
     sources,
     src,
+    fallbackSrc,
     alt,
     width,
     height,
@@ -28,7 +30,7 @@ export function GridPicture({
     fetchPriority,
 }: GridPictureProps) {
     return (
-        <picture data-grid-picture data-fallback-src={src}>
+        <picture data-grid-picture data-fallback-src={fallbackSrc ?? src}>
             {sources.map((source) => (
                 <source
                     key={`${source.type}:${source.srcSet}`}

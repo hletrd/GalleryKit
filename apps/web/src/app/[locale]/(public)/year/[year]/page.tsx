@@ -4,7 +4,7 @@ import { getTranslations, getLocale } from 'next-intl/server';
 import { getYearInReviewImages } from '@/lib/data-timeline';
 import { getSeoSettings } from '@/lib/data';
 import { localizePath, localizeUrl, buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
-import { imageUrl, absoluteImageUrl } from '@/lib/image-url';
+import { imageUrl, absoluteImageUrl, sizedImageUrl } from '@/lib/image-url';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -225,8 +225,14 @@ export default async function YearInReviewPage({
                                                                     srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
                                                                     sizes: '(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw',
                                                                 },
+                                                                {
+                                                                    type: 'image/jpeg',
+                                                                    srcSet: `${sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, smallSize, imageSizes)} ${smallSize}w, ${sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, mediumSize, imageSizes)} ${mediumSize}w`,
+                                                                    sizes: '(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw',
+                                                                },
                                                             ]}
-                                                            src={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
+                                                            src={sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, smallSize, imageSizes)}
+                                                            fallbackSrc={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
                                                             alt={altText}
                                                             width={photo.width}
                                                             height={photo.height}

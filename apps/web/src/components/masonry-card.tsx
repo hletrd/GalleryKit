@@ -6,7 +6,7 @@ import { GridPicture } from '@/components/grid-picture';
 import { OptimisticImage } from './optimistic-image';
 import { useTranslation } from '@/components/i18n-provider';
 import { cn } from '@/lib/utils';
-import { imageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
 import { findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
@@ -103,8 +103,14 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, topicLabel, i
                                                 srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
                                                 sizes: MASONRY_SIZES,
                                             },
+                                            {
+                                                type: 'image/jpeg',
+                                                srcSet: `${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallSize, imageSizes)} ${smallSize}w, ${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, mediumSize, imageSizes)} ${mediumSize}w`,
+                                                sizes: MASONRY_SIZES,
+                                            },
                                         ]}
-                                        src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                        src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallSize, imageSizes)}
+                                        fallbackSrc={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                         alt={altText}
                                         width={image.width}
                                         height={image.height}

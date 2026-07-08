@@ -6,7 +6,7 @@ import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { headers } from 'next/headers';
 import { ArrowLeft } from 'lucide-react';
-import { imageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageUrl } from '@/lib/image-url';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { GridPicture } from '@/components/grid-picture';
@@ -229,8 +229,14 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                         srcSet: `${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${smallGridSize}.webp`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${mediumGridSize}.webp`)}`)} ${mediumGridSize}w`,
                                         sizes: '(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw',
                                     }] : []),
+                                    {
+                                        type: 'image/jpeg',
+                                        srcSet: `${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallGridSize, gridImageSizes)} ${smallGridSize}w, ${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, mediumGridSize, gridImageSizes)} ${mediumGridSize}w`,
+                                        sizes: '(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw',
+                                    },
                                 ]}
-                                src={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
+                                src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallGridSize, gridImageSizes)}
+                                fallbackSrc={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                 alt={altText}
                                 width={image.width}
                                 height={image.height}
