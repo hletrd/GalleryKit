@@ -51,7 +51,12 @@ const nextConfig: NextConfig = {
   // standalone build does not webpack-trace their .node binaries into the server bundle.
   // (clip-model.ts also imports transformers lazily so the dark CLIP feature never loads
   // it on the boot/upload path.)
-  serverExternalPackages: ['drizzle-orm', 'sharp', '@huggingface/transformers', 'onnxruntime-node'],
+  // geoip-lite loads its country DB from `path.join(__dirname, '../data')` at
+  // runtime. If it is bundled, webpack rewrites `__dirname` to a bogus build
+  // path (e.g. `/ROOT/...`) so every lookup ENOENTs and falls back to 'XX'
+  // (all analytics countries showed XX). Keeping it external preserves the
+  // real `__dirname` so it finds `/app/node_modules/geoip-lite/data`.
+  serverExternalPackages: ['drizzle-orm', 'sharp', '@huggingface/transformers', 'onnxruntime-node', 'geoip-lite'],
   async headers() {
     const isDev = process.env.NODE_ENV === 'development';
     const devCspValue = buildContentSecurityPolicy({ isDev: true, imageBaseUrl });

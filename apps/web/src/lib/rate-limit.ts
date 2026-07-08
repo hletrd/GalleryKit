@@ -173,27 +173,6 @@ export function getTrustedProxyHopCount(value: string | undefined = process.env.
 }
 
 export function getClientIp(headerStore: HeaderLike): string {
-    // TEMP-CLIENTIP-DIAG (remove after diagnosis): privacy-safe — logs header
-    // PRESENCE/shape only, never the actual IP. Gated on a request header so
-    // only an explicit probe triggers it.
-    if (headerStore.get('x-clientip-diag') === '1') {
-        const xff = headerStore.get('x-forwarded-for') || '';
-        const parts = xff.split(',').map(p => p.trim()).filter(Boolean);
-        const hop = getTrustedProxyHopCount();
-        const idx = parts.length - hop;
-        let geoInfo: unknown = 'n/a';
-        try {
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
-            const geo = require('geoip-lite');
-            geoInfo = { resolved: require.resolve('geoip-lite'), lookup8888: geo.lookup('8.8.8.8')?.country ?? 'NULL' };
-        } catch (e) { geoInfo = { err: (e as Error).message }; }
-        console.error('[CLIENTIP-DIAG2]', JSON.stringify({
-            trust: process.env.TRUST_PROXY ?? '(unset)',
-            hopCount: hop,
-            picked: idx >= 0 ? normalizeIp(parts[idx]) : null,
-            geo: geoInfo,
-        }));
-    }
     // Only trust proxy headers when TRUST_PROXY is explicitly set.
     // Without it, an attacker can spoof X-Forwarded-For to bypass rate limits.
     if (process.env.TRUST_PROXY === 'true') {
