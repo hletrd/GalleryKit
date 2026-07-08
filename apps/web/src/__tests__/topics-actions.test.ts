@@ -818,6 +818,25 @@ describe('topic actions', () => {
         expect(revalidateAllAppDataMock).not.toHaveBeenCalled();
     });
 
+    it('serializes map visibility toggles with the topic route mutation lock', async () => {
+        updateMock.mockReturnValueOnce(makeUpdateChain([{ affectedRows: 1 }]));
+
+        await expect(setTopicMapVisible('travel', true)).resolves.toEqual({ success: true });
+
+        expect(lockQueryMock).toHaveBeenCalledWith(expect.stringContaining('GET_LOCK'));
+        expect(updateMock).toHaveBeenCalledTimes(1);
+        expect(logAuditEventMock).toHaveBeenCalledWith(
+            1,
+            'topic_map_visible_set',
+            'topic',
+            'travel',
+            undefined,
+            { map_visible: true },
+        );
+        expect(revalidateAllAppDataMock).toHaveBeenCalledTimes(1);
+        expect(releaseLockQueryMock).toHaveBeenCalledWith(expect.stringContaining('RELEASE_LOCK'));
+    });
+
 // AGG9B-09 / TEST9-03 (loop-B cycle 9b): GET_LOCK returning 0 (the 5 s
 // route-lock wait expiring under contention) throws TopicRouteLockTimeoutError
 // — previously zero-covered across all five catch sites even though the

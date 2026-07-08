@@ -1,80 +1,68 @@
-# Run-10 Cycle 34 Debugger Review
+# Cycle 35 Debugger Review
 
-Role lane: debugger
+Role lane: debugger subagent
 Date: 2026-07-08 KST
 Repository: `/Users/hletrd/flash-shared/gallery`
-Reviewed HEAD: `e94455d372daf74d8de9c909558ad7173b6cc864`
-Status: review-only. No source fixes, commits, pushes, or deploys performed.
+Reviewed HEAD: `7993fa467f8a71814f878aa59bcd80174daab1ed`
+Status: review-only. Product code was not edited.
 
-## Inventory First
+## Inventory / Scope Reviewed
 
-I read the workspace rules in `AGENTS.md` and `CLAUDE.md`, then inventoried the bug-prone surfaces before drilling into code. Relevant files inspected:
+Read before review: `AGENTS.md`, `CLAUDE.md`, and the review workflow instructions.
 
-- Upload/delete: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/upload-tracker*.ts`, `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/lib/process-image.ts`.
-- Queue/backfill/image processing: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/src/lib/clip-*`, `apps/web/src/lib/caption-generator.ts`.
-- Restore/auth/session: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance*.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/pending-session-revocations.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, admin layouts.
-- Migrations/data/routes: `apps/web/scripts/migrate.js`, `apps/web/drizzle/**`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, semantic/similar/OG/upload route handlers, public actions.
-- Service worker/deploy: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/scripts/build-sw.ts`, `apps/web/src/lib/sw-cache.ts`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/next.config.ts`, nginx config references.
+Inventory built first with `rg --files` and targeted source searches for async boundaries, advisory locks, restore gates, server actions, route handlers, queue handoff, raw SQL, delete/update paths, and error handling. High-risk files reviewed in detail:
 
-## Confirmed Issues
+- Upload, delete, and file durability: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/lib/process-topic-image.ts`.
+- Queue, backfill, and async image/embedding work: `apps/web/src/lib/image-queue.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, related tests around similar/semantic behavior.
+- Restore, maintenance, and mutation admission: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/db-restore.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/api-auth.ts`.
+- Topic/tag/share/settings/public mutation paths: `apps/web/src/app/actions/topics.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/app/actions/settings.ts`, `apps/web/src/app/actions/admin-users.ts`.
+- Data/privacy/rate-limit surfaces: `apps/web/src/lib/data.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/auth-rate-limit.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`, map/topic tests, and route lint scripts.
+- Migration/schema-sensitive areas were inventoried through `apps/web/drizzle/**`, `apps/web/scripts/migrate.js`, and schema-related tests, with deeper review focused on code paths touched by current mutation/data risks.
 
-### DBG-R10C34-01 - In-app backfill is not part of graceful shutdown/drain
+Validation run:
+
+- `npm run lint:api-auth --workspace=apps/web` - passed.
+- `npm run lint:action-origin --workspace=apps/web` - passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
+
+I did not run the full lint/typecheck/build/test suite for this review-only pass. Existing modified peer reports in `.context/reviews/` were not touched.
+
+## Findings
+
+### DBG-C35-01 - Topic map visibility toggles can be lost during a concurrent slug rename
 
 - Severity: Medium
 - Confidence: High
-- File/region: `apps/web/src/lib/admin-backfill-runner.ts:45-51`, `675-727`, `821-865`, `917-920`; `apps/web/src/instrumentation.ts:49-61`; `apps/web/src/lib/process-image.ts:1142-1202`, `1411-1455`.
-- Failure scenario: An admin starts "Re-encode existing photos" and then a deploy/restart sends SIGTERM. `triggerAdminBackfill()` intentionally launches `runBackfill(lockConnHandoff).catch(...)` fire-and-forget at `admin-backfill-runner.ts:917-920`. The shutdown handler drains the image queue, maintenance scheduler, buffered view writes, and single-writer guard at `instrumentation.ts:49-61`, but it never imports or awaits the admin backfill runner. If the process exits while `runBackfill()` is inside `processImageFormats()`, per-file atomic renames keep individual files from being torn, but the whole photo set can be left mixed across formats/sizes/settings before the DB `pipeline_version` update. The row remains a candidate, but no automatic post-restart backfill resumes it; an operator must notice `candidateCount` later.
-- Why tests/comments can mislead: The runner header says a kill mid-backfill will "pick up where this one left off" (`admin-backfill-runner.ts:45-51`). That is true for manual re-invocation, not for graceful shutdown. `processImageFormats()` has JS-level rollback on thrown errors (`process-image.ts:1142-1202`, `1451-1455`), but process termination is outside that `catch/finally` contract.
-- Fix: Track the active backfill promise in module state and export a `drainAdminBackfillForShutdown(timeoutMs)`/`abortAdminBackfillForShutdown()` hook. Call it from `instrumentation.ts` and from the restore drain checklist, or persist a durable backfill-incomplete marker and have startup/status surface it explicitly. At minimum, update the comment to say resume is manual and add a shutdown test that proves SIGTERM waits for or cancels the in-app runner.
+- Classification: Likely data-consistency bug, confirmed by static interleaving.
+- File / code region:
+  - `apps/web/src/app/actions/topics.ts:70-103` defines `withTopicRouteMutationLock(...)`.
+  - `apps/web/src/app/actions/topics.ts:282-372` uses that lock for `updateTopic(...)`; the slug-rename branch reads the old row, inserts the new slug with `map_visible: transactionTopic.map_visible`, rewrites children, then deletes the old slug.
+  - `apps/web/src/app/actions/topics.ts:690-720` implements `setTopicMapVisible(...)` as a direct `UPDATE topics SET map_visible = ? WHERE slug = ?` without the same route/topic serialization lock.
+  - `apps/web/src/__tests__/topics-actions.test.ts:813-819` covers malformed map-visible input, but I did not find coverage for `setTopicMapVisible(...)` serializing with slug rename.
 
-## Likely Risks
+Root cause:
 
-### DBG-R10C34-02 - Server Action multipart upload/restore admission still happens after framework parsing
+`updateTopic(...)` treats a slug change as delete-and-recreate rather than an in-place slug update. It correctly carries `map_visible` from the old row into the inserted replacement row, but that carry-forward value is read inside the rename transaction before the old row is deleted. `setTopicMapVisible(...)` mutates the same row outside `withTopicRouteMutationLock(...)`, so it can update the old slug while the rename transaction is in flight.
 
-- Severity: Medium
-- Confidence: Medium-High
-- File/region: `apps/web/next.config.ts:111-119`; `apps/web/src/lib/upload-limits.ts:1-6`, `33-35`; `apps/web/src/app/actions/images.ts:87-106`, `154-221`; `apps/web/src/app/[locale]/admin/db-actions.ts:421-447`, `789-814`; safer contrast `apps/web/src/app/api/admin/lr/upload/route.ts:101-187`.
-- Failure scenario: Browser upload and DB restore are Server Actions. The app-level checks for admin/auth/locks/quota happen inside the action, but Next must accept and parse the multipart body up to `NEXT_SERVER_ACTION_BODY_SIZE_LIMIT` first. A large restore body or a few oversized browser-upload attempts can spend parser memory/CPU before `uploadImages()` reaches `formData.getAll()` and the upload contract lock, or before `restoreDatabase()` writes the restore file to its temp path. The Lightroom route is safer because it checks `Content-Length`, rejects chunked transfer, enforces quota, and acquires a parse slot before `request.formData()`.
-- Why tests/comments can mislead: `upload-limits.test.ts` verifies the 266 MB framework cap, and upload code enforces per-file and total quotas after parsing. Those tests do not prove early rejection under lock contention, restore maintenance, or parser pressure.
-- Fix: Consider moving browser upload and DB restore ingestion to Node route handlers with pre-parse `Content-Length` checks, explicit parse semaphores, and streaming temp-file writes. Keep Server Actions as thin form shims only after the route-level admission controls exist.
+Concrete failure scenario:
 
-### DBG-R10C34-03 - Queue/post-commit "self-healing" relies on restart/bootstrap timing
+1. Topic `travel` currently has `map_visible = false`.
+2. Admin A starts renaming `travel` to `trips`. `updateTopic(...)` enters the route lock and reads `transactionTopic.map_visible = false` at `topics.ts:299-306`.
+3. Admin B toggles map visibility for `travel` to `true`. `setTopicMapVisible(...)` passes restore/origin/admin checks and updates the old row at `topics.ts:709-712` because it does not wait on the route lock.
+4. Admin A's rename inserts `trips` with the stale carried value `false` at `topics.ts:317-323`, then deletes `travel` at `topics.ts:370-371`.
+5. Admin B receives success and an audit event is logged at `topics.ts:716-717`, but the visible state was deleted with the old row and `/map` remains hidden for the renamed topic until toggled again.
 
-- Severity: Low-Medium
-- Confidence: Medium
-- File/region: `apps/web/src/app/actions/images.ts:484-516`, `580-607`; `apps/web/src/app/api/admin/lr/upload/route.ts:523-587`; `apps/web/src/lib/image-queue.ts:737-742`, `1139-1283`; `apps/web/src/instrumentation.ts:9-10`.
-- Failure scenario: Both browser and Lightroom upload paths commit an image row and then call `enqueueImageProcessing()` as post-commit work. The LR route explicitly states missed enqueue is self-healing (`lr/upload/route.ts:523-531`). That is mostly true: bootstrap scans `processed=false AND processing_error IS NULL` rows on startup. The weak spot is operator visibility and latency. If enqueue returns `false` because shutdown has started (`image-queue.ts:737-742`) or post-commit work fails, the upload response can still be success while the photo stays pending until the next bootstrap/restart/resume path. If bootstrap itself hits transient DB errors, retry timers eventually heal, but the user sees a successful upload with no immediate processing progress.
-- Why tests/comments can mislead: Existing tests lock many source-ordering properties, but I did not find a behavior test that simulates "post-commit enqueue rejected by shutdown" and proves the admin UI/status makes the pending state clear before a restart.
-- Fix: Treat a post-commit enqueue rejection as an explicit admin-visible pending state: log structured event, increment a metric/status counter, and schedule a bounded bootstrap retry when not in restore/shutdown. Add a focused test for `enqueueImageProcessing()` returning false after a committed upload.
+Suggested fix:
 
-## Manual-Validation Risks
+Serialize `setTopicMapVisible(...)` with the same route/topic mutation lock used by create, rename, delete, and alias changes. Keep the restore fence and same-origin checks as the outer admission gate, then perform the clean-slug validation, update, audit, and revalidation inside `withTopicRouteMutationLock(...)`. Add a regression test that proves `setTopicMapVisible(...)` calls the lock helper or an integration-style interleaving test around rename plus map-visible update.
 
-### DBG-R10C34-04 - Restore-maintenance recovery depends on a documented restart after sidecar clear
+## Final Sweep / Non-Findings
 
-- Severity: Medium
-- Confidence: High for dependency, Low for source defect because it is documented
-- File/region: `apps/web/src/lib/restore-maintenance-durable.ts:90-96`, `121-127`; `apps/web/scripts/restore-maintenance-recovery.mjs:76-85`; `CLAUDE.md:437-438`; tests `apps/web/src/__tests__/restore-maintenance-recovery-mjs.test.ts:68-80`, `apps/web/src/__tests__/restore-maintenance.test.ts:71-83`.
-- Failure scenario: A failed restore leaves process-local maintenance active and writes the durable marker. The recovery script clears the marker from a separate Node process, but it cannot clear the already-running web process' in-memory flag. `CLAUDE.md` correctly says restart/redeploy after sidecar clear. If an operator only runs the clear command and trusts its JSON `active:false`, the live site can keep returning maintenance until the container restarts.
-- Fix: Add the restart requirement to the command output after `clear`, or make the command refuse to imply live-process recovery. A lightweight health/status route could report both durable marker and process-local maintenance state for operator confirmation.
+- Upload and Lightroom ingestion paths settle their upload-tracker claims on the main observed failure paths, use restore admission, and route post-commit processing through queue self-healing.
+- Semantic and similar search route handlers have same-origin checks, restore-maintenance checks, body-size/content-type guards where relevant, rate-limit pre-increment, bounded scanning, and missing/corrupt embedding handling.
+- Restore import/export code keeps dangerous failures in maintenance, drains admitted mutations, validates dump trailer/SQL shape, and releases temporary files in finalizers.
+- Pending file deletion paths insert durable cleanup work before DB row deletion and use strict path resolution helpers.
+- Privacy-sensitive admin-only fields remain covered by the symmetric privacy guard test pattern inspected in `data.ts` and related tests.
+- Route/auth lint gates passed for admin API wrappers, server-action same-origin admission, and public route rate limits.
 
-### DBG-R10C34-05 - Advisory locks are mostly process-safe but not instance-namespaced except the warn-only singleton
-
-- Severity: Medium
-- Confidence: Medium
-- File/region: `apps/web/src/lib/advisory-locks.ts:10-18`, `20-52`, `70-75`; `CLAUDE.md:247`, `442-446`.
-- Failure scenario: The repo documents that most MySQL advisory locks are server-global, not database-scoped. The single-writer guard is DB-scoped and warn-only, but restore/upload/backfill/image-processing lock names are shared across all GalleryKit databases on the same MySQL server. A legitimate co-located second gallery can serialize or block maintenance work in the first gallery, while a misconfigured second instance of the same gallery can still pass traffic because the singleton guard warns but does not block.
-- Fix: Manual validation should confirm the production MySQL server hosts only this GalleryKit DB, or that cross-gallery lock sharing is accepted. Long-term, prefix all advisory locks with a stable instance/database hash, preserving an intentional global lock only where cross-DB serialization is desired.
-
-## Confirmed Non-Findings
-
-- Delete durability is substantially covered: `deleteImage()`/`deleteImages()` insert `pending_file_deletions` before DB row deletion and cleanup uses strict delete helpers plus hourly/restore drains (`actions/images.ts:677-723`, `814-892`; `pending-file-deletions.ts:72-139`; migration/schema mirror checked).
-- Restore import failure keeps maintenance for the dangerous handoff paths: mysql nonzero/timeout and post-restore migration failures return `keepMaintenance: true` and the finalizer preserves the durable marker (`db-actions.ts:986-1010`, `704-714`).
-- Auth/session paths short-circuit restore and same-origin checks in the expected order, with pending session revocations for logout/restore windows (`auth.ts`, `session.ts`, `pending-session-revocations.ts`).
-- Service worker generated version matches the template hash plus image pipeline version: expected and actual `SW_VERSION` are `fc3ca358-p7`; admin/revocable route bypass patterns matched the documented `/admin`, `/p`, `/s`, `/g`, `/c`, and `/map` exclusions.
-- Migration reconcile currently mirrors the pending deletion table and recent image columns (`migrate.js:397-502`, `720-749`), and the `_journal.json` entry for `0030_pending_file_deletions` exists.
-
-## Final Sweep
-
-Final pass checked upload/delete races, pending cleanup, queue retries/permanent failures, bootstrap and restore resume, in-app and sidecar backfills, restore child-process handoff, auth/session revocation, public data field omissions, semantic/similar search bounds, service-worker cache exclusions, migration baseline/reconcile coupling, deploy pruning, and recovery scripts.
-
-No critical confirmed bug was found. The main actionable issue is the in-app backfill shutdown gap; the other items are likely/manual risks where the current code is mostly correct but depends on operational behavior or delayed self-healing.
+Skipped/limited areas: no top-level source area was intentionally skipped during inventory, but the deepest line-by-line review focused on mutation, async, data, restore, upload, and route-handler surfaces. Static assets, generated files, and presentational React/CSS components were not exhaustively line-reviewed beyond their relevance to the failure modes above.

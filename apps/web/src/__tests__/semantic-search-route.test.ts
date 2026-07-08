@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { SEMANTIC_SCAN_LIMIT } from '@/lib/clip-embeddings';
 
 const {
     hasTrustedSameOriginMock,
@@ -547,6 +548,33 @@ describe('/api/search/semantic POST (C12-TE-01)', () => {
         await expect(response.json()).resolves.toEqual({ error: 'Server error' });
         // AGG-12: rate-limit budget is NOT refunded after expensive work begins
         expect(rollbackSemanticAttemptMock).not.toHaveBeenCalled();
+    });
+
+    it('applies the semantic scan cap to the executed embedding scan query', async () => {
+        const scanLimitMock = vi.fn().mockResolvedValue([]);
+        dbSelectMock.mockReturnValue({
+            from: vi.fn().mockReturnValue({
+                innerJoin: vi.fn().mockReturnValue({
+                    where: vi.fn().mockReturnValue({
+                        orderBy: vi.fn().mockReturnValue({
+                            limit: scanLimitMock,
+                        }),
+                    }),
+                }),
+                leftJoin: vi.fn().mockReturnValue({
+                    where: vi.fn().mockReturnValue({
+                        groupBy: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([]),
+                        }),
+                    }),
+                }),
+            }),
+        });
+
+        const response = await POST(mockRequest({ query: 'mountain landscape' }));
+
+        expect(response.status).toBe(200);
+        expect(scanLimitMock).toHaveBeenCalledWith(SEMANTIC_SCAN_LIMIT);
     });
 
     it('filters scanned embeddings by the active model version', () => {

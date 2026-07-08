@@ -17,6 +17,7 @@ import { resolve } from 'node:path';
 import {
     PRODUCTION_MODEL_VERSION,
     EMBEDDING_BYTES,
+    SEMANTIC_SCAN_LIMIT,
 } from '@/lib/clip-embeddings';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
@@ -43,6 +44,7 @@ const NEIGHBOUR_EMBEDDING_B64 = makeEmbeddingBase64(0.49);
 // The whereSpy records every call to the .where() chain step so we can assert
 // which filter arguments were passed.
 const whereSpy = vi.fn();
+const limitSpy = vi.fn();
 
 // Control which rows the db mock returns per test.
 // `targetRows` → the target-image embedding lookup (limit 1)
@@ -71,7 +73,8 @@ vi.mock('@/db', () => {
         innerJoin: () => chain,
         leftJoin: () => chain,
         orderBy: () => chain,
-        limit: () => {
+        limit: (...args: unknown[]) => {
+            limitSpy(...args);
             if (activeQuery === 1) return Promise.resolve(targetRows);
             if (activeQuery === 2) return Promise.resolve(scanRows);
             return Promise.resolve([]);
@@ -150,6 +153,7 @@ function params(id: string): { params: Promise<{ id: string }> } {
 describe('GET /api/search/similar/[id]', () => {
     beforeEach(() => {
         whereSpy.mockClear();
+        limitSpy.mockClear();
         selectCallCount = 0;
         activeQuery = 0;
         vi.mocked(hasTrustedSameOrigin).mockReset().mockReturnValue(true);
@@ -336,6 +340,18 @@ describe('GET /api/search/similar/[id]', () => {
             arg => typeof arg === 'object' && arg !== null && JSON.stringify(arg).includes(PRODUCTION_MODEL_VERSION),
         );
         expect(hasProductionVersionFilter).toBe(true);
+    });
+
+    it('applies the semantic scan cap to the executed embedding scan query', async () => {
+        targetRows = [{ embedding: TARGET_EMBEDDING_B64 }];
+        scanRows = [];
+        imageRows = [];
+
+        const res = await GET(req('3') as never, params('3'));
+
+        expect(res.status).toBe(200);
+        expect(limitSpy).toHaveBeenCalledWith(1);
+        expect(limitSpy).toHaveBeenCalledWith(SEMANTIC_SCAN_LIMIT);
     });
 
     it('sets Cache-Control: no-store on the 200 response', async () => {

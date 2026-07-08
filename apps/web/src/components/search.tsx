@@ -447,7 +447,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             aria-describedby={hasDisplayedResults ? 'search-keyboard-instructions' : undefined}
                             role="combobox"
                             aria-autocomplete="list"
-                            aria-controls={hasDisplayedResults ? 'search-results' : 'search-dialog'}
+                            aria-controls={hasDisplayedResults ? 'search-results' : undefined}
                             aria-expanded={isOpen}
                             aria-activedescendant={activeIndex >= 0 && results[activeIndex] ? `search-result-${activeIndex}` : undefined}
                             value={query}

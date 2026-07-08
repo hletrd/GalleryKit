@@ -31,7 +31,8 @@ describe('search dialog status ownership', () => {
         expect(SOURCE).toContain('const hasSettledCurrentQuery = trimmedQuery.length > 0 && settledQuery === trimmedQuery');
         expect(SOURCE).toContain('const hasDisplayedResults = hasSettledCurrentQuery && results.length > 0');
         expect(SOURCE).toContain('aria-describedby={hasDisplayedResults ?');
-        expect(SOURCE).toContain("aria-controls={hasDisplayedResults ? 'search-results' : 'search-dialog'}");
+        expect(SOURCE).toContain("aria-controls={hasDisplayedResults ? 'search-results' : undefined}");
+        expect(SOURCE).not.toContain("aria-controls={hasDisplayedResults ? 'search-results' : 'search-dialog'}");
         expect(SOURCE).toContain('aria-expanded={isOpen}');
         expect(SOURCE).not.toContain('aria-expanded={hasDisplayedResults}');
         expect(SOURCE).toContain('{hasDisplayedResults ? (');

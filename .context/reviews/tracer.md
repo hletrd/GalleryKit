@@ -1,59 +1,85 @@
-# Run-10 Cycle 34 Tracer Review
+# Run-10 Cycle 35 Tracer Review
 
-Scope: review-only causal tracing across upload, delete/cleanup, restore, backfill, queue, auth/session, rate limits, public route data, service worker, and deploy. I read `AGENTS.md`, `CLAUDE.md`, and the relevant source paths below. I did not run destructive commands, commit, push, deploy, or edit source files.
+Date: 2026-07-08 KST
+Role: cycle-35 tracer subagent
+Workspace: `/Users/hletrd/flash-shared/gallery`
+Mode: review-only; no product-code edits
 
-## Inventory
+## Scope And Inventory
 
-- Governing context: `AGENTS.md`, `CLAUDE.md`, `.context/reviews/tracer.md` from the previous cycle.
-- Upload/browser and Lightroom/PAT ingest: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/components/upload-dropzone.tsx`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/admin-tokens.ts`, `apps/web/src/lib/upload-tracker.ts`, `apps/web/src/lib/upload-limits.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`.
-- Delete and cleanup: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`.
-- Restore and session fences: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/restore-drain-checklist.ts`, `apps/web/src/lib/pending-session-revocations.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`.
-- Queue and backfill: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/queue-shutdown.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/backfill-alt-text.ts`, `apps/web/src/app/actions/admin-backfill.ts`, `apps/web/src/app/actions/embeddings.ts`.
-- Auth/session and lint gates: `apps/web/src/lib/api-auth.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/src/proxy.ts`.
-- Rate limits and public data: `apps/web/src/lib/rate-limit.ts`, `apps/web/src/app/actions/public.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, public pages under `apps/web/src/app/[locale]/(public)/`.
-- Service worker: `apps/web/public/sw.template.js`, `apps/web/public/sw.js`, `apps/web/scripts/build-sw.ts`, `apps/web/src/components/register-service-worker.tsx`, `apps/web/src/__tests__/sw-template-contract.test.ts`.
-- Deploy and edge controls: `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`, `apps/web/docker-compose.yml`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`.
+Required instructions read first: `AGENTS.md` and `CLAUDE.md`. I also read the previous tracer report at this path to avoid re-filing fixed cycle-34 issues.
 
-## Confirmed Defects
+Trace inventory reviewed:
 
-### C34-TRC-01 - Lightroom upload can write into a freshly restored DB because it bypasses the admin mutation barrier
+- Upload to DB to processing to serving: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/lib/upload-processing-contract-lock.ts`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/serve-upload.ts`, `apps/web/src/app/uploads/[...path]/route.ts`, `apps/web/src/app/[locale]/(public)/uploads/[...path]/route.ts`.
+- Delete and cleanup: `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`.
+- Restore and mutation fences: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/restore-drain-checklist.ts`, `apps/web/src/lib/pending-session-revocations.ts`.
+- Auth/session and admin actions: `apps/web/src/app/actions/auth.ts`, `apps/web/src/app/actions/admin-users.ts`, `apps/web/src/app/actions/settings.ts`, `apps/web/src/app/actions/sharing.ts`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/session.ts`, `apps/web/src/proxy.ts`.
+- Share/search/view analytics: `apps/web/src/app/actions/public.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/data.ts`, public share/photo/topic pages under `apps/web/src/app/[locale]/(public)/`.
+- Backfill and sidecar processing: `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, `apps/web/scripts/backfill-alt-text.ts`.
+- Deploy and migration flows: `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `apps/web/docker-compose.yml`.
+- Guard scripts run as validation: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`.
 
-- Severity: High
-- Confidence: High
-- Region: `apps/web/src/app/api/admin/lr/upload/route.ts:84-99`, `apps/web/src/app/api/admin/lr/upload/route.ts:259-281`, `apps/web/src/app/[locale]/admin/db-actions.ts:486-498`, `apps/web/src/app/[locale]/admin/db-actions.ts:571-610`, `apps/web/src/app/[locale]/admin/db-actions.ts:655-676`, `apps/web/src/lib/admin-mutation-barrier.ts:1-29`, `apps/web/src/lib/admin-mutation-barrier.ts:76-130`, `apps/web/src/lib/upload-processing-contract-lock.ts:10-30`.
-- Evidence: Browser uploads hold `acquireAdminMutationSlot()` for the whole mutation body before waiting on the upload-processing contract lock (`apps/web/src/app/actions/images.ts:87-101`, `apps/web/src/app/actions/images.ts:154-164`). The Lightroom route is a mutating admin API route wrapped by `withAdminAuth`, but it never imports or acquires `acquireAdminMutationSlot`; it only checks restore maintenance at entry and again before waiting up to the default 5 seconds on `acquireUploadProcessingContractLock()` (`apps/web/src/app/api/admin/lr/upload/route.ts:94-99`, `apps/web/src/app/api/admin/lr/upload/route.ts:259-281`). Restore acquires the upload-processing contract lock before it starts the durable maintenance marker, then later drains only mutation-slot holders before importing the dump (`apps/web/src/app/[locale]/admin/db-actions.ts:486-498`, `apps/web/src/app/[locale]/admin/db-actions.ts:571-610`, `apps/web/src/app/[locale]/admin/db-actions.ts:655-676`). The barrier comments describe exactly this pre-marker admitted mutation class as the corruption it is meant to prevent (`apps/web/src/lib/admin-mutation-barrier.ts:5-29`).
-- Concrete failure scenario: A Lightroom/PAT upload enters just before restore begins and passes both route-level restore checks. Restore then obtains `gallerykit_upload_processing_contract`, sets durable maintenance, drains browser/server-action mutation slots, imports the backup, clears maintenance, and releases the upload lock. Because the LR request is not counted in `drainAdminMutationsForRestore()`, it can acquire the upload lock after the restore completes and insert/enqueue a photo that belonged to the pre-restore request into the freshly restored database.
-- Why current gates miss it: `lint:action-origin` discovers `app/actions/**`, `app/[locale]/admin/db-actions.ts`, and `app/actions.ts`, not `app/api/admin/**/route.ts` (`apps/web/scripts/check-action-origin.ts:92-114`). `lint:api-auth` checks admin API route exports for `withAdminAuth(...)` only (`apps/web/scripts/check-api-auth.ts:1-11`, `apps/web/scripts/check-api-auth.ts:146-164`). So this exact class can pass both blocking gates.
-- Fix: Import and acquire `acquireAdminMutationSlot()` in `apps/web/src/app/api/admin/lr/upload/route.ts` immediately after the entry restore-maintenance check and before body parsing/tracker preclaim/contract-lock wait. Return 503 if not acquired, and keep the slot held through topic verify, save, DB insert, token mark, enqueue, audit, and response finalization. Add a route-level lint/test that mutating `app/api/admin/**/route.ts` handlers either hold the same mutation barrier or carry a reasoned exemption naming an equivalent restore fence.
+## Findings
 
-## Likely Risks
+No new confirmed, likely, or risk-class tracer findings were identified in this cycle.
 
-No likely-only code defects were elevated after tracing. The suspicious areas that initially looked risky had concrete fences in source: delete inserts durable pending-file rows before DB deletion; queue and color/semantic/alt backfills hold restore/backfill locks or durable restore checks; public view writes re-check restore before insert; semantic/similar search rate-limit before expensive work; and service-worker admin/revocable routes are excluded from offline HTML caching.
+Evidence:
 
-## Manual-Validation Risks
+- The cycle-34 Lightroom restore race is fixed. `apps/web/src/app/api/admin/lr/upload/route.ts:95-105` acquires `acquireAdminMutationSlot()` before multipart parsing; `route.ts:267-294` re-checks restore maintenance and acquires the upload-processing contract lock before topic verification/save/insert/enqueue. This now mirrors browser upload fencing in `apps/web/src/app/actions/images.ts:87-160`.
+- Restore imports are fenced by DB restore, upload-contract, color backfill, semantic backfill, and alt-text backfill locks before the durable marker is set (`apps/web/src/app/[locale]/admin/db-actions.ts:430-570`). The import then drains shared-group view counts, image queue, background DB writes, maintenance sweeps, and admin mutations before `runRestore` (`db-actions.ts:571-680`).
+- Foreground admin mutations consistently hold the restore drain slot; the custom scanner passed and reported OK for upload, delete, settings, share, auth, topic, tag, token, collection, and admin-user mutations. The mechanism is defined in `apps/web/src/lib/admin-mutation-barrier.ts:76-134`.
+- Queue/backfill write paths use per-image advisory claims through re-encode and persistence. The live queue checks pending row state before processing and conditionally updates `processed=false`; deleted-mid-processing rows clean all derivative size variants (`apps/web/src/lib/image-queue.ts:761-936`). In-app and sidecar backfills mirror the deleted-mid-reencode cleanup and avoid version bumps on detection failure (`apps/web/src/lib/admin-backfill-runner.ts:496-679`, `apps/web/scripts/backfill-color-pipeline.ts:487-623`).
+- Delete cleanup records durable `pending_file_deletions` rows in the same transaction as image-row deletion, then drains filesystem cleanup after commit (`apps/web/src/app/actions/images.ts:678-728`, `apps/web/src/app/actions/images.ts:809-893`).
+- Public view analytics pre-increment rate limits before durable writes, then wrap asynchronous inserts in the restore-drained background write tracker (`apps/web/src/app/actions/public.ts:377-475`, `apps/web/src/app/actions/public.ts:477-559`, `apps/web/src/lib/background-db-writes.ts:42-112`).
+- Semantic and similar search reject invalid origin/maintenance early and charge the shared semantic limiter before DB-backed mode lookup or embedding scans (`apps/web/src/app/api/search/semantic/route.ts:107-184`, `apps/web/src/app/api/search/similar/[id]/route.ts:68-131`).
+- Serving uploaded derivatives is constrained to `jpeg|webp|avif`, validates path segments/extensions, rejects symlinks, checks realpath containment, uses fd-stat for GET bodies, handles HEAD without opening a stream, and wires abort cleanup (`apps/web/src/lib/serve-upload.ts:162-384`).
+- Migration protection is explicit: all 31 journal entries have matching SQL files; the journal remains historically non-monotonic, but `apps/web/scripts/migrate.js:877-993` separates pending migrations from drift, refuses unsafe DML baselining, and asserts every journal hash after migrate.
 
-### C34-TRC-MV-01 - Host nginx rate-limit and real-IP protections remain config-only until an operator applies and validates them
+## Causal Chains And Hypotheses Cleared
 
-- Severity: Medium
-- Confidence: High
-- Region: `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:254-306`, `apps/web/deploy.sh:51-55`, `apps/web/deploy.sh:99-104`.
-- Evidence: The committed nginx config defines `public` and `nextimage` `limit_req_zone`s and explicitly warns that `$binary_remote_addr` is the TCP peer unless realip/PROXY protocol is configured (`apps/web/nginx/default.conf:1-29`). The public catch-all also states that this file is not touched by deploys and must be manually tested/reloaded (`apps/web/nginx/default.conf:290-293`). The remote deploy builds and starts Docker, waits for health, and prunes Docker artifacts; it does not copy or reload host nginx (`apps/web/deploy.sh:51-55`, `apps/web/deploy.sh:99-104`).
-- Concrete failure scenario: A release assumes public SSR and `/_next/image` flood caps are live because the config exists in git, but production still runs an older nginx config. Public page traffic is intentionally not covered by an app-layer page limiter, so bursts reach Next directly. In an LB-fronted topology, a partially applied config without realip can also key every visitor to the load balancer address and cause shared-bucket 429s.
-- Fix: Keep host-nginx apply/verify as an explicit manual release step for every nginx change: `nginx -T`/`nginx -t`, reload evidence, real-client-IP evidence, burst 429 evidence, and normal browsing non-429 evidence. If this should become automatic, implement a separate opt-in deploy step that syncs config and reloads nginx only after explicit production-change approval.
+- Upload chain: browser/LR entry guard -> admin mutation slot -> upload contract lock -> original save/GPS/HDR gates -> late restore cleanup -> DB insert -> queue enqueue -> per-image queue claim -> derivative write -> conditional processed update -> serve-upload/static serving. Competing hypotheses checked: LR bypassed restore drain, topic validation ran before the upload contract lock, post-save restore could insert after marker, and delete during processing could orphan derivatives. Current code has fences for each.
+- Auth/admin chain: origin/session/PAT verification -> mutation slot -> rate-limit pre-increment where applicable -> DB mutation -> audit/revalidation. Competing hypotheses checked: cookie admin API lacking origin, mutating action without barrier, and restore resurrecting logged-out sessions. Guard scripts passed; restore flushes pending session revocations before reopening maintenance (`db-actions.ts:686-724`).
+- Restore/backup chain: backup/restore advisory lock -> durable marker -> drain checklist -> import -> migration/reconcile postconditions -> marker clear/resume. Competing hypotheses checked: backup racing restore, queued analytics writing into import, admin mutation admitted pre-marker, and sidecar backfill writing during restore. Backup shares the restore lock; drains and durable marker checks cover the write paths inspected.
+- Share/search/view chain: public validation -> rate-limit pre-increment -> bounded DB/read/insert work -> rollback only on documented no-work/error paths. Competing hypotheses checked: expensive search before limiter, public analytics inserts untracked by restore drain, share-key TOCTOU, and public PII through semantic enrichment. Current code charges before protected work, tracks async analytics writes, uses conditional share-key updates, and shares compile-guarded public select fields.
+- Deploy/migration chain: deploy pulls/builds/health-checks/prunes only after success; migrations reconcile/baseline with hash postconditions; nginx is a committed template requiring operator apply. Competing hypotheses checked: deploy prune deleting persistent data, missing migration SQL, journal skip not detected, and nginx limiter assumed live by deploy. Source behavior matches documented contracts; live nginx application remains an operator validation item, not a new source defect.
 
-## Cleared Flow Notes
+## Validation
 
-- Browser uploads: fenced by entry restore check, same-origin admin check, whole-body mutation slot, upload tracker, disk-space check, upload-processing contract lock, GPS/HDR policy, late restore cleanup, DB insert, enqueue, audit, and revalidation (`apps/web/src/app/actions/images.ts:87-611`).
-- Delete/cleanup: single and bulk deletes remove queue state, insert `pending_file_deletions` in the same DB transaction as image-row deletion, then clean files after commit and keep failed cleanup durable for retry (`apps/web/src/app/actions/images.ts:613-880`, `apps/web/src/lib/pending-file-deletions.ts:82-139`).
-- Restore: the core server-action path has the expected exclusive restore lifecycle: DB restore lock, upload/backfill advisory locks, durable maintenance marker, queue/background/analytics/admin-mutation drains, import, pending session revocation flush, marker clear, queue resume, pending file deletion drain, and advisory lock release (`apps/web/src/app/[locale]/admin/db-actions.ts:421-752`).
-- Queue/backfill: image queue rejects active restore, uses per-image advisory locks, conditionally marks processed, and deletes variants if the row disappeared mid-processing. Color and semantic sidecars check durable restore maintenance and hold their respective global locks before mutating batches (`apps/web/src/lib/image-queue.ts:737-1098`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`).
-- Auth/session: login/logout/password actions use same-origin and mutation slots; logout queues revocation if DB mutation is blocked and restore flushes queued revocations before reopening normal admin auth (`apps/web/src/app/actions/auth.ts:100-109`, `apps/web/src/app/actions/auth.ts:286-299`, `apps/web/src/app/[locale]/admin/db-actions.ts:686-704`).
-- Public route data and rate limits: public search/load-more/view/share paths use app-layer pre-increment rate-limit helpers before expensive or mutating work, and public selects derive from explicit safe field lists rather than exposing admin-only fields (`apps/web/src/app/actions/public.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/data.ts:251-488`).
-- Service worker: `sw.template.js` and generated `sw.js` were checked for contract drift; only the generated version token differs. Admin routes and revocable public object pages bypass offline HTML caching, while image derivatives use bounded stale-while-revalidate behavior (`apps/web/public/sw.template.js:43-65`, `apps/web/public/sw.template.js:312-500`, `apps/web/public/sw.template.js:533-567`).
-- Deploy/migration: deploy does not hardcode host/key paths, checks env-file permissions, performs health check before Docker pruning, and preserves the documented bind-mounted data guarantees. Migration post-conditions remain guarded by journal hash assertions and legacy reconcile logic (`apps/web/deploy.sh:15-104`, `apps/web/scripts/migrate.js`).
+Fresh commands run:
 
-## Final Missed-Issue / Skipped-File Sweep
+```bash
+npm run lint:api-auth --workspace=apps/web
+npm run lint:action-origin --workspace=apps/web
+npm run lint:public-route-rate-limit --workspace=apps/web
+node -e "const j=require('./apps/web/drizzle/meta/_journal.json'); let ok=true, max=-Infinity; for (const e of j.entries){ if(e.when<=max){ console.log('non-monotonic', e.idx, e.tag, e.when, '<=', max); ok=false;} max=Math.max(max,e.when);} console.log('entries', j.entries.length, 'strictlyMonotonic', ok, 'maxWhen', max);"
+node -e "const fs=require('fs'); const j=require('./apps/web/drizzle/meta/_journal.json'); const missing=j.entries.filter(e=>!fs.existsSync('./apps/web/drizzle/'+e.tag+'.sql')); console.log('missingSql', missing.length, missing.map(e=>e.tag).join(','));"
+```
 
-- Missed-issue classes explicitly checked: pre-marker restore races, route/action lint coverage gaps, delete-before-ledger races, post-restore session resurrection, pending deletion during restore, queue/backfill writes during restore, unsafe file path deletion, public privacy field exposure, semantic/similar route expensive-work rate-limit order, service-worker admin/share staleness, generated SW drift, and nginx/deploy split-brain.
-- Skipped as irrelevant to this tracer lane: `.next/`, `node_modules/`, binary/image/font assets, Playwright screenshots/videos, historical review directories except for orientation, and unrelated dirty work. `git status --short` showed unrelated modifications to `.context/reviews/critic.md` and `.context/reviews/test-engineer.md`; I did not change either.
-- Validation run: static source tracing with `rg`, `nl`, and targeted cross-file inspection. I did not run lint/typecheck/tests because this was a review-only lane and no source behavior was changed.
+Results:
+
+- Admin API auth lint passed for both admin API routes.
+- Server-action origin and mutation-barrier lint passed.
+- Public route rate-limit lint passed for upload derivative, health/live, OG, search, feed, and public upload routes.
+- Migration journal inspection found 31 entries, 31 SQL files, and no missing SQL. The journal is still historically non-monotonic at entries 7-17, which is the documented condition handled by `migrate.js`.
+
+## Final Sweep
+
+Commonly missed issue classes explicitly checked:
+
+- Pre-marker restore races in browser upload, LR upload, auth, settings, share, delete, and retry paths.
+- Untracked background DB writes during restore.
+- Delete-before-ledger and deleted-mid-reencode derivative orphaning.
+- Rate-limit order for public search, load-more, view analytics, OG/feed route classes, and semantic/similar scans.
+- Public privacy field leakage through listing, map exception, semantic enrichment, and similar-image enrichment selects.
+- Upload/original path traversal, symlink, and legacy public-original fallback behavior.
+- Migration journal/hash drift, reconcile coverage for current schema, and deploy prune persistence guarantees.
+- Host nginx/app proxy split-brain and limiter-key caveats.
+
+Skipped files:
+
+- `node_modules`, `.next`, test-results, runtime upload/resource/backups directories, binary/image/font assets, and historical archive screenshots.
+- I did not exhaustively re-read every historical `.context/reviews/archive/**` artifact. Current source, current instructions, and the previous tracer report were sufficient for this lane.
+- I observed unrelated modified review files in the worktree (`.context/reviews/code-reviewer.md`, `critic.md`, `perf-reviewer.md`, `security-reviewer.md`, `verifier.md`) and did not touch them.
+
+No product code was edited. This report is the only file changed by this tracer pass.

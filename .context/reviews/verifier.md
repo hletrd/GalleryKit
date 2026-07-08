@@ -1,157 +1,182 @@
-# Run-10 Cycle 34 Verifier Review
+# Cycle 35 Verifier Review
 
-Role: verifier lane
+Role: cycle-35 verifier subagent
 Repo: `/Users/hletrd/flash-shared/gallery`
-Mode: review-only; no implementation or source behavior changes
+Mode: review-only; no product-code edits
 Date: 2026-07-08 KST
 
-## Inventory
+## Inventory / Scope Reviewed
 
-Guidance read first: `AGENTS.md`, `CLAUDE.md`, and the local `code-review` skill. I then inventoried docs, deploy scripts, gates, tests, and the runtime code paths that back documented operational claims.
+Required guidance read first:
 
-Relevant files and regions inspected:
+- `AGENTS.md:1-50`
+- `CLAUDE.md:1-765`
+- Code-review skill: `/Users/hletrd/.agents/skills/code-review/SKILL.md`
 
-- Workspace and repo contracts: `AGENTS.md:5-46`, `CLAUDE.md:1-765`, `README.md:171-177`, `apps/web/README.md:57-64`.
-- Root and app scripts: `package.json:17-30`, `apps/web/package.json:5-30`, `scripts/deploy-remote.sh:1-93`, `apps/web/deploy.sh:1-108`.
-- Runtime packaging and proxy config: `apps/web/Dockerfile:1-198`, `apps/web/docker-compose.yml:1-79`, `apps/web/nginx/default.conf:1-312`, `scripts/check-proxy-topology.mjs:1-134`.
-- Schema and privacy contracts: `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/lib/data.ts:260-488`, `apps/web/src/__tests__/privacy-fields.test.ts:41-220`.
-- Color/HDR and settings-hash contracts: `apps/web/src/lib/settings-hash.ts:44-183`, `apps/web/src/__tests__/settings-hash.test.ts:20-260`.
-- CLIP semantic-search contracts: `apps/web/src/lib/clip-model.ts:53-216`, `apps/web/src/lib/clip-paths.ts:60-97`, `apps/web/src/app/api/search/semantic/route.ts:1-194`, `apps/web/src/app/api/search/similar/[id]/route.ts:1-171`, `apps/web/src/__tests__/clip-offline-load.test.ts:15-42`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`.
-- Public freshness and admin dynamism: public pages under `apps/web/src/app/[locale]/(public)/**/page.tsx` with `revalidate = 0`, admin pages under `apps/web/src/app/[locale]/admin/**` with `dynamic = "force-dynamic"`, and dynamic API routes under `apps/web/src/app/api/**`.
-- Gate scripts and tests: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, migration journal/reconcile tests, deploy/nginx tests, and targeted privacy/settings tests.
+Verification-relevant inventory built before reviewing:
+
+- App source: 627 TypeScript/TSX files under `apps/web/src`.
+- Unit tests: 363 Vitest test files under `apps/web/src/__tests__`.
+- E2E tests: 9 Playwright specs under `apps/web/e2e`.
+- Scripts: 29 files under `apps/web/scripts`.
+- App Router page/layout/route files: 43.
+- Primary behavior contracts inspected: root/app READMEs, `AGENTS.md`, `CLAUDE.md`, package scripts, Docker/Compose/nginx/deploy scripts, migration journal and reconcile code, public/admin data selectors, semantic-search routes, upload/original paths, service worker contract tests, admin API/action/public-route lint scripts, and test gates.
+
+High-signal files/regions manually checked:
+
+- Git/deploy/schema/gate contracts: `AGENTS.md:15-39`, `CLAUDE.md:510-666`.
+- Package and gate scripts: `apps/web/package.json:8-30`.
+- Deploy and pruning behavior: `apps/web/deploy.sh:51-108`.
+- Docker persistence and CLIP model mount: `apps/web/Dockerfile:125-180`, `apps/web/docker-compose.yml:1-35`.
+- Nginx public/image/admin limits and proxy assumptions: `apps/web/nginx/default.conf:1-90`, `apps/web/nginx/default.conf:240-305`.
+- Proxy diagnostic limits: `scripts/check-proxy-topology.mjs:7-16`, `scripts/check-proxy-topology.mjs:129-134`.
+- Privacy/public selectors: `apps/web/src/lib/data.ts:251-488`, `apps/web/src/lib/search-enrichment-fields.ts:1-47`.
+- Upload/original storage boundary: `apps/web/src/lib/upload-paths.ts:12-66`, `apps/web/src/lib/upload-paths.ts:173-202`.
+- CLIP manual preflight gates: `apps/web/src/__tests__/clip-offline-load.test.ts:1-42`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:1-31`.
 
 ## Verification Evidence
 
-Fresh commands run in this lane:
+Fresh commands run:
 
 ```bash
 npm run lint:api-auth --workspace=apps/web
 npm run lint:action-origin --workspace=apps/web
 npm run lint:public-route-rate-limit --workspace=apps/web
-npm test --workspace=apps/web -- --run src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/privacy-fields.test.ts src/__tests__/settings-hash.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/nginx-config.test.ts
+npm run typecheck --workspace=apps/web
+npm run test --workspace=apps/web -- src/__tests__/privacy-fields.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/nginx-config.test.ts src/__tests__/sw-template-contract.test.ts src/__tests__/free-download-contract.test.ts src/__tests__/check-action-origin.test.ts src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/check-api-auth.test.ts
+npm run lint --workspace=apps/web
+npm run audit:prod
+npm test --workspace=apps/web
+GALLERYKIT_TYPECHECKED=1 npx next build   # run from apps/web; avoids prebuild generators
 ```
 
 Results:
 
-- `lint:api-auth`: passed; admin API exports are wrapped by `withAdminAuth(...)`.
-- `lint:action-origin`: passed; mutating non-auth server actions enforce same-origin provenance or carry explicit exemptions.
-- `lint:public-route-rate-limit`: passed; public mutating or expensive route handlers have pre-increment rate limits or explicit exemptions.
-- Targeted invariant suite: 7 test files passed, 156 tests passed.
+- Admin API auth lint: passed.
+- Server action origin/barrier lint: passed.
+- Public route rate-limit lint: passed.
+- Typecheck: passed, including app tests and scripts.
+- Targeted contract suite: 10 files passed, 402 tests passed.
+- ESLint: passed.
+- Production dependency audit: passed, `found 0 vulnerabilities`.
+- Full unit suite: 361 files passed, 2 skipped; 3394 tests passed, 4 skipped.
+- Direct production compiler build: passed on Next.js 16.2.10.
+- Worktree remained unchanged before report write except ignored `.next/` build output.
 
-Full `lint`, `typecheck`, `build`, full unit suite, Playwright E2E, production audit, live deploy, and live host checks were not run in this verifier lane.
+## Findings
 
-## Confirmed Findings
+No confirmed implementation-vs-documentation correctness findings were found.
 
-No confirmed implementation-vs-documentation correctness gaps were found in the inspected scope.
+No likely code-level findings were found. The inspected docs, scripts, code, and tests line up on the reviewed contracts: admin API wrapping, server-action origin and restore-barrier coverage, public route rate limits, privacy-sensitive field omissions, public map exception shape, migration journal/reconcile coverage, deploy prune safety, Docker bind mounts, private originals, CLIP production gating, service worker generation contract, and build/type/test/audit gates.
 
-The checked docs, scripts, code, and tests agree on these core invariants: signed conventional git workflow, env-driven deploy helper, Docker prune after successful health, no `docker volume prune -a`, migration journal monotonicity and reconcile coverage, public selector privacy omissions, settings-hash key coverage for color-impacting config, public-route rate-limit scanning, admin API auth scanning, action-origin scanning, public page no-cache behavior, and CLIP production gating.
+## Missing Verification / Manual Risks
 
-## Likely Findings
-
-No likely code-level findings are being reported. The remaining risks below are manual-validation risks because the repo intentionally cannot prove live host state, model-weight state, real proxy topology, or real upload memory envelope.
-
-## Manual-Validation Risks
-
-### M1. Host nginx limiter application is documented but not repo-verifiable
-
-Severity: Medium
-Confidence: High
-Classification: Manual-validation risk
-
-Evidence:
-
-- `CLAUDE.md:516-526` says deploys do not touch host nginx and the public/`_next/image` limiter zones must be applied manually.
-- `apps/web/nginx/default.conf:10-29` defines shared limiter zones and notes the limiter key is only correct when `$remote_addr` is the real client.
-- `apps/web/nginx/default.conf:246-312` applies the `_next/image` and catch-all public limiters.
-- `apps/web/deploy.sh:55-104` only performs Compose up, health checks, and Docker prune; it does not sync or reload host nginx.
-
-Failure scenario:
-
-An operator assumes `npm run deploy` activated the committed public and image rate limiters, but the host is still running an older nginx config. Public SSR and Next image optimizer traffic remain unthrottled. In a load-balancer topology without real-IP configuration, the opposite failure can also occur: all visitors share the load balancer IP bucket and receive unrelated 429s.
-
-Concrete fix/verification:
-
-Apply the committed nginx config on the host, run `nginx -t`, reload nginx, then burst-test `/` and `/_next/image` until overflow returns 429 while normal single-client page loads still succeed. In load-balancer topologies, configure and verify `real_ip` or PROXY protocol before accepting the limiter evidence.
-
-### M2. CLIP production readiness depends on seeded host weights and manual preflight
+### M1. Host nginx limiter application remains outside repo-verifiable evidence
 
 Severity: Medium
 Confidence: High
-Classification: Manual-validation risk
+Classification: Risk / manual-verification gap
 
 Evidence:
 
-- `CLAUDE.md:618-626` states CLIP weights are intentionally not in CI and the real ONNX/runtime preflight must be run manually with seeded weights.
-- `apps/web/package.json:23` exposes `test:clip:preflight`, requiring `CLIP_MODELS_ROOT` and enabling offline/integration gates.
-- `apps/web/src/__tests__/clip-offline-load.test.ts:15-42` skips unless `CLIP_OFFLINE_LOAD=1` and a seeded model root exist.
-- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31` skips by default unless `CLIP_INTEGRATION=1`.
-- `apps/web/Dockerfile:131-135` creates and exports `/app/data/models/clip`; it does not bake model weights into the image.
-- `apps/web/src/lib/clip-model.ts:203-216` disables remote model loading and loads from the configured local cache.
+- `CLAUDE.md:516-526` states deploys do not touch host nginx and limiter activation requires manual host apply/reload.
+- `apps/web/nginx/default.conf:10-19` defines `public` and `nextimage` zones.
+- `apps/web/nginx/default.conf:254-294` applies the `/_next/image` and catch-all public limiters.
+- `apps/web/deploy.sh:51-108` rebuilds/restarts the app and prunes Docker; it does not sync or reload host nginx.
 
-Failure scenario:
+Concrete failure scenario:
 
-The DB row or env gate is flipped to production mode on a host without the expected model snapshots or without a successful preflight. Semantic search then returns 503/errors or empty production results even though ordinary CI and local tests passed.
+An operator deploys the commit and assumes the checked-in nginx rate limiters are live, but the host still runs an older config. Public SSR pages or Next image optimizer requests remain unthrottled, or an LB-fronted topology keys all visitors into one `$binary_remote_addr` bucket and creates unrelated 429s.
 
-Concrete fix/verification:
+Suggested fix:
 
-Seed the model snapshots into the deployed `CLIP_MODELS_ROOT`, run the documented sidecar/backfill, then run `CLIP_MODELS_ROOT=<absolute-host-path> npm run test:clip:preflight --workspace=apps/web` on the deployment host. Record the preflight output and a production semantic query result before enabling the DB production gate.
+Apply the committed nginx template on the host, run `nginx -t`, reload, then burst-test `/` and `/_next/image` until overflow returns 429 while normal page loads still succeed. For LB/CDN-fronted hosts, first configure `real_ip` or PROXY protocol so `$binary_remote_addr` is the real client.
 
-### M3. Proxy topology check does not prove effective client-IP buckets
+### M2. CLIP production readiness depends on seeded host weights and env-gated preflight
 
 Severity: Medium
 Confidence: High
-Classification: Manual-validation risk
+Classification: Risk / manual-verification gap
 
 Evidence:
 
-- `README.md:171-177` and `apps/web/README.md:57-64` require `TRUST_PROXY=true` only behind a trusted proxy that overwrites `X-Forwarded-*`.
-- `apps/web/nginx/default.conf:20-28` and `apps/web/nginx/default.conf:59-71` warn that `$binary_remote_addr` and `X-Forwarded-For` behavior are only correct when nginx sees the real client or is configured for the upstream load balancer.
-- `scripts/check-proxy-topology.mjs:7-16` explicitly says it cannot prove `X-Forwarded-For` or effective client-IP bucket behavior.
-- `scripts/check-proxy-topology.mjs:131-134` reports effective client-IP bucket / XFF overwrite as `not-verified`.
+- `CLAUDE.md:558-626` documents that CLIP weights are not baked and the real preflight is the production activation proof.
+- `apps/web/package.json:21-23` exposes `test:clip:preflight`.
+- `apps/web/src/__tests__/clip-offline-load.test.ts:15-42` skips unless `CLIP_OFFLINE_LOAD=1` and seeded weights exist.
+- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31` skips unless `CLIP_INTEGRATION=1`.
+- `apps/web/Dockerfile:131-175` creates `/app/data/models/clip` but does not include model weights.
 
-Failure scenario:
+Concrete failure scenario:
 
-The spoof-resistance check passes while all app or nginx rate-limit decisions still key on the load balancer IP. That can cause global lockouts under normal multi-user traffic, or it can make per-client throttles ineffective depending on where the wrong IP is trusted.
+`SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and the DB row are enabled before the host has the expected model snapshots and production embeddings. Ordinary CI/unit tests still pass, but production semantic search returns 503/errors or no useful results.
 
-Concrete fix/verification:
+Suggested fix:
 
-Add or run an operational diagnostic that proves the effective client key from two distinct real clients through the production proxy chain. Pair `npm run check:proxy-topology -- --url <origin>` with nginx/app log evidence, and configure `set_real_ip_from` plus `real_ip_header X-Forwarded-For` or PROXY protocol where needed.
+Seed weights into the deployed `CLIP_MODELS_ROOT`, run the documented production backfill, then run `CLIP_MODELS_ROOT=<abs-models-root> npm run test:clip:preflight --workspace=apps/web` on the deployment host before flipping the DB production mode.
 
-### M4. Large multipart upload RSS envelope remains unmeasured on the production host
+### M3. Proxy topology diagnostic does not prove effective client-IP buckets
 
 Severity: Medium
 Confidence: High
-Classification: Manual-validation risk
+Classification: Risk / manual-verification gap
 
 Evidence:
 
-- `CLAUDE.md:661-663` documents that on-host RSS measurement for multipart uploads is still pending, while upload caps default to 200 MiB total and 100 MiB per file.
-- `AGENTS.md:29-39` lists broad gates, but none of those gates prove concurrent production-host memory behavior under real multipart uploads.
+- `apps/web/nginx/default.conf:20-28` warns that nginx limiter keys need real-IP configuration in LB-fronted topologies.
+- `apps/web/nginx/default.conf:59-71` documents that overwriting `X-Forwarded-For` with `$remote_addr` is correct only when nginx sees the real client.
+- `scripts/check-proxy-topology.mjs:7-16` says the probe cannot prove XFF overwrite or intended client-IP bucket selection.
+- `scripts/check-proxy-topology.mjs:129-134` reports `not-verified=effective client-IP bucket or X-Forwarded-For overwrite`.
 
-Failure scenario:
+Concrete failure scenario:
 
-Operators raise upload caps or accept multiple concurrent large uploads assuming the pipeline is fully disk-streamed. If the framework or runtime buffers multipart `File` objects on heap before downstream image processing, the container can OOM or restart under concurrent admin uploads.
+The spoof-resistance check passes, but app and nginx rate limits still key on a load balancer IP. This can either globally lock out legitimate users or weaken per-client abuse protection depending on the proxy chain.
 
-Concrete fix/verification:
+Suggested fix:
 
-Run a controlled production-like upload load test at the documented caps and expected concurrency, capture container RSS and restart evidence, then record the safe concurrency/memory budget in `CLAUDE.md` or an operational runbook. Add a repeatable smoke or load-test command if the budget becomes a release invariant.
+Add an operational proof that observes the effective rate-limit key from two distinct real client IPs through the production edge, paired with nginx/app logs. Configure `set_real_ip_from` plus `real_ip_header X-Forwarded-For` or PROXY protocol where needed.
+
+### M4. Large multipart upload RSS envelope is explicitly not measured
+
+Severity: Medium
+Confidence: High
+Classification: Risk / manual-verification gap
+
+Evidence:
+
+- `CLAUDE.md:661-663` documents the memory envelope and says on-host RSS measurement is still pending.
+- `AGENTS.md:29-39` defines the blocking gates, but none measure production-host multipart RSS under concurrent large uploads.
+
+Concrete failure scenario:
+
+Admins upload several near-cap files concurrently, or operators raise caps, assuming the pipeline is fully disk-streamed. Framework multipart buffering plus Sharp work can exceed container memory and restart the process.
+
+Suggested fix:
+
+Run a controlled production-like upload load test at the documented caps and expected concurrency, record container RSS/restart evidence, then add the safe concurrency budget to the ops runbook if it becomes a release invariant.
+
+## Claims Not Backed By Local Automated Evidence
+
+- Live host nginx reload status and real limiter behavior are documented but not proven by repo tests.
+- Real CLIP production model loading/ranking is intentionally skipped without seeded model weights.
+- Effective production client-IP bucket selection cannot be proven by the checked-in spoof probe alone.
+- Real upload RSS behavior under max-size concurrent multipart uploads is not covered by unit/build gates.
+- Playwright E2E and admin E2E were not run in this verifier lane; admin E2E requires explicit credentials/enabled flags.
+- The full `npm run build --workspace=apps/web` wrapper was not run because its `prebuild` step regenerates tracked PWA assets. I ran `GALLERYKIT_TYPECHECKED=1 npx next build` directly after typecheck, and `sw-template-contract.test.ts` covered the generated service worker contract.
+- No production deploy or live host checks were run.
 
 ## Final Sweep
 
-Checked common missed issue classes:
+Common missed issues checked:
 
-- Docs claiming deploy behavior not backed by scripts/tests: no confirmed mismatch found for env-file selection, permission checks, bind mounts, health-before-prune, and no `volume prune -a`.
-- Migration entry without journal or reconcile mirror: no confirmed mismatch found in targeted migration tests.
-- Public selectors leaking admin-only fields: no confirmed mismatch found in `data.ts` or targeted privacy tests.
-- Color/HDR setting key drift: no confirmed mismatch found in settings hash source or targeted tests.
-- Public route doing expensive or mutating work before a limiter: scanner passed.
-- Admin API route lacking `withAdminAuth(...)`: scanner passed.
-- Mutating server action lacking same-origin return-early: scanner passed.
-- Public page cache freshness drift: inspected public page exports use `revalidate = 0`; admin pages inspected use dynamic rendering.
-- CLIP production routes lacking same-origin or production gating: no confirmed mismatch found in inspected semantic/similar route regions.
+- Destructive deploy cleanup: `apps/web/deploy.sh:99-104` uses `docker volume prune -f`, not `volume prune -a`, and only after health passes.
+- Admin API routes: scanner passed for all admin API route handlers.
+- Mutating server actions: scanner passed for same-origin return-early and restore-mutation barrier coverage/exemptions.
+- Expensive public routes: scanner passed for rate-limit helpers or explicit exemptions.
+- Privacy fields: `apps/web/src/lib/data.ts:374-488` and `apps/web/src/lib/search-enrichment-fields.ts:29-47` include compile-time guards; targeted tests passed.
+- Legacy public originals: `apps/web/src/lib/upload-paths.ts:173-202` fails closed in production when legacy public originals exist, and migration/startup call sites were present.
+- Migration journal: all journal entries had matching SQL; targeted migration tests passed.
+- Ignored local runtime files under `apps/web/public/uploads/`, `apps/web/public/resources/`, and ignored `.next/` build output were observed but are not committed source and were not used as product-code findings.
 
-Skipped or outside this lane:
+Skipped files:
 
-- Historical `.context/reviews/**` and `.context/plans/**` were inventoried but not exhaustively re-reviewed because `CLAUDE.md` and `AGENTS.md` are the current authority for this verifier pass.
-- I did not run full blocking gates, Playwright E2E, production audit, production deploy, live nginx reload checks, real CLIP model preflight, real proxy-client-IP diagnostics, or upload RSS measurement.
-- Pre-existing unrelated working-tree change observed: `.context/reviews/perf-reviewer.md`. I did not inspect or edit it.
+- Historical `.context/reviews/**`, `.context/plans/**`, `.omc/**`, `.omx/**`, `.claude/**`, and ignored runtime/generated files were inventoried but not exhaustively re-reviewed. Current authority for this pass was `AGENTS.md`, `CLAUDE.md`, current source, current scripts, and current tests.

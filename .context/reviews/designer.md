@@ -1,160 +1,131 @@
-# Run-10 Cycle 34 Designer UI/UX Review
+# Cycle 35 Designer UI/UX Review
 
-Role: `designer`
+Role: `cycle-35 designer / UI-UX reviewer`
 Repo: `/Users/hletrd/flash-shared/gallery`
-Review HEAD: `e94455d372daf74d8de9c909558ad7173b6cc864`
+Review HEAD: `7993fa467f8a71814f878aa59bcd80174daab1ed`
 Date: 2026-07-08 KST
 
-Scope: review-only. I modified only this artifact. No source edits, commits, pushes, deploys, destructive commands, or production access.
+Scope: review-only. I did not edit product code. This report is the only file written.
 
-## Method
+## Inventory And Scope
 
-Instructions read: `AGENTS.md`, `CLAUDE.md`, and agent-browser skill docs for core navigation, query/snapshot, interaction, wait, visual capture, and viewport configuration.
+Read before review: `AGENTS.md`, `CLAUDE.md`, and the relevant agent-browser skills (`agent-browser`, `agent-browser-query`, `agent-browser-interact`, `agent-browser-config`, `agent-browser-visual`).
 
-UI inventory covered `apps/web/src/app/[locale]`, `apps/web/src/components`, shared UI primitives, `apps/web/messages/en.json`, `apps/web/messages/ko.json`, and Playwright/admin E2E helpers for route and auth context. I inspected public IA, admin IA, modal/focus helpers, form validation, loading/error states, map/archive pages, photo surfaces, reduced-motion hooks, touch-target patterns, i18n, and responsive layout code.
+Route inventory reviewed:
 
-Browser automation was feasible. `npm run dev --workspace=apps/web -- --hostname 127.0.0.1 --port 3100` failed before serving because Turbopack could not acquire its lockfile (`os error 72`). I used the existing built app with `npm run start --workspace=apps/web -- --hostname 127.0.0.1 --port 3100`; `/en` returned 200. Agent-browser was available (`0.22.2`) and used for page loads, viewport changes, accessibility snapshots, interactions, and screenshots. Because this lane is review-only, I did not create an authenticated DB session; protected-admin findings below are source-backed rather than live-authenticated.
+- Public localized routes: `/[locale]`, `/[locale]/[topic]`, `/[locale]/p/[id]`, `/[locale]/g/[key]`, `/[locale]/s/[key]`, `/[locale]/c/[slug]`, `/[locale]/map`, `/[locale]/timeline`, `/[locale]/year/[year]`, `/[locale]/privacy`, `/[locale]/about-gallerykit`, localized upload fallback route, not-found/error/loading surfaces.
+- Admin routes: `/[locale]/admin`, protected dashboard, analytics, categories, tags, settings, SEO, DB, password, tokens, users.
+- Component inventory: `apps/web/src/components/**`, including nav/search, masonry cards, photo viewer, lightbox, info bottom sheet, map, histogram, color details, forms, admin managers, and `components/ui/**`.
+- i18n/theme/performance surfaces: `messages/en.json`, `messages/ko.json`, `app/[locale]/layout.tsx`, `globals.css`, image loading paths, focus-trap helpers, reduced-motion CSS/hooks.
 
-Browser evidence collected:
+Runtime browser review was feasible via the existing production build. `next dev` could not start because a stale Next dev marker reported another dev server on PID 7042 while no port 3000 listener existed; I avoided deleting lock files or killing processes. `npm run start --workspace=apps/web -- -p 3001` served the built app and warned that standalone output prefers `node .next/standalone/server.js`.
 
-- Desktop `/en`: accessibility snapshot showed skip link, main nav, tag filter group, named search/theme/locale controls, photo links, footer links, and no console/page errors in the later Playwright probe.
-- Mobile `/en`: accessibility snapshot stayed landmarked; screenshot `/tmp/gallery-mobile-home.png` showed the metadata overlay covering the top of each photo.
-- Search modal: agent-browser snapshot after opening showed only `dialog "Search photos"` with expanded combobox and close button; `#search-input` had `aria-expanded="true"` and `aria-controls="search-dialog"`.
-- `/en/admin`: empty submit produced visible `role="alert"` messages; Playwright confirmed focus returned to `#login-username`, username/password had `aria-invalid="true"`, and username described `login-username-error`.
-- `/ko`: `html lang="ko" dir="ltr"` and localized nav/search/footer labels.
-- `/en/map`: snapshot showed a `Photo map` region, skip link to the accessible list, Leaflet zoom buttons, and the fallback photo list. Playwright measured the zoom buttons at `44x44`.
-- `/en/timeline` and `/en/privacy`: heading/landmark snapshots were coherent.
+Browser/session evidence:
 
-## Confirmed Findings
+- `curl -I http://127.0.0.1:3001/en` returned HTTP 200 with CSP, HSTS, locale alternates, and `NEXT_LOCALE=en`.
+- Agent-browser `0.22.2` snapshots covered `/en`, `/ko`, `/en/admin`, `/en/map`, `/en/timeline`, `/en/p/25`, search modal, lightbox, and mobile info sheet.
+- Playwright DOM probe covered mobile `390x844` and desktop `1280x900` across `/en`, `/ko`, `/en/admin`, `/en/map`, `/en/timeline`, `/en/p/25`, `/en/privacy`, `/en/about-gallerykit`: no unnamed visible focusables, no horizontal overflow, `html lang/dir` correct for English/Korean, body contrast about `19.90:1`, and no page errors.
+- Form validation check on `/en/admin`: empty submit produced inline `role="alert"` messages for username and password.
+- Modal checks: search and lightbox snapshots hid the rest of the page from the accessibility tree; mobile info sheet exposed expand/close/title/date.
 
-### DES-C34-01 - Mobile public photo grids still cover delivered photos with permanent metadata overlays
+Skipped live runtime areas: protected admin internals beyond the unauthenticated login screen, because this review lane did not create or use an authenticated admin session. Those admin findings are source-backed.
 
-Severity: Low-Medium
-Confidence: High
+## Findings
 
-Evidence:
-
-- `apps/web/src/components/masonry-card.tsx:155-160` renders mobile-only metadata as `absolute inset-x-0 top-0 sm:hidden bg-gradient-to-b from-black/75 to-transparent p-3` over the image.
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx:285-287` renders archive-card metadata as `absolute inset-x-0 bottom-0 bg-gradient-to-t...`; the hover/focus opacity behavior only starts at `sm:`, so mobile gets a permanent overlay.
-- Live mobile browser probe on `/en`: first card box was `358x556.875`; overlay box was `358x60`, `position: absolute`, `display: block`, with `linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0))`. Screenshot: `/tmp/gallery-mobile-home.png`.
-
-Failure scenario:
-
-A phone visitor scans a portrait or landscape where important crop detail sits near the top or bottom edge. The gallery permanently paints title/topic chrome over the finished photograph before the visitor chooses to open it.
-
-Fix:
-
-Move mobile metadata outside the bitmap into a reserved caption band, or show it on focus/open instead of continuously over the photo. Apply the same rule to masonry, timeline, year archive, and share-grid cards so the public photo surfaces preserve photographer intent consistently.
-
-### DES-C34-02 - SEO form marks every field invalid for one server-side field error
+### DES-C35-01 - Search combobox controls the dialog when no result list exists
 
 Severity: Medium
 Confidence: High
+Classification: Confirmed
 
 Evidence:
 
-- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:75-85` stores one `formError`, toasts it, and focuses the summary.
-- `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:127`, `141`, `156`, `170`, `184`, and `208` set `aria-invalid={!!formError}` on all SEO controls.
-- `apps/web/src/app/actions/seo.ts:85-139` returns specific failures such as `seoTitleInvalid`, `seoLocaleInvalid`, and `seoOgImageUrlInvalid`, but the client receives only a generic string and cannot associate it with the failing control.
+- Source: `apps/web/src/components/search.tsx:443-452` renders `#search-input` as `role="combobox"` with `aria-expanded={isOpen}` and `aria-controls={hasDisplayedResults ? 'search-results' : 'search-dialog'}`.
+- Source: `apps/web/src/components/search.tsx:430-435` makes `#search-dialog` the modal container with `role="dialog"`.
+- Browser evidence on `/en`, after opening search with no query: `#search-input aria-controls="search-dialog"`, `#search-dialog role="dialog"`, and `#search-input aria-expanded="true"`.
+- Browser evidence after typing `portrait`: `aria-controls` correctly changes to `search-results`, whose role is `listbox`.
 
-Failure scenario:
+User failure scenario:
 
-An admin enters an invalid Open Graph image URL, presses Save, then screen-reader output and visual styling imply that title, nav title, description, author, locale, and URL are all invalid. Keyboard focus lands on the summary, not the actual URL field that needs correction.
+A screen-reader user opens search before typing. The combobox announces as expanded but points its controlled popup relationship at the whole dialog rather than a listbox/results popup. This creates an invalid control relationship and can make the search field's state harder to understand before results exist.
 
-Fix:
+Suggested fix:
 
-Return structured field errors from `updateSeoSettings`, for example `{ field: 'seo_og_image_url', error }`. In `SeoSettingsClient`, set `aria-invalid` only on affected controls, append field-specific error IDs to `aria-describedby`, render inline persistent errors, and focus the first invalid field after save failure.
+Keep the combobox relationship stable. Either always render a `#search-results` element with `role="listbox"` and put empty/loading/status content inside it, or omit `aria-controls`/set `aria-expanded=false` until an actual listbox popup exists. Do not use the modal dialog itself as the combobox popup.
 
-## Likely Issues
-
-### DES-C34-03 - Protected admin photo management remains table-first with nested scrolling
-
-Severity: Medium
-Confidence: High source confidence; live protected-admin DOM not validated in this lane
-
-Evidence:
-
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144` places Recent Uploads inside `max-h-[calc(100vh-16rem)] overflow-auto`.
-- `apps/web/src/components/image-manager.tsx:427-450` renders a nine-column table inside `overflow-x-auto`.
-- `apps/web/src/components/image-manager.tsx:472-488` uses a fixed `h-32 w-32` preview, `image-manager.tsx:500-552` requires a `min-w-[200px]` tag editor, and `image-manager.tsx:571-607` puts edit/delete actions at the far right.
-
-Failure scenario:
-
-On a tablet or narrow laptop, an admin scrolls horizontally to reach edit/delete actions and loses row context for the thumbnail/title/filename that identified the photo. The nested vertical pane also competes with the page scroll during batch review.
-
-Fix:
-
-Keep the dense table for wide desktop, but add a responsive list/card workbench below large desktop widths. Each item should keep thumbnail, processing state, title/filename, topic, tags, gamut/date, and actions in one visual cluster with the existing 44 px target floor and confirmation dialogs.
-
-### DES-C34-04 - Admin taxonomy dialogs still expose one summary error across multiple editable fields
+### DES-C35-02 - Mobile masonry cards permanently cover photos with metadata overlays
 
 Severity: Low-Medium
-Confidence: High source confidence; not submitted live in this lane
+Confidence: High
+Classification: Confirmed
 
 Evidence:
 
-- Topic create/update handlers store one `createError`/`editError` at `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx:101-149`.
-- The create dialog applies that same error to label and slug via `aria-invalid={!!createError}` and `aria-describedby="create-topic-error"` at `topic-manager.tsx:248-255`; the edit dialog does the same at `topic-manager.tsx:420-427`.
-- Tag edit has the same one-error pattern at `apps/web/src/app/[locale]/admin/(protected)/tags/tag-manager.tsx:55-76` and `tag-manager.tsx:193-202`.
+- Source: `apps/web/src/components/masonry-card.tsx:155-160` renders a mobile-only `absolute inset-x-0 top-0 sm:hidden bg-gradient-to-b from-black/75 to-transparent p-3` title/topic overlay inside the photo.
+- Browser DOM evidence on mobile `/en`: first `.masonry-card` measured `358 x 556.875`; the overlay measured `358 x 60`, `position:absolute`, `display:block`, with `linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0))`.
+- Related source pattern: `apps/web/src/components/masonry-card.tsx:161-166` uses hover/focus reveal only at `sm` and above, so the mobile overlay is always present.
 
-Failure scenario:
+User failure scenario:
 
-An admin edits a topic slug to one that collides with a route or enters a rejected tag value. The dialog shows a persistent summary, but multiple controls may be marked invalid from one failure, and focus goes to the summary rather than the exact control.
+A phone visitor scans the public gallery and the top 60px of every image is covered by title/topic chrome. For photos with important subject matter near the top edge, the gallery masks part of the delivered edit before the user has chosen to open the photo.
 
-Fix:
+Suggested fix:
 
-Use structured field errors for topic/tag mutations. Mark only the failing label/slug/name/order/image/alias control invalid, place inline `role="alert"` text under that control, and move focus to the first invalid field. Keep the current summary only for non-field failures.
+Move mobile metadata into a reserved caption area below the image, or reveal the overlay only on focus/tap/long-press with a clear persistent alternative. Keep the current hover/focus reveal for larger pointer devices.
 
-## Manual-Validation Risks
-
-### DES-C34-R01 - Reduced-motion coverage is uneven across CSS-only animations
-
-Severity: Low-Medium
-Confidence: Medium
-
-Evidence:
-
-- Motion-aware code exists in `apps/web/src/components/photo-viewer.tsx:74`, `apps/web/src/components/lightbox.tsx:101-114`, `apps/web/src/components/image-zoom.tsx:52`, `apps/web/src/components/photo-navigation.tsx:27-102`, and `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:188-192`.
-- CSS-only primitives still apply animation classes without a visible `motion-reduce` guard, including `apps/web/src/components/ui/dialog.tsx:42` and `73`, `apps/web/src/components/ui/alert-dialog.tsx:39` and `57`, dropdown/select/tooltip primitives, and photo-card hover transforms such as `apps/web/src/components/masonry-card.tsx:117`.
-
-Failure scenario:
-
-A user with `prefers-reduced-motion: reduce` still receives modal zoom/fade animations, dropdown entrance animations, or thumbnail scale transitions. These are short, but they are broad UI primitives.
-
-Fix:
-
-Add global or primitive-level `motion-reduce:animate-none motion-reduce:transition-none` guards for Radix overlays/content and nonessential hover transforms. Manually validate with a reduced-motion browser context because several components already have JS-level motion gates that should remain intact.
-
-### DES-C34-R02 - Protected admin flows need live authenticated assistive-tech validation
+### DES-C35-03 - SEO settings mark every field invalid for one server-side field error
 
 Severity: Medium
-Confidence: Medium
+Confidence: High for source behavior; protected route not live-authenticated
+Classification: Confirmed source issue
 
 Evidence:
 
-- This lane intentionally did not insert a session row or use plaintext admin credentials. Protected-admin pages were reviewed from source and unauthenticated redirect/login behavior only.
-- The highest-risk protected surfaces are dashboard image management, taxonomy dialogs, SEO/settings saves, token plaintext flow, DB restore confirmation, and bulk edit dialogs.
+- Source: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:75-85` stores a single `formError`, toasts it, and focuses the summary.
+- Source: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:121-128`, `135-142`, `149-157`, `164-171`, `178-185`, and `200-209` set `aria-invalid={!!formError}` on all SEO inputs/textareas.
+- Source: `apps/web/src/app/actions/seo.ts:85-139` returns field-specific failure messages such as `seoTitleInvalid`, `seoLocaleInvalid`, and `seoOgImageUrlInvalid`, but not structured field identifiers.
 
-Failure scenario:
+User failure scenario:
 
-Source-backed ARIA and focus patterns can still diverge once Radix portals, real table width, real data, toasts, and server-action pending states run under an authenticated session.
+An admin enters an invalid Open Graph image URL and presses Save. The UI sets every SEO field to invalid, so screen-reader users and sighted users must re-check unrelated title, description, author, locale, and URL fields even though only one field needs correction.
 
-Fix:
+Suggested fix:
 
-Run an authenticated admin browser pass in a disposable local/e2e DB using the existing E2E helper path, then capture keyboard traversal, focus return, screen-reader announcements, and mobile/tablet screenshots for the protected pages.
+Return structured field errors from `updateSeoSettings`, for example `{ field: 'seo_og_image_url', error }`. In `SeoSettingsClient`, set `aria-invalid` only on affected controls, include field-specific error IDs in `aria-describedby`, render persistent inline errors, and focus the first invalid field after a failed save.
 
-## Current Non-Issues Checked
+### DES-C35-04 - Public photo/search surfaces expose visible keyboard-shortcut tutorial text
 
-- Public home desktop/mobile had coherent landmarks, headings, named controls, tag filter grouping, and no observed horizontal overflow.
-- Search modal isolation is working from the accessibility-tree perspective: agent-browser snapshot while open exposed only the search dialog, expanded combobox, close button, and hint text.
-- Login empty-submit validation is field-associated and persistent: `#login-username` and `#login-password` receive `aria-invalid`, visible `role="alert"` errors, and focus returns to the first invalid field.
-- Korean locale renders translated UI labels with `lang="ko"` and currently expected `dir="ltr"`.
-- Map route provides a skip path around the map, a labelled map region, 44 px Leaflet zoom controls, and a list fallback.
-- Timeline and privacy route snapshots showed coherent heading hierarchy and landmarks.
-- Browser probe across `/en`, search, `/en/admin`, and `/en/map` recorded zero console warnings/errors/page errors.
+Severity: Low
+Confidence: High
+Classification: Confirmed
 
-## Final Sweep
+Evidence:
 
-Reviewed categories: information architecture, public/admin navigation, affordances, keyboard/focus paths, WCAG 2.2 target size posture, ARIA/name/role/value, focus traps and modal isolation, contrast token comments, reduced motion, responsive breakpoints, loading/empty/error states, form validation UX, English/Korean i18n, current RTL posture, and perceived-performance patterns for image loading and map chunks.
+- Source: `apps/web/src/components/photo-viewer.tsx:580-585` renders a visible desktop paragraph with `viewer.shortcutsHint` above the photo viewer.
+- Browser evidence on desktop `/en/p/25`: accessibility snapshot included `Shortcuts: ←/→ to navigate, F to toggle lightbox, I to toggle info, C color details, H histogram. Space toggles slideshow in lightbox.`
+- Source: `apps/web/src/components/search.tsx:524-530` renders visible search footer shortcut text, including `Ctrl/⌘ K`.
+- Browser evidence in the open search dialog: snapshot included `Ctrl/⌘ K to toggle search`.
 
-Skipped or limited: live authenticated protected-admin DOM, destructive admin mutations, real screen-reader output, true RTL rendering because no RTL locale ships, physical P3/HDR display behavior, production CDN/service-worker/offline behavior, and full performance traces under production data volume.
+User failure scenario:
+
+A public gallery visitor on desktop sees operational training text in the primary viewing surface, above or inside photo-focused UI. This competes with the photograph and page content, and it is read as ordinary page/dialog text rather than offered as contextual help.
+
+Suggested fix:
+
+Move shortcut discovery to tooltips on the relevant controls, a compact help/menu affordance, or screen-reader-only instructions tied to the specific widget. Keep visible copy focused on the photo/search task rather than listing global shortcuts.
+
+## Covered Areas With No New Findings
+
+- Information architecture: public home, topic, timeline, map, privacy/about, photo detail, footer, and localized nav were landmarked and had coherent headings in browser snapshots.
+- Focus and keyboard: skip link targets resolved; login validation focused the first invalid field; search/lightbox/info sheet used focus traps and modal isolation.
+- WCAG 2.2 basics: runtime probes found no unnamed visible focusables and no horizontal overflow at tested mobile/desktop viewports; repo touch-target policy is represented in source and tests.
+- Contrast/dark/light: body foreground/background contrast passed strongly in light and dark probes; CSS includes forced-colors and reduced-motion handling.
+- Loading/empty/error states: photo loading skeleton has `role="status"`; not-found/error routes include main landmarks and recovery links; gallery empty/filter state has a clear action.
+- i18n/RTL: English and Korean routes set `lang` and `dir="ltr"` correctly. RTL is supported through `getLocaleDirection`, but no RTL locale is currently shipped, so RTL rendering was source-reviewed only.
+- Perceived performance: source uses image dimensions/aspect-ratio reservations, above-fold priority, responsive derivatives, lazy loading, `content-visibility`, and bounded histogram/map chunks. No CLS was observed in the sampled routes.
+
+## Final Sweep Notes
+
+Commonly missed issues checked: duplicate/hidden headings, modal focus traps, `aria-modal`, focus restore, unlabeled icon buttons, small touch targets, hidden content still exposed to AT, reduced motion, forced colors, dark mode, loading/empty/error affordances, validation feedback, language direction, horizontal overflow, and LCP/CLS/INP risks.
+
+Skipped live routes: authenticated protected admin pages (`dashboard`, `analytics`, `categories`, `tags`, `settings`, `seo`, `db`, `password`, `tokens`, `users`) and share-key/private collection states that require specific live data or credentials. Their source was included in the review, but runtime claims above are limited to the unauthenticated/admin-login and public seeded routes.

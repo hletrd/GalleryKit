@@ -33,8 +33,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 34/100 Implementation Plan - active ledger from Cycle 34 aggregate: harden PAT upload restore serialization, admin backfill shutdown drain, upload topic lookup errors, e2e seed cleanup containment, cycle/review provenance, sidecar color-backfill per-image locks, full gates, signed push, and per-cycle deploy (`run10-cycle34/plan.md`)
-- Run-10 Cycle 34/100 Deferred Findings - Cycle 34 deferred architecture/performance/test/UX/product/operator-validation items with preserved severity/confidence and exit criteria (`run10-cycle34/deferred.md`)
+- Run-10 Cycle 35/100 Implementation Plan - active ledger from Cycle 35 aggregate: serialize topic map-visible changes with slug mutations, fix search combobox ARIA, correct wide-gamut hint copy, add semantic scan-cap behavioral tests, repair nginx/cycle provenance docs, full gates, signed push, and per-cycle deploy (`run10-cycle35/plan.md`)
+- Run-10 Cycle 35/100 Deferred Findings - Cycle 35 deferred architecture/performance/test/UX/product/operator-validation items with preserved severity/confidence and exit criteria (`run10-cycle35/deferred.md`)
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
@@ -45,6 +45,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 34/100 Implementation Plan - completed and pushed as signed `7993fa46`; local gates and per-cycle deploy/live-smoke evidence are recorded in its plan (`run10-cycle34/plan.md`)
+- Run-10 Cycle 34/100 Deferred Findings - superseded by Cycle 35 deferred register where findings remain open or are re-raised (`run10-cycle34/deferred.md`)
 - Run-10 Cycle 33/100 Implementation Plan - completed and pushed as signed `5124d17e`; local gates are recorded green in the plan. Its committed plan lacked deploy/live-smoke evidence, so Cycle 34's per-cycle deploy is scheduled to supersede production evidence for the pushed Cycle 33 history (`run10-cycle33/plan.md`)
 - Run-10 Cycle 33/100 Deferred Findings - no new Cycle 33 deferrals (`run10-cycle33/deferred.md`)
 - Run-10 Cycle 32/100 Implementation Plan - completed and pushed as signed `959e45af`; local full gates are recorded green in the plan. Its committed plan lacked deploy/live-smoke evidence, so Cycle 33's per-cycle deploy is scheduled to supersede production evidence for the pushed Cycle 32 history (`run10-cycle32/plan.md`)

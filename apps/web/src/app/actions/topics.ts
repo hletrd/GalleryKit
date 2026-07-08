@@ -706,16 +706,26 @@ export async function setTopicMapVisible(topicSlug: string, mapVisible: boolean)
     if (slugRejected || !cleanSlug || !isValidSlug(cleanSlug)) return { error: t('invalidSlug') };
     if (typeof mapVisible !== 'boolean') return { error: t('invalidInput') };
 
-    const [result] = await db
-        .update(topics)
-        .set({ map_visible: mapVisible })
-        .where(eq(topics.slug, cleanSlug));
+    try {
+        return await withTopicRouteMutationLock(async () => {
+            const [result] = await db
+                .update(topics)
+                .set({ map_visible: mapVisible })
+                .where(eq(topics.slug, cleanSlug));
 
-    if (result.affectedRows === 0) return { error: t('topicNotFound') };
+            if (result.affectedRows === 0) return { error: t('topicNotFound') };
 
-    const currentUser = await getCurrentUser();
-    logAuditEvent(currentUser?.id ?? null, 'topic_map_visible_set', 'topic', cleanSlug, undefined, { map_visible: mapVisible }).catch(console.debug);
+            const currentUser = await getCurrentUser();
+            logAuditEvent(currentUser?.id ?? null, 'topic_map_visible_set', 'topic', cleanSlug, undefined, { map_visible: mapVisible }).catch(console.debug);
 
-    revalidateAllAppData();
-    return { success: true };
+            revalidateAllAppData();
+            return { success: true };
+        });
+    } catch (e: unknown) {
+        if (e instanceof TopicRouteLockTimeoutError) {
+            return { error: t('failedToUpdateTopic') };
+        }
+        console.error('Failed to update topic map visibility:', e);
+        return { error: t('failedToUpdateTopic') };
+    }
 }

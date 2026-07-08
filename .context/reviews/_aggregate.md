@@ -1,188 +1,283 @@
-# Run-10 Cycle 34/100 Aggregate Review
+# Run-10 Cycle 35/100 Aggregate Review
 
 Date: 2026-07-08 KST
-Start HEAD: `5124d17ec6bf801f302c180cabf6a58539d892c5`
-Review artifact commits already pushed by subagents: `53476e5d`, `bb61b083`, `68abb0ac`, `e94455d3`
+HEAD: `7993fa467f8a71814f878aa59bcd80174daab1ed`
+Scope: full-repository review-plan-fix cycle 35.
 
 ## Agent Coverage
 
-Required lanes completed: `code-reviewer`, `perf-reviewer`, `security-reviewer`, `critic`, `verifier`, `test-engineer`, `tracer`, `architect`, `debugger`, `document-specialist`, and `designer`.
+Required and discovered reviewer surfaces completed:
 
-Additional registered reviewer-style lane completed: `product-marketer-reviewer`.
+- `code-reviewer.md` - no fresh code-quality/correctness findings.
+- `perf-reviewer.md` - 4 performance/resource findings.
+- `security-reviewer.md` - no fresh security findings.
+- `critic.md` - no fresh code defects; reiterated manual ops risks.
+- `verifier.md` - no implementation/docs correctness mismatch; 4 manual verification risks.
+- `test-engineer.md` - 9 test/gate coverage risks.
+- `tracer.md` - no fresh causal-flow findings.
+- `architect.md` - 4 architecture/resource/manual-risk findings.
+- `debugger.md` - 1 data-consistency bug.
+- `document-specialist.md` - 2 documentation/provenance findings.
+- `designer.md` - 4 UI/UX/accessibility findings with browser evidence.
+- `product-marketer-reviewer.md` - 2 product-copy/config findings.
 
-The environment exposed only generic native subagent roles plus local reviewer prompt files, so each specialist lane ran through a bounded default-agent prompt. The runtime allowed five concurrent agents, not the six allowed by AGENTS.md, so the fan-out ran in waves. Initial `test-engineer` spawn hit the thread limit and was retried successfully. No reviewer failed after retry.
+The requested single-batch fan-out was capacity-bounded by the active child-agent limit, so the lanes were run in staged batches while preserving every required and discovered reviewer. No agent failed after retry.
+
+Raw finding count: 30 when counting all per-agent findings and manual-risk items. Deduped actionable count: 24.
 
 ## Deduped Findings
 
-### C34-01 - Lightroom/PAT upload can write after restore because it does not hold the admin mutation barrier
+### C35-01 - Shared background DB/CPU capacity is not enforced across subsystems
 
 - Severity: High
 - Confidence: High
-- Status: confirmed correctness/data-consistency defect
-- Cross-agent agreement: tracer primary; related restore/upload timing concerns from critic, perf, and debugger.
-- Citations: `apps/web/src/app/api/admin/lr/upload/route.ts:84-440`; `apps/web/src/lib/admin-mutation-barrier.ts:1-141`; `.context/reviews/tracer.md`.
-- Problem: browser mutating admin actions hold `acquireAdminMutationSlot()` for the full mutation body, but the PAT Lightroom route only checks restore maintenance and the upload-processing contract lock. A route admitted before restore maintenance begins can parse/save/insert after restore drains foreground action slots.
-- Scenario: a PAT upload starts, passes the first restore check, then a DB restore marks maintenance and drains admin mutation slots. Because the PAT route never acquired a slot, restore can import a dump and release locks while the upload continues and inserts into the freshly restored DB.
-- Fix: acquire an admin mutation slot for the full PAT upload mutation window, returning 503 when the exclusive restore side is active. Add route/source tests proving the PAT upload imports and uses the barrier.
+- Classification: confirmed performance/architecture risk
+- Agents: `perf-reviewer` (`PERF-C35-01`), `architect` (`ARCH-C35-02`), `code-reviewer` prior-risk note.
+- Regions: `apps/web/src/db/index.ts:31-42`, `apps/web/src/lib/image-queue.ts:121-153`, `apps/web/src/lib/admin-backfill-runner.ts:97-143`, `apps/web/src/lib/background-db-writes.ts:8-75`.
+- Problem: image processing, in-app color backfill, semantic work, maintenance, and analytics each reason about capacity locally. Aggregate background DB work can consume the foreground pool reserve.
+- Fix direction: add a shared web-process resource coordinator or maintenance admission mode; prove with a small-pool combined-background regression.
 
-### C34-02 - In-app color backfill is not part of graceful shutdown drain
-
-- Severity: Medium
-- Confidence: High
-- Status: confirmed reliability defect
-- Cross-agent agreement: debugger primary; related background-work/resource concerns from code-reviewer, perf, and architect.
-- Citations: `apps/web/src/lib/admin-backfill-runner.ts:45-51`, `apps/web/src/lib/admin-backfill-runner.ts:678-863`, `apps/web/src/instrumentation.ts:33-87`; `.context/reviews/debugger.md`.
-- Problem: the in-app admin color backfill is fire-and-forget and tracks `state.running`, but shutdown drains only the image queue, maintenance scheduler, shared view-count buffer, background DB writes, and single-writer guard. A SIGTERM during in-app backfill can cut off re-encode work even though shutdown reports only queue drain state.
-- Scenario: an operator triggers re-encode from Settings, then deploy restarts the container. The process can exit after image queue/background DB drain while backfill work remains active, leaving a partially processed run and misleading shutdown evidence.
-- Fix: expose a bounded `shutdownAdminBackfillRunner()`/drain helper and include it in `instrumentation.ts` graceful shutdown. Pin with a source/unit test.
-
-### C34-03 - Browser upload rethrows topic lookup failure after quota preclaim
+### C35-02 - Color sidecar can exceed live DB/CPU admission controls
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed reliability/UX defect
-- Cross-agent agreement: critic primary; related multipart/upload concerns from perf and debugger.
-- Citations: `apps/web/src/app/actions/images.ts:252-274`; `.context/reviews/critic.md`.
-- Problem: after the upload tracker preclaim, a topic lookup DB error settles the quota claim but rethrows the error. That surfaces as an unstructured Server Action failure instead of the app's normal localized upload error.
-- Scenario: a transient DB connection reset during topic validation produces a framework-level failure for the admin upload UI rather than a controlled error response, even though other adjacent upload failures return structured messages.
-- Fix: log the topic lookup error, settle the claim, and return a localized structured failure such as `failedToVerifyTopic`.
+- Classification: confirmed performance/ops risk
+- Agents: `perf-reviewer` (`PERF-C35-02`), `architect` (`ARCH-C35-02`).
+- Regions: `apps/web/scripts/backfill-color-pipeline.ts:416-420`, `apps/web/scripts/backfill-color-pipeline.ts:557-623`, `apps/web/src/lib/process-image.ts:36-57`.
+- Problem: the sidecar runs in a separate process/pool and allows up to 8 lanes, bypassing the in-app pool clamp.
+- Fix direction: default/clamp sidecar concurrency for live-traffic-safe mode and document/enforce when high concurrency requires quiescing live background workers.
 
-### C34-04 - E2E seeding deletes DB-sourced filenames without containment validation
+### C35-03 - Service-worker cached images can still block on synchronous HEAD probes
+
+- Severity: Medium
+- Confidence: High
+- Classification: likely performance issue
+- Agents: `perf-reviewer` (`PERF-C35-03`).
+- Region: `apps/web/public/sw.template.js:31-39`, `apps/web/public/sw.template.js:350-438`.
+- Problem: warm cached image responses with ETags wait on a synchronous HEAD path up to 300 ms per tile before serving cached bytes.
+- Fix direction: serve fresh-enough cached images immediately and move validation into `event.waitUntil`, with sync validation only for stale entries or a manifest/version mismatch.
+
+### C35-04 - Photo/share viewer initial bundle includes optional panels
+
+- Severity: Medium
+- Confidence: Medium
+- Classification: likely performance issue
+- Agents: `perf-reviewer` (`PERF-C35-04`).
+- Regions: `apps/web/src/components/photo-viewer.tsx:15-29`, `apps/web/src/components/photo-viewer.tsx:807-956`, `.next/diagnostics/route-bundle-stats.json`.
+- Problem: lightbox, bottom sheet, histogram, color details, and similar photos are statically imported into the initial viewer bundle.
+- Fix direction: split the primary viewer shell from on-demand panels and compare route diagnostics after the split.
+
+### C35-05 - Semantic embedding work has multiple active owners
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed architecture/resource risk
+- Agents: `architect` (`ARCH-C35-01`).
+- Regions: `apps/web/src/lib/image-queue.ts:501-637`, `apps/web/scripts/backfill-clip-embeddings.ts:114-130`, `apps/web/src/app/actions/embeddings.ts:113-131`, `apps/web/src/lib/clip-model.ts:53-173`.
+- Problem: live bootstrap can perform duplicate embedding work while sidecar/admin semantic backfills own the semantic backfill lock.
+- Fix direction: have live bootstrap observe the semantic backfill lock or move all embedding writes to a shared durable work queue/lease.
+
+### C35-06 - Color sidecar batching weakens per-image claim ownership
+
+- Severity: Low
+- Confidence: Medium
+- Classification: likely invariant risk
+- Agents: `architect` (`ARCH-C35-04`).
+- Regions: `apps/web/scripts/backfill-color-pipeline.ts:471-527`, `apps/web/scripts/backfill-color-pipeline.ts:557-603`.
+- Problem: one concurrent task can flush another task's row and release timing can drift from the owning claim's persistence.
+- Fix direction: make the claim owner persist its own row, or make the batch coordinator track/release all row claims after persistence.
+
+### C35-07 - Topic map visibility toggles can be lost during slug rename
+
+- Severity: Medium
+- Confidence: High
+- Classification: likely data-consistency bug, confirmed by static interleaving
+- Agents: `debugger` (`DBG-C35-01`).
+- Regions: `apps/web/src/app/actions/topics.ts:70-103`, `apps/web/src/app/actions/topics.ts:282-372`, `apps/web/src/app/actions/topics.ts:690-720`, `apps/web/src/__tests__/topics-actions.test.ts:813-819`.
+- Problem: `updateTopic` serializes slug mutation through `withTopicRouteMutationLock`, but `setTopicMapVisible` updates the same row outside that lock.
+- Fix direction: run `setTopicMapVisible` under the same lock and add a regression that proves lock usage around the update/audit/revalidate path.
+
+### C35-08 - nginx public limiter docs understate public API coverage
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed documentation/comment mismatch
+- Agents: `document-specialist` (`DOC-C35-01`).
+- Regions: `CLAUDE.md:248`, `apps/web/nginx/default.conf:274-295`, `apps/web/src/app/api/search/**`, `apps/web/src/app/api/og/**`, `apps/web/src/app/api/health/route.ts`, `apps/web/src/app/api/live/route.ts`.
+- Problem: docs describe page-only throttling and say API locations are excluded, but public non-admin API routes also fall through `location /`.
+- Fix direction: update docs/template comments to "public catch-all" or add explicit public API locations with intentional limiter policy.
+
+### C35-09 - Active review/provenance index still points at Cycle 34
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed stale provenance mismatch
+- Agents: `document-specialist` (`DOC-C35-02`).
+- Regions: `.context/reviews/_aggregate.md:1-13` before this update, `.context/plans/README.md:34-38`, root review lane headers.
+- Problem: root review artifacts are mixed generation until the Cycle 35 aggregate and plan pointers are updated.
+- Fix direction: write this Cycle 35 aggregate and update plan index during Prompt 2.
+
+### C35-10 - Search combobox points `aria-controls` at the dialog when results are absent
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed accessibility issue
+- Agents: `designer` (`DES-C35-01`).
+- Regions: `apps/web/src/components/search.tsx:430-452`.
+- Problem: the search input is `role="combobox"` with `aria-expanded=true` while controlling the modal dialog instead of a listbox when no results are displayed.
+- Fix direction: always render a listbox/status target or omit the combobox popup relationship until results exist.
+
+### C35-11 - Mobile masonry metadata overlays permanently cover photos
+
+- Severity: Low-Medium
+- Confidence: High
+- Classification: confirmed UX issue
+- Agents: `designer` (`DES-C35-02`).
+- Region: `apps/web/src/components/masonry-card.tsx:155-166`.
+- Problem: mobile gallery cards permanently cover the top of photos with a dark title/topic overlay.
+- Fix direction: move metadata to a reserved caption area or make overlay reveal intentional with an accessible persistent alternative.
+
+### C35-12 - SEO settings mark every field invalid for one field error
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed source UI/accessibility issue
+- Agents: `designer` (`DES-C35-03`).
+- Regions: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:75-209`, `apps/web/src/app/actions/seo.ts:85-139`.
+- Problem: one form-level server error sets `aria-invalid` on every SEO field.
+- Fix direction: return structured field errors and apply invalid state/descriptions only to affected controls.
+
+### C35-13 - Public photo/search surfaces expose visible shortcut tutorial copy
 
 - Severity: Low
 - Confidence: High
-- Status: confirmed local destructive operational risk
-- Cross-agent agreement: security-reviewer primary.
-- Citations: `apps/web/scripts/seed-e2e.ts:213-233`; `.context/reviews/security-reviewer.md`.
-- Problem: `seed-e2e.ts` restricts production/destructive DB use, but when deleting existing seed-topic rows it joins DB-stored filenames directly into upload directories. If a disposable DB contains poisoned filenames, the script can unlink outside the intended seed file set.
-- Scenario: a compromised or manually edited local e2e DB row under the seed topic has `filename_original = '../../something'`; running the destructive seed helper can remove an unintended path in the developer/e2e environment.
-- Fix: validate filenames before deletion with the same filename contract used by app paths, or restrict cleanup to the known seed basename allowlist.
+- Classification: confirmed UX/copy issue
+- Agents: `designer` (`DES-C35-04`).
+- Regions: `apps/web/src/components/photo-viewer.tsx:580-585`, `apps/web/src/components/search.tsx:524-530`.
+- Problem: operational shortcut text is visible in the public photo/search experience rather than contextual help.
+- Fix direction: move shortcut discovery to tooltips/help affordances or screen-reader-only widget instructions.
 
-### C34-05 - Cycle 33 release ledger still marks shipped work as active/pending
-
-- Severity: Medium
-- Confidence: High
-- Status: confirmed documentation/provenance mismatch
-- Cross-agent agreement: document-specialist plus local aggregate evidence.
-- Citations: `.context/plans/run10-cycle33/plan.md:3`, `.context/plans/run10-cycle33/plan.md:127-128`, `.context/plans/README.md`; `.context/reviews/document-specialist.md`.
-- Problem: Cycle 33 is committed and pushed at `5124d17e`, but its plan still says signed push and deploy/live smoke are pending, and the plans index still lists Cycle 33 as active.
-- Scenario: future cycles treat already-shipped work as pending or miss the production evidence gap that Cycle 34 is supposed to supersede.
-- Fix: mark Cycle 33 complete/pushed, move it to recently completed in the index, and make Cycle 34 the active ledger.
-
-### C34-06 - Root review handoff mixes current Cycle 34 artifacts with stale top-level review files
+### C35-14 - Wide-gamut hint overstates sRGB delivery
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed documentation/provenance mismatch
-- Cross-agent agreement: document-specialist primary; current cycle observation confirms.
-- Citations: `.context/reviews/_aggregate.md`; root `.context/reviews/*.md`; `.context/reviews/document-specialist.md`.
-- Problem: current Cycle 34 lanes overwrite some root review files while other root files remain stale from older cycles, making root review state ambiguous.
-- Scenario: a planner reads root review files and accidentally combines current Cycle 34 findings with stale Cycle 24/Cycle 33 artifacts.
-- Fix: write a cycle-scoped `.context/reviews/run10-cycle34/_aggregate.md` and make root `_aggregate.md` explicitly point to the current cycle. Keep per-agent root artifacts as the current rolling handoff only when rewritten this cycle.
+- Classification: confirmed product-copy issue
+- Agents: `product-marketer-reviewer` (`PMR-C35-01`).
+- Regions: `apps/web/messages/en.json:398-399`, `apps/web/messages/ko.json:398-399`, `apps/web/src/components/wide-gamut-hint.tsx:146-172`, `apps/web/src/components/photo-viewer.tsx:521-561`.
+- Problem: copy says an sRGB display is seeing an "sRGB version" or converted sRGB color, but the viewer does not select a separate sRGB asset by display capability.
+- Fix direction: change copy to display-capability wording that does not claim a separate sRGB rendition.
 
-### C34-07 - Background DB connection budgets are fragmented across image queue and backfills
+### C35-15 - Checked-in Atik site config can brand fresh self-hosted builds
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed architectural/resource risk
-- Cross-agent agreement: code-reviewer, perf-reviewer, and architect.
-- Citations: `apps/web/src/db/index.ts:31-42`; `apps/web/src/lib/image-queue.ts:121-153`; `apps/web/src/lib/admin-backfill-runner.ts:106-143`; `apps/web/src/lib/background-db-writes.ts`; `CLAUDE.md` DB pool budget note; `.context/reviews/code-reviewer.md`; `.context/reviews/perf-reviewer.md`; `.context/reviews/architect.md`.
-- Problem: each background subsystem reserves DB headroom independently. Running upload processing and admin color backfill together can leave far less live-request headroom than either subsystem's formula claims.
-- Scenario: image processing and admin re-encode overlap on the default 10-connection pool, then a live photo/search/admin request fan-out queues behind long-held encode/update work.
-- Disposition: deferred with preserved severity. This is a broader scheduler/resource-governor design, already documented in `CLAUDE.md`, and is not a contained same-cycle bug fix.
+- Classification: confirmed distribution/product risk
+- Agents: `product-marketer-reviewer` (`PMR-C35-02`).
+- Regions: `apps/web/src/site-config.json:2-10`, `apps/web/scripts/ensure-site-config.mjs:4-42`, `README.md`, `apps/web/README.md`.
+- Problem: `site-config.json` contains real Atik deployment values and passes production validation, so a fresh self-hosted build can inherit Atik branding/canonical URL.
+- Fix direction: track only example config, require explicit deployment allowlist for Atik config, or make production reject checked-in deployment-specific config without an override.
 
-### C34-08 - Sidecar color backfill does not claim the per-image processing lock
+### C35-16 - No coverage metric or ratchet exists for high-risk code
 
-- Severity: High
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed test/gate gap
+- Agents: `test-engineer` (`TE-C35-01`).
+- Regions: `package.json:17-30`, `apps/web/package.json:8-30`, `apps/web/vitest.config.ts:16-39`, `.github/workflows/quality.yml:54-83`.
+- Problem: the suite has no coverage command, threshold, or changed-file coverage signal for high-risk branches.
+- Fix direction: add a non-blocking coverage job first, then ratchet thresholds by high-risk directory.
+
+### C35-17 - Semantic scan cap is source-pinned instead of behavior-pinned
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed behavioral-test gap
+- Agents: `test-engineer` (`TE-C35-02`).
+- Regions: `apps/web/src/__tests__/semantic-scan-limit-source.test.ts:42-76`, `apps/web/src/app/api/search/semantic/route.ts:263-279`, `apps/web/src/app/api/search/similar/[id]/route.ts:177-190`.
+- Problem: tests prove `.limit(SEMANTIC_SCAN_LIMIT)` appears in source, not that the executed embedding scan query applies the cap.
+- Fix direction: add route-level DB-chain mocks that record and assert the terminal scan limit for semantic and similar routes.
+
+### C35-18 - Nav visual e2e captures screenshots without comparing them
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed test gap
+- Agents: `test-engineer` (`TE-C35-03`).
+- Region: `apps/web/e2e/nav-visual-check.spec.ts:40-86`.
+- Problem: screenshots are written as artifacts but never compared to baselines.
+- Fix direction: add stable `toHaveScreenshot` / snapshot assertions with masks, keeping geometry checks.
+
+### C35-19 - Production CLIP proof is outside PR/push gates
+
+- Severity: Medium
+- Confidence: High
+- Classification: confirmed gate/manual-validation gap
+- Agents: `test-engineer` (`TE-C35-04`), `verifier` (`M2`), `critic` (`RISK35-03`).
+- Regions: `apps/web/package.json:21-23`, `.github/workflows/quality.yml:69-83`, `.github/workflows/clip-preflight.yml:3-46`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`.
+- Problem: real CLIP model loading/ranking is skipped in normal CI and runs only manual/weekly.
+- Fix direction: trigger CLIP preflight on PR/push path filters for CLIP/model/semantic-production files, or require an explicit preflight check on such changes.
+
+### C35-20 - Sidecar backfill scripts have mostly indirect/source coverage
+
+- Severity: Medium
 - Confidence: Medium-High
-- Status: likely/confirmed-by-architecture risk for the sidecar path
-- Cross-agent agreement: architect primary; sidecar code inspection confirms no `getImageProcessingLockName()` use in `scripts/backfill-color-pipeline.ts`.
-- Citations: `apps/web/scripts/backfill-color-pipeline.ts:524-560`; `apps/web/src/lib/admin-backfill-runner.ts:355-389`, `apps/web/src/lib/admin-backfill-runner.ts:521-671`; `.context/reviews/architect.md`.
-- Problem: the in-app backfill claims the per-image processing lock, but the sidecar color backfill processes rows under only the global color-backfill lock.
-- Scenario: a failed image retry or live image-processing worker can claim the same image while the sidecar re-encodes it, creating duplicate derivative writes or stale metadata persistence.
-- Disposition: scheduled in Cycle 34. The contained fix is to hold the same per-image processing advisory lock as the in-app runner through sidecar reprocess and persistence, with source-contract coverage.
+- Classification: likely test gap
+- Agents: `test-engineer` (`TE-C35-05`).
+- Regions: `apps/web/scripts/backfill-alt-text.ts:55-160`, `apps/web/scripts/backfill-cicp-recheck.ts:51-157`.
+- Problem: operator sidecar behavior is guarded mostly by source-string tests instead of behavioral runner tests.
+- Fix direction: extract injectable runners and add table tests for locks, disabled/force behavior, restore markers, row errors, tuple unwraps, and exit codes.
 
-### C34-09 - Semantic embedding bootstrap and sidecars do not coordinate on one work owner
+### C35-21 - Migration reconcile tests are not structural validation
+
+- Severity: Medium
+- Confidence: Medium
+- Classification: test risk
+- Agents: `test-engineer` (`TE-C35-06`).
+- Region: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts`.
+- Problem: source tripwires can pass while emitted table/column/index/FK structure differs from Drizzle.
+- Fix direction: add disposable MySQL structural-diff tests for high-risk tables.
+
+### C35-22 - Hydration e2e uses `networkidle` as hydration oracle
+
+- Severity: Low-Medium
+- Confidence: Medium
+- Classification: test reliability risk
+- Agents: `test-engineer` (`TE-C35-07`).
+- Region: `apps/web/e2e/hydration-photo-page.spec.ts:20-49`.
+- Problem: `networkidle` can miss late hydration warnings or create unrelated flake.
+- Fix direction: add an app-level client-ready marker and assert for a bounded interval after mount.
+
+### C35-23 - Browser-flow matrix is single-project Desktop Chromium
 
 - Severity: Medium
 - Confidence: High
-- Status: confirmed design risk
-- Cross-agent agreement: architect primary; related CLIP readiness risks from verifier/test-engineer/document-specialist.
-- Citations: `apps/web/src/lib/image-queue.ts`; `apps/web/scripts/backfill-clip-embeddings.ts`; `apps/web/src/app/actions/embeddings.ts`; `.context/reviews/architect.md`.
-- Problem: upload/bootstrap embedding work, semantic backfill action, and sidecar embedding backfill coordinate partially through mode/model filters and advisory locks, but the ownership contract is spread across paths.
-- Scenario: activation/backfill/retry operations overlap and produce stale or skipped embeddings unless the operator follows the runbook exactly.
-- Disposition: deferred with preserved severity as an architecture/test-infra item.
+- Classification: manual-validation/test-matrix risk
+- Agents: `test-engineer` (`TE-C35-08`).
+- Regions: `apps/web/playwright.config.ts:48-77`, `.github/workflows/quality.yml:75-80`.
+- Problem: mobile WebKit, mobile Chromium, Firefox/display-gamut, and touch/service-worker behavior can regress outside CI.
+- Fix direction: add small smoke projects for mobile Chromium and mobile WebKit first; add Firefox display-capability smoke if the color surface changes.
 
-### C34-10 - Large Server Action upload and restore bodies are admitted after framework parsing
-
-- Severity: High
-- Confidence: High
-- Status: confirmed performance/resource risk; long-standing architecture item
-- Cross-agent agreement: perf-reviewer, debugger, verifier, test-engineer.
-- Citations: `apps/web/next.config.ts:111-119`; `apps/web/src/app/actions/images.ts:87-106`; `apps/web/src/app/[locale]/admin/db-actions.ts:789-810`; `.context/reviews/perf-reviewer.md`; `.context/reviews/debugger.md`.
-- Problem: browser upload/restore Server Actions receive already-materialized `FormData` before app-level locks, quotas, and disk checks.
-- Scenario: near-limit browser uploads or restore files can consume hundreds of MiB of heap/RSS before GalleryKit's resource gates run.
-- Disposition: deferred with preserved severity. Fix requires route-handler/streaming architecture and browser-flow coverage.
-
-### C34-11 - Search/timeline/map performance paths still rely on scan-heavy query shapes
+### C35-24 - Public edge/proxy/upload operational proofs remain manual
 
 - Severity: Medium
-- Confidence: High
-- Status: confirmed performance long-tail
-- Cross-agent agreement: perf-reviewer/test-engineer; prior carry-forward lineage.
-- Citations: `apps/web/src/lib/data.ts` search/map paths; `apps/web/src/lib/data-timeline.ts`; `.context/reviews/perf-reviewer.md`.
-- Problem: public keyword search uses leading-wildcard LIKE and tag EXISTS scans; timeline archive queries use date functions; public map can emit up to 10,000 markers.
-- Scenario: larger galleries see accepted public requests consume DB/client CPU despite rate limits.
-- Disposition: deferred with preserved severity; needs schema/index/product pagination work.
+- Confidence: High for nginx/CLIP/proxy; Medium for upload RSS
+- Classification: manual validation gaps
+- Agents: `verifier` (`M1`, `M3`, `M4`), `critic` (`RISK35-01`, `RISK35-02`, `RISK35-04`), `architect` (`ARCH-C35-03`), `test-engineer` (`TE-C35-09`).
+- Regions: `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:254-306`, `scripts/check-proxy-topology.mjs:7-16`, `CLAUDE.md:657-663`.
+- Problem: live host nginx limiter application, effective client-IP buckets, and large-upload RSS envelope are not proven by repo-local gates.
+- Fix direction: preserve operator runbooks and add non-mutating post-deploy probes where possible; keep live-host verification as a manual evidence item when production state cannot be safely mutated from the cycle.
 
-### C34-12 - Test strategy gaps remain despite high raw test count
+## Cross-Agent Agreement
 
-- Severity: Medium
-- Confidence: High
-- Status: confirmed/likely test gaps
-- Cross-agent agreement: test-engineer; verifier for manual proof gaps.
-- Citations: `.context/reviews/test-engineer.md`.
-- Problem: no coverage signal exists; semantic caps and sidecar behaviors are often source-pinned; nav visual specs do not compare pixels; production CLIP proof is outside normal push gates; browser matrix is Desktop Chromium only.
-- Scenario: behavior changes can satisfy source-contract tests while still regressing runtime behavior, visual output, or non-Chromium/mobile flows.
-- Disposition: deferred with preserved severity as test-infra work.
+- Background capacity / DB pool pressure was flagged by `perf-reviewer`, `architect`, and the code-review prior-risk sweep.
+- nginx/live edge validation was flagged by `architect`, `test-engineer`, `verifier`, `critic`, and `document-specialist`.
+- CLIP production preflight was flagged by `test-engineer`, `verifier`, and `critic`.
+- UI findings were browser-backed by `designer`; product-copy findings were independently source-backed by `product-marketer-reviewer`.
 
-### C34-13 - Public/admin UX field association and responsive issues
+## Agent Failures
 
-- Severity: Medium
-- Confidence: High for SEO field-error issue; mixed for other UI risks
-- Status: confirmed/likely UX defects
-- Cross-agent agreement: designer primary.
-- Citations: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:75-208`; `apps/web/src/app/actions/seo.ts:85-139`; public grid card components cited in `.context/reviews/designer.md`.
-- Problem: the SEO form marks all fields invalid for one server-side error; mobile photo grids keep permanent metadata overlays over photos; admin tables/dialogs have responsive and field-error limitations.
-- Scenario: admins using screen readers or narrow screens are sent to a summary/all-fields-invalid state rather than the actual invalid field; mobile visitors see photo intent obscured by permanent overlays.
-- Disposition: deferred with preserved severity. Needs structured field-error design and browser-flow validation.
+None. One attempted sixth concurrent spawn failed because the environment thread limit was already reached; it was retried successfully after a slot freed.
 
-### C34-14 - Checked-in Atik site-config can become a fresh deploy's public identity
+## Completion Notes
 
-- Severity: Medium
-- Confidence: High
-- Status: confirmed product/distribution risk
-- Cross-agent agreement: product-marketer-reviewer primary; document-specialist related provenance concerns.
-- Citations: `apps/web/src/site-config.json`; `apps/web/scripts/ensure-site-config.mjs`; `README.md`; `apps/web/README.md`; `.context/reviews/product-marketer-reviewer.md`.
-- Problem: although `apps/web/.gitignore` ignores `src/site-config.json`, the current repository still tracks a real Atik deployment config. A fresh clone can build with Atik fallback metadata if `BASE_URL`/DB SEO settings are absent.
-- Scenario: a self-hosting operator publishes the wrong canonical URL, footer, and fallback SEO metadata.
-- Disposition: deferred with preserved severity. The primary deployment uses this repository, so replacing tracked config needs an explicit distribution/deploy decision.
-
-### C34-15 - Operational/manual validation risks remain outside repository proof
-
-- Severity: Medium mixed
-- Confidence: High that manual validation is required
-- Status: manual-validation risks
-- Cross-agent agreement: code-reviewer, security-reviewer, critic, verifier, test-engineer, architect, document-specialist.
-- Citations: proxy/nginx docs and scripts; CLIP runbook/tests; backup/privacy docs; `.context/reviews/*`.
-- Problem: host nginx limiter/real-IP state, production CLIP seeded weights/env/DB state, upload RSS envelope, runtime secret rotation, plaintext backup boundary, and service-worker offline freshness cannot be proven from source alone.
-- Scenario: production behaves differently than source assumptions because host config, model files, or operational state drift.
-- Disposition: deferred/manual validation with preserved severity and exit criteria.
-
-## AGENT FAILURES
-
-None after retry. The initial `test-engineer` spawn failed due to the runtime thread limit and was retried successfully.
-
-## Final Sweep
-
-The aggregate preserves every review finding either as scheduled work or deferred/manual-validation work for Prompt 2. Confirmed correctness/security/data-loss issues scheduled for this cycle: C34-01 through C34-06 and C34-08. Broader architecture, performance, UX, test-infra, product-distribution, and operator-validation findings are recorded with original severity/confidence and explicit exit criteria in the Cycle 34 deferred register.
+All per-agent reports are retained as provenance. This aggregate intentionally separates implementation-ready issues from operational/manual risks so Prompt 2 can schedule or defer every finding under the repo's deferred-fix rules.

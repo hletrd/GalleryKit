@@ -1,95 +1,73 @@
-# Run-10 Cycle 34 Code Reviewer Report
+# Run-10 Cycle 35 Code Reviewer Report
 
 Date: 2026-07-08 KST
-Review HEAD: `5124d17ec6bf801f302c180cabf6a58539d892c5`
-Role: code-reviewer lane
-Scope: comprehensive whole-repository code-quality, logic, maintainability, race/shared-state, error-handling, invariant, and cross-file interaction review. Product code was not edited.
+Review HEAD: `7993fa467f8a71814f878aa59bcd80174daab1ed`
+Role: cycle-35 code-reviewer subagent
+Scope: whole-repository code-quality, logic, SOLID/maintainability, cross-file contract, state consistency, error-handling, and correctness review. Product code was not edited.
 
-## Inventory
+## Inventory / Scope Reviewed
 
-Authority and context read first: `AGENTS.md`, `CLAUDE.md`, the current review target, and the existing `.context/reviews/code-reviewer.md` baseline.
+Required authority and context read first: `AGENTS.md`, `CLAUDE.md`, and the code-review skill instructions. I also read the current rolling `.context/reviews/code-reviewer.md`, the latest aggregate review `.context/reviews/run10-cycle34/_aggregate.md`, rolling `.context/reviews/_aggregate.md`, and `.context/plans/run10-cycle34/deferred.md` so prior findings were not re-filed as new.
 
-Relevant tracked code inventory reviewed:
+Review-relevant inventory built before retaining claims:
 
-- 692 tracked implementation/operations files in the active review set: `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/nginx`, `apps/web/docker-compose.yml`, `apps/web/next.config.ts`, and `scripts/check-proxy-topology.mjs`.
-- 624 tracked TypeScript/TSX source files under `apps/web/src`: 80 `app` files, 61 component files, 115 library files, 3 DB files, 1 i18n file, 1 type file, and 364 tests.
-- 67 tracked operational/schema/config files outside `src`: 29 scripts, 34 migration/meta files, nginx config, Docker Compose, Next config, and the proxy-topology checker.
+- 725 tracked implementation, operations, schema, config, test, and docs-contract files in the active review set: `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, app config files, nginx/Docker/deploy config, root scripts, and live planning/review context.
+- 627 TypeScript/TSX/JS implementation and test files under `apps/web/src`.
+- 29 app scripts and 34 migration/meta files under `apps/web/scripts` and `apps/web/drizzle`.
+- High-risk paths examined in detail: admin API auth wrappers, mutating server-action guards, public route rate limits, upload/LR upload flows, restore-maintenance and admin mutation barriers, background queue/backfill runners, sidecar color backfill, pending cleanup queues, advisory locks, DB pool budgeting, public data privacy projections, search/timeline/map query paths, migrations, deployment/proxy config, and current source-contract tests.
 
-High-risk cross-file areas examined in detail: admin auth/API wrappers, mutating server-action origin and mutation barriers, public route rate limits, semantic/similar search admission, public data privacy projections, smart collections, topic routes, restore/backup maintenance, background DB writers, pending cleanup queues, image-processing queue, color re-encode backfill, advisory locks, DB pool budgeting, upload/original-file path safety, nginx/proxy assumptions, migration baselining, and source-contract tests.
+Intentionally not treated as source: `node_modules`, `.next`/build output, runtime uploads/backups/test-results, `.claude/worktrees`, and historical `.context` artifacts except where they document current invariants or known deferred findings. No relevant tracked implementation/config path in the active inventory was intentionally skipped.
 
-Intentionally not reviewed as source: `node_modules`, build outputs, runtime uploads/backups, and historical `.context` plans/reviews except where they documented current invariants or prior findings. Final sweep checked that no relevant tracked implementation/config path in the inventory above was skipped.
+## Fresh Findings
 
-## Confirmed Issues
+No new confirmed or likely code-quality/correctness findings were retained in this cycle.
 
-### CR34-01: Image queue and admin backfill each reserve live DB headroom independently, so running both can nearly saturate the shared pool
+Evidence supporting that conclusion:
+
+- The latest Cycle 34 scheduled fixes were rechecked in source:
+  - LR/PAT upload now holds the admin mutation barrier before parsing/saving/inserting (`apps/web/src/app/api/admin/lr/upload/route.ts:95-105`).
+  - In-app admin backfill now exposes a shutdown drain and is included in graceful shutdown (`apps/web/src/lib/admin-backfill-runner.ts:877-884`, `apps/web/src/instrumentation.ts:54-63`).
+  - Browser upload topic verification now returns a structured error after settling the quota claim (`apps/web/src/app/actions/images.ts:265-275`).
+  - E2E seed cleanup now allowlists expected seed filenames before unlinking DB-sourced paths (`apps/web/scripts/seed-e2e.ts:191-204`).
+  - Sidecar color backfill now claims the per-image processing lock around reprocess/persistence (`apps/web/scripts/backfill-color-pipeline.ts:319-347`, `apps/web/scripts/backfill-color-pipeline.ts:560-603`).
+- The previously scheduled December archive bug is fixed and behavior-tested (`apps/web/src/lib/data-timeline.ts:93-103`, `apps/web/src/__tests__/data-timeline-behavior.test.ts:59-90`).
+- Custom architecture gates, lint, typecheck, production audit, focused regressions, and the full Vitest suite passed; command evidence is listed below.
+
+## Known / Deferred Items Not Re-filed
+
+These are real or plausible issues already documented in the current deferred register, so they are not fresh Cycle 35 findings.
+
+### C34-07: Fragmented background DB connection budgets
 
 Severity: Medium
 Confidence: High
-Status: Confirmed resource/race risk
+Classification: Confirmed architectural/resource risk, deferred
+Regions: `apps/web/src/db/index.ts:31-42`, `apps/web/src/lib/image-queue.ts:121-153`, `apps/web/src/lib/admin-backfill-runner.ts:106-143`
 
-Code regions:
+Failure scenario: upload image processing and admin color backfill can overlap, each reserving live DB headroom independently. On the default 10-connection pool, combined background work can leave less live-request headroom than either formula claims.
 
-- `apps/web/src/db/index.ts:31-42`
-- `apps/web/src/lib/image-queue.ts:121-153`
-- `apps/web/src/lib/admin-backfill-runner.ts:106-143`
-- `apps/web/src/lib/admin-backfill-runner.ts:716-727`
-- `CLAUDE.md:272-285`
+Suggested fix: introduce a shared background DB resource budget/semaphore across image queue, admin backfill, sidecars, and maintenance, or make heavy backfills explicitly quiesce competing background processors.
 
-Evidence:
+### C34-09 / C34-10 / C34-11 / C34-12 / C34-13 / C34-14 / C34-15
 
-The app ships with `POOL_CONNECTION_LIMIT = 10` and `queueLimit: 20` (`db/index.ts:31-42`). `resolveImageQueueConcurrency()` reserves `max(3, ceil(pool / 2))` for live traffic and caps the image queue in isolation (`image-queue.ts:121-153`). `resolveBackfillConcurrency()` uses a similar isolated formula for admin color backfill, including the global backfill lock plus per-image claim/update connections (`admin-backfill-runner.ts:106-143`), and the runner applies that cap when starting the PQueue (`admin-backfill-runner.ts:716-727`). `CLAUDE.md:272-285` documents that these two background consumers do not subtract each other, but the code still has no shared budget, pause, or semaphore between them.
+Severity: Mixed High/Medium
+Confidence: Mostly High
+Classification: Deferred design, performance, UX, test-infra, product-distribution, and manual-validation risks
+Regions: documented in `.context/plans/run10-cycle34/deferred.md`
 
-Failure scenario:
+These remain open by explicit deferral: semantic embedding ownership, large Server Action body admission after framework parsing, scan-heavy public query paths, test strategy gaps, UX field/responsive issues, checked-in deployment-specific site config, and live proxy/CLIP/ops validation. I did not re-file them as code-review findings because the current plan already preserves severity, citations, scenarios, and exit criteria.
 
-On the default 10-connection pool, an active upload/image-processing queue at effective concurrency 2 and an admin-triggered color re-encode at effective concurrency 2 can overlap because they use different locks. The backfill can pin roughly 1 global lock plus 2 workers times 2 connections, while the image queue can pin 2 workers times 2 connections. That leaves about one free pool connection, not the five live connections each formula independently claims to reserve. A live photo page, topic page, search, or admin view with DB fan-out can then queue behind encode-duration holds and hit the pool `queueLimit` under normal maintenance plus upload activity.
+## Final Sweep
 
-Concrete fix:
+Commonly missed issue classes checked:
 
-Introduce a single shared background DB connection budget for all long-running background processors, or make admin backfill explicitly quiesce/pause the image-processing queue before it starts. The invariant should be "combined background work leaves live headroom" rather than "each background worker class leaves live headroom in isolation." Add a regression/source-contract test that proves `imageQueueBudget + backfillBudget + long-held locks` cannot exceed the shared pool budget at `POOL_CONNECTION_LIMIT = 10`.
+- Guard coverage: admin API `withAdminAuth`, server-action same-origin/mutation barriers, and public-route rate-limit posture all passed their custom scanners.
+- Privacy/data projection: reviewed `data.ts`/`data-timeline.ts`, semantic/similar search output shaping, and privacy guard tests through the full suite; no new public PII leak path was confirmed.
+- Restore/queue races: rechecked LR upload, browser upload, admin backfill shutdown, sidecar per-image lock, image queue retry/claim paths, and pending cleanup behavior around current HEAD changes.
+- Filesystem boundaries: rechecked upload original path handling, sidecar/e2e cleanup allowlists, derivative cleanup, and serve-upload containment patterns.
+- Schema/migration contracts: migration journal and reconcile behavior remain covered by tests in the full suite; no new migration/journal drift was found.
 
-## Likely Issues
-
-No likely-but-unconfirmed code defects were retained after the final sweep. Older Cycle 25 findings for fail-open color config and restore temp-file cleanup were rechecked against current code and are no longer current: the re-encode paths now call strict detached config accessors, and `runRestore()` transfers temp-file cleanup only after `spawn()` returns and handlers are registered.
-
-## Manual-Validation Risks
-
-### CR34-MV01: Effective per-client rate-limit identity still depends on deployed proxy topology
-
-Severity: Medium
-Confidence: Medium
-Status: Manual-validation risk, not a confirmed repository-code defect
-
-Code/config regions:
-
-- `apps/web/src/lib/rate-limit.ts:175-216`
-- `apps/web/nginx/default.conf:1-29`
-- `apps/web/nginx/default.conf:59-71`
-- `scripts/check-proxy-topology.mjs:12-16`
-- `scripts/check-proxy-topology.mjs:131-133`
-- `CLAUDE.md:97-98`
-- `CLAUDE.md:248`
-- `CLAUDE.md:753`
-
-Evidence:
-
-App-side rate limiting trusts `X-Forwarded-For`/`X-Real-IP` only when `TRUST_PROXY=true`; otherwise `getClientIp()` returns the shared key `"unknown"` and logs once (`rate-limit.ts:175-216`). The shipped nginx limiter keys on `$binary_remote_addr` (`default.conf:1-29`) and the config comments correctly warn that this is only the true client IP when nginx sees the real client as its TCP peer; in an upstream LB/CDN topology, operators must configure real-IP/PROXY protocol for nginx and adjust XFF/hop behavior (`default.conf:59-71`). The repo includes a read-only `check:proxy-topology` script, but its own help/output says it verifies forwarded host/proto spoof resistance and explicitly does not verify the effective client-IP bucket or XFF overwrite (`check-proxy-topology.mjs:12-16`, `131-133`). Running `npm run check:proxy-topology` locally without `--url` / `PROXY_TOPOLOGY_URL` failed before any live validation.
-
-Failure scenario:
-
-If production is behind a CDN or load balancer and nginx still sees only the upstream peer, nginx `limit_req_zone $binary_remote_addr` buckets all visitors together. If app `TRUST_PROXY`/`TRUSTED_PROXY_HOPS` does not match the real chain, app-layer login/search/share/semantic buckets can also collapse to a shared key or select the wrong hop. A small number of failed logins or public requests from one client can then throttle unrelated users, while spoofed or mis-selected forwarding chains weaken per-client limits.
-
-Concrete validation/fix:
-
-On the deployed host, run `npm run check:proxy-topology -- --url <public-origin> [--direct-url <direct-app-url>]` for forwarded host/proto resistance, then verify real-IP behavior with edge logs or a diagnostic that exposes only the effective bucket key class, not raw secrets. If an LB/CDN is in front, configure nginx `set_real_ip_from`/`real_ip_header` or PROXY protocol so `$binary_remote_addr` reflects the client, switch XFF handling to append mode where appropriate, and set `TRUSTED_PROXY_HOPS` to the real trusted-hop count.
-
-## Missed-Issue / File-Skip Sweep
-
-- Re-ran the custom guard scripts: API admin routes are wrapped by `withAdminAuth`, mutating server actions enforce same-origin and mutation-barrier contracts, and public route handlers have the required rate-limit posture or explicit exemption.
-- Reviewed restore sequencing across durable maintenance, upload-processing contract lock, backfill locks, image queue quiesce/resume, background DB drains, maintenance sweep drain, admin mutation drain, temp-file cleanup, child-process watchdogs, and post-restore migrations. No current restore data-corruption or temp-file ownership issue was confirmed.
-- Reviewed public data projection guards in `data.ts`/`data-timeline.ts`, semantic/similar route output shaping, and smart collection query compilation. No confirmed privacy field leak, SQL injection path, or unbounded public query path was found.
-- Reviewed advisory lock call sites and the raw `RELEASE_LOCK` allowlist. Fail-fast pooled lock paths use the shared destroy-on-ambiguous-acquire / destroy-on-release-failure helpers; script-only raw releases remain allowlisted by source-contract tests.
-- Reviewed upload/original-file path handling, derivative cleanup, pending file deletions, and serve-upload path safety. No confirmed traversal/symlink cleanup issue was found.
-- Reviewed migration journal/baseline contracts and current drizzle files. No confirmed journal ordering, DML-baseline, or reconcile parity issue was found in this pass.
+Skipped validation: `npm run build --workspace=apps/web` and Playwright e2e were not run. Build was avoided because this is a read-only review and the `prebuild` hook can rewrite generated tracked assets (`public/sw.js`, icons). E2E was not necessary for any retained source-level finding.
 
 ## Verification
 
@@ -98,7 +76,13 @@ Commands run:
 - `npm run lint:api-auth --workspace=apps/web` — passed.
 - `npm run lint:action-origin --workspace=apps/web` — passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` — passed.
-- `npm test --workspace=apps/web -- --run src/__tests__/rate-limit.test.ts src/__tests__/nginx-config.test.ts src/__tests__/restore-drain-checklist.test.ts src/__tests__/advisory-lock-release-contract.test.ts src/__tests__/admin-backfill-runner-batching.test.ts src/__tests__/image-queue-r10c1-contracts.test.ts` — 6 files / 61 tests passed.
-- `npm run check:proxy-topology` — not completed because no `--url` / `PROXY_TOPOLOGY_URL` was provided; retained as manual-validation risk only.
+- `npm run lint --workspace=apps/web` — passed.
+- `npm run typecheck --workspace=apps/web` — passed.
+- Focused regression run for latest upload/backfill changes — 7 files / 101 tests passed.
+- `npm test --workspace=apps/web` — 361 files passed, 2 skipped; 3394 tests passed, 4 skipped.
+- `npm run audit:prod` — 0 production vulnerabilities.
+- `npm run check:proxy-topology -- --help` — confirmed the helper is read-only and that effective client-IP bucket validation remains a live/operator check, not source-proven.
 
-No implementation was performed. The only reportable confirmed code issue from this pass is CR34-01; CR34-MV01 requires live deployment validation.
+## Conclusion
+
+No fresh Cycle 35 code-review defects were found beyond the already-documented deferred risks. The current HEAD passes the reviewed local gates, and the Cycle 34 correctness fixes I spot-checked are present with regression coverage.

@@ -1,156 +1,118 @@
-# Run-10 Cycle 34 Critic Review
+# Cycle 35 Critic Review
 
 Date: 2026-07-08 KST
-Role: `critic`
-Review HEAD: `53476e5d2454c9fb66f779cd33e6404913cf9ab5`
-Scope: skeptical whole-repo critique across product constraints, reliability, correctness, operator safety, maintainability, UX, and test evidence. Review-only; no implementation changes.
+Role: `cycle-35 critic`
+Repository: `/Users/hletrd/flash-shared/gallery`
+Mode: review-only; no product-code edits.
 
-## Inventory First
+## Inventory And Scope Reviewed
 
-I read `AGENTS.md` and `CLAUDE.md` before judging code. I inventoried the repository with `rg --files`, then focused on source/config/docs that can affect production behavior. Generated/runtime payloads were out of scope unless they are committed contract artifacts such as `public/sw.js`.
+Required control docs were read first:
 
-Relevant source/doc/test inventory:
+- `AGENTS.md:15-39` for deploy, schema, and blocking quality-gate policy.
+- `CLAUDE.md:510-667` for operational playbook, nginx manual-apply rules, disk hygiene, CLIP production activation, upload/memory limits, persistence, and liveness/readiness contracts.
 
-- Control docs and runbooks: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.context/plans`, `.context/reviews`, `plan/`.
-- App surfaces: 81 files under `apps/web/src/app`, including public pages, admin pages, server actions, API routes, metadata/OG routes, and DB restore actions.
-- Shared code: 115 files under `apps/web/src/lib`, including auth/session/PAT, origin/rate-limit, image processing, upload/file serving, queue/backfill, restore maintenance, pending deletions, semantic search/CLIP, service worker, data privacy projections, and config parsing.
-- Data/ops: `apps/web/src/db`, all `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/scripts/*`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `.github/workflows/*`.
-- Tests: 368 files under `apps/web/src/__tests__`, plus `apps/web/e2e`, lint guard scripts, CI workflow gates, and CLIP preflight workflow.
+Repository inventory was built before judging code:
 
-Validation evidence from this lane:
+- Repository file map via `rg --files`.
+- Review-relevant surface count: 643 files under `apps/web/src/app`, `apps/web/src/lib`, `apps/web/src/db`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, and `apps/web/src/__tests__`.
+- App Router inventory: 12 `route.*` handlers and 13 server-action files.
+- Test inventory: 364 unit/integration test files under `apps/web/src/__tests__` and 10 Playwright e2e/helper files under `apps/web/e2e`.
+- Tracked artifact/secret sweep checked for committed `.env`, `.next`, data/upload directories, obvious secret/key/token/password filenames; only examples, tests, and auth/token source were matched.
 
-- `npm run lint:action-origin --workspace=apps/web` passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+Areas examined in detail:
+
+- Product/data correctness: `apps/web/src/lib/data.ts:13-120`, `apps/web/src/lib/data.ts:1318-1362`, `apps/web/src/lib/data.ts:1766-1809`, public page/share/map/search paths, and privacy projections.
+- Auth and mutation safety: `apps/web/src/lib/api-auth.ts`, `apps/web/src/app/actions/auth.ts`, `apps/web/src/lib/session.ts`, admin API routes, admin DB actions, public mutation routes, same-origin guards, and rate-limit guard scripts.
+- Data integrity and migration behavior: `apps/web/src/db/schema.ts`, `apps/web/scripts/migrate.js:1-110`, `apps/web/scripts/migrate.js:291-360`, `apps/web/scripts/migrate.js:760-835`, all committed `apps/web/drizzle/*.sql`, and `apps/web/drizzle/meta/_journal.json`.
+- Deployment and operations: `apps/web/deploy.sh:10-12`, `apps/web/deploy.sh:51-77`, `apps/web/deploy.sh:79-104`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf:1-29`, and `apps/web/nginx/default.conf:254-306`.
+- CLIP semantic search: `apps/web/package.json:21-23`, `apps/web/src/lib/clip-model.ts:200-225`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:1-31`, semantic/similar routes, enrichment fields, and search UI.
+- Restore/upload/maintenance safety: restore maintenance barrier, DB restore helpers/actions, external Lightroom upload route, upload tracker state, and prior verifier notes.
+- Prior-cycle context: newest verifier/test-engineer review artifacts and `.context/plans/archive/82-deferred-cycle34.md`, to avoid re-filing closed or already-tracked items as new defects.
+
+Skipped or only sampled:
+
+- Generated/runtime artifacts such as `apps/web/.next/**`, local `.omc/**`, uploaded media, binary image fixtures, and untracked runtime data.
+- Full line-by-line reading of every test file; I sampled tests around the risk areas and used guard scripts plus targeted suites for evidence.
+- Full deploy, production nginx reload, production CLIP preflight, production RSS measurement, and Playwright browser flows; those require external/runtime state and were treated as manual validation risks below.
+
+## Validation Evidence
+
+Fresh checks run in this review lane:
+
 - `npm run lint:api-auth --workspace=apps/web` passed.
-- `npm run typecheck --workspace=apps/web` passed.
-- Targeted tests passed: `npm test --workspace=apps/web -- --run src/__tests__/images-actions.test.ts src/__tests__/lr-upload-route-behavior.test.ts src/__tests__/db-restore.test.ts src/__tests__/sw-template-contract.test.ts` passed 76 tests.
+- `npm run lint:action-origin --workspace=apps/web` passed; all mutating server actions either enforce same-origin provenance or carry explicit exemptions.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed; public route handlers were either guarded or explicitly exempted.
+- Targeted regression suite passed:
+  `npm test --workspace=apps/web -- --run src/__tests__/privacy-fields.test.ts src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/nginx-config.test.ts src/__tests__/search-route-privacy.test.ts`
+  Result: 7 files passed, 141 tests passed.
 
-Not rerun here: full `npm run lint`, `npm run build`, full `npm test`, `npm run audit:prod`, and Playwright e2e. CI defines those as blocking gates in `.github/workflows/quality.yml:54-83`.
+Additional static sweeps:
 
-## Confirmed Findings
+- `rg` checks for `sql.raw`, shell execution, dangerous/TODO markers, DOM injection, cookies, random IDs, and environment parsing produced no new actionable issue after inspecting the relevant hits.
+- Test skip/focus sweep found no `.only`. Skips are explicit for local-admin e2e gating and real-CLIP env-gated suites: `apps/web/e2e/admin.spec.ts:7-12`, `apps/web/e2e/origin-guard.spec.ts:29-77`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, and `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`.
 
-### CRIT34-01 - Browser upload rethrows a post-quota topic lookup failure instead of returning a structured action error
+Not run in this critic lane: full `npm run lint`, `npm run typecheck`, `npm run build`, full `npm test`, `npm run audit:prod`, `npm run test:e2e`, `npm run deploy`.
 
-- Severity: Medium
+## Findings
+
+No new confirmed or likely code-level findings.
+
+This is not a claim that the repository is risk-free. It means the cross-file issues I specifically pursued were either covered by code/tests/docs or already tracked as operational/manual risks:
+
+- Public privacy surfaces are guarded by explicit projections and tests: share group reads omit sensitive fields at `apps/web/src/lib/data.ts:1318-1362`, map GPS exposure is opt-in by topic and runtime-asserted at `apps/web/src/lib/data.ts:1766-1809`, and the targeted privacy/search tests passed.
+- Migration/baseline risk is actively defended: destructive legacy convergence is explicit at `apps/web/scripts/migrate.js:291-360`, removed feature cleanup is mirrored at `apps/web/scripts/migrate.js:760-769`, and DML-bearing journal baselining is refused at `apps/web/scripts/migrate.js:803-835`; targeted migration tests passed.
+- Admin and mutation surfaces are mechanically guarded by the three lint contracts from `AGENTS.md:31-34`; all three passed in this lane.
+- Deployment data safety is documented and implemented around health-before-prune and bind-mounted persistence: `CLAUDE.md:528-550` and `apps/web/deploy.sh:57-104`.
+- CLIP production activation is deliberately operator-gated rather than silently enabled: docs at `CLAUDE.md:558-636`, script gate at `apps/web/package.json:21-23`, offline model load at `apps/web/src/lib/clip-model.ts:200-225`, and env-gated preflight tests at `apps/web/src/__tests__/clip-offline-load.test.ts:32-41` / `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`.
+
+## Residual Manual Risks, Not New Findings
+
+### RISK35-01 - Host nginx limiter changes remain inert until an operator applies them
+
+- Severity: Medium operational risk
 - Confidence: High
-- Status: Confirmed reliability/UX defect
-- Region: `apps/web/src/app/actions/images.ts:217-274`, `apps/web/src/app/actions/images.ts:608-610`, `apps/web/src/app/api/admin/lr/upload/route.ts:283-297`, `apps/web/src/__tests__/images-action-toctou-claim.test.ts:68-79`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:321-330`.
+- Classification: Known/manual validation risk, not a new code defect
+- Region: `CLAUDE.md:514-526`, `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:254-306`
+- Scenario: A commit changes public or image rate-limiting in `apps/web/nginx/default.conf`, but production keeps the old host nginx config because deploys do not copy/reload host nginx. The app code is deployed, yet the intended edge flood cap is absent or stale.
+- Suggested fix / validation: Keep treating host nginx changes as open until an operator copies the template, runs `nginx -t`, reloads, and verifies overflow requests return 429 while normal page loads do not. Record that host-side verification in the active cycle ledger.
 
-Why this is a problem:
+### RISK35-02 - Real client IP topology is still an operator contract
 
-`uploadImages()` synchronously claims the admin/IP upload quota at `apps/web/src/app/actions/images.ts:217-227`, then performs awaited disk and topic checks. The topic lookup catch at `apps/web/src/app/actions/images.ts:271-274` correctly settles the quota claim, but then `throw err` escapes the server action. The only outer cleanup is the `finally` that releases the upload-processing lock at `apps/web/src/app/actions/images.ts:608-610`; there is no action-level catch converting this transient DB failure into `{ error: ... }`.
+- Severity: Medium operational risk
+- Confidence: Medium
+- Classification: Known/manual validation risk, topology-dependent
+- Region: `apps/web/nginx/default.conf:20-29`, `apps/web/nginx/default.conf:59-71`, `apps/web/nginx/default.conf:269-306`
+- Scenario: If a load balancer terminates TLS and nginx sees only the balancer IP, `$binary_remote_addr` rate-limit zones and `X-Forwarded-For $remote_addr` collapse all visitors into one bucket. A burst or failed-login sequence by one client can throttle unrelated visitors.
+- Suggested fix / validation: On every production topology change, verify whether nginx's peer address is the real client or an upstream proxy. If it is an upstream proxy, configure `realip`/PROXY protocol for nginx limiter keys and switch app-facing XFF to an append form with the matching trusted-hop setting.
 
-The Lightroom upload route handles the same failure more safely: it settles the claim, logs, and returns a JSON 500 at `apps/web/src/app/api/admin/lr/upload/route.ts:283-297`. The browser path instead pushes an expected transient infrastructure fault into Next.js's server-action exception path. Worse, the source-contract test pins the rethrow shape at `apps/web/src/__tests__/images-action-toctou-claim.test.ts:68-79`, while the LR test pins structured JSON behavior at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:321-330`.
+### RISK35-03 - CLIP production readiness depends on seeded host weights and manual preflight
 
-Concrete failure scenario:
-
-An admin starts a browser upload while MySQL restarts or the pool times out between the quota claim and the topic existence query. The claim is rolled back, but the action throws. The upload UI receives a framework-level failure instead of a localized recoverable upload error, so the admin sees a generic crash/error state or loses clean per-file feedback even though no file was accepted.
-
-Fix:
-
-Keep the `settleClaim(0, 0)` call, but replace `throw err` with a logged structured return such as `{ error: t('failedToFetchGallerySettings') }` or a dedicated localized upload-temporarily-unavailable message. Update `images-action-toctou-claim.test.ts` so it asserts settlement plus structured return, not settlement plus rethrow. Add a behavior test in `images-actions.test.ts` that mocks the topic select rejection and asserts the action resolves with `{ error: ... }`, does not call `saveOriginalAndGetMetadata`, and releases the upload lock.
-
-### CRIT34-02 - Browser and Lightroom upload ingestion still duplicate a critical privacy/color pipeline
-
-- Severity: Medium
+- Severity: Medium product/ops risk
 - Confidence: High
-- Status: Confirmed maintainability/correctness risk
-- Region: `apps/web/src/app/actions/images.ts:87-610`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-633`, `apps/web/src/app/actions/images.ts:397-516`, `apps/web/src/app/api/admin/lr/upload/route.ts:204-214`, `apps/web/src/app/api/admin/lr/upload/route.ts:327-345`, `apps/web/src/app/api/admin/lr/upload/route.ts:398-427`, `apps/web/src/app/api/admin/lr/upload/route.ts:550-586`.
+- Classification: Known/manual validation risk
+- Region: `CLAUDE.md:558-636`, `apps/web/package.json:21-23`, `apps/web/src/lib/clip-model.ts:200-225`, `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`
+- Scenario: `admin_settings.semantic_search_mode='production'` is set without seeded model files or without the container env flag. The route then fails/503s instead of serving semantic results, or the real encoder path has never been validated because CI skips the model-weight tests.
+- Suggested fix / validation: Before production activation, run `CLIP_MODELS_ROOT=<abs-models-root> npm run test:clip:preflight` against the seeded host volume, then deploy with `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and only then flip the DB setting.
 
-Why this is a problem:
+### RISK35-04 - Large browser uploads still need on-host RSS measurement
 
-The browser upload action and Lightroom/PAT route independently implement the same ingest lifecycle: quota claim/settle, upload-processing contract lock, topic verification, disk preflight, original save, HDR rejection, GPS stripping, EXIF/color normalization, insert value construction, queue job construction, audit, and revalidation. The LR file contains repeated parity comments documenting prior drift fixes: filename sanitation parity at `route.ts:204-214`, disk precheck parity at `route.ts:327-345`, HDR/GPS parity at `route.ts:398-427`, and queue-setting/color parity at `route.ts:550-586`. The browser insert/enqueue contract at `apps/web/src/app/actions/images.ts:397-516` is the parallel shape that future changes must remember to mirror.
-
-Concrete failure scenario:
-
-A future admin-only color/HDR field or processing setting is added to the browser insert/enqueue block at `apps/web/src/app/actions/images.ts:397-516`, but the LR route's duplicate payload at `apps/web/src/app/api/admin/lr/upload/route.ts:550-586` is missed. Browser uploads then preserve the photographer-intent setting while external publish uploads silently omit it until a backfill repairs rows, causing source-dependent public rendering differences.
-
-Fix:
-
-Extract a shared ingest service after route-specific auth and form parsing. The service should own config snapshotting, topic verification, disk preflight, original save, HDR/GPS policy, EXIF/color normalization, insert values, queue job values, and post-commit bookkeeping. Keep the browser action and LR route as adapters for localization, auth/PAT context, and HTTP status. Add behavior tests proving both adapters produce the same insert/enqueue contract for representative JPEG, HDR-rejected, GPS-stripped, RAW-rejected, and processing-setting cases.
-
-## Likely Risks
-
-### CRIT34-03 - Source-contract tests encode implementation shapes strongly enough to preserve defects
-
-- Severity: Low
+- Severity: Medium capacity risk
 - Confidence: Medium
-- Status: Likely maintainability/test-design risk
-- Region: `apps/web/src/__tests__/images-action-toctou-claim.test.ts:68-79`, `apps/web/src/__tests__/cycle-22-source-contracts.test.ts:125-138`, `apps/web/src/__tests__/sw-template-contract.test.ts:13-15`, `apps/web/src/__tests__/sw-template-contract.test.ts:60-88`, `apps/web/src/__tests__/sw-template-contract.test.ts:171-214`.
-
-Why this is a problem:
-
-Some source-contract tests intentionally guard brittle cross-file invariants, which is appropriate for the service worker template and generated worker parity. The risk is that the same style is also used where a behavior test would be safer. `images-action-toctou-claim.test.ts:68-79` requires `settleClaim(0, 0); throw err;`, preserving CRIT34-01's bad browser-action error surface. `cycle-22-source-contracts.test.ts:125-138` checks broad source snippets around the same upload claim region rather than a failing DB-select behavior. The service-worker suite is explicit about template/source drift at `sw-template-contract.test.ts:13-15`, and its checks at `sw-template-contract.test.ts:60-88` and `171-214` are reasonable because the shipped template cannot import the reference implementation directly.
-
-Concrete failure scenario:
-
-A developer fixes the browser upload path to return a structured error after a topic lookup failure. The behavior is better, but the source-contract test fails because the implementation no longer rethrows. Under time pressure, the developer may keep the rethrow to satisfy the test rather than updating the contract to assert the actual safety property.
-
-Fix:
-
-Keep source contracts only where import/runtime constraints force them. For server-action and route logic, prefer mocked behavior tests that assert externally visible outcomes and side effects: quota settled, no file saved, lock released, localized error returned. Where a source contract remains, make it assert semantic ingredients and explicitly avoid pinning harmful control flow such as `throw err`.
-
-## Manual-Validation Risks
-
-### CRIT34-04 - Public-page and Next image rate limiting depends on manually applied host nginx, but deploy does not verify it
-
-- Severity: High if the deployed host has stale nginx; otherwise Low
-- Confidence: High for the manual gap, unknown for current production state
-- Status: Manual-validation risk
-- Region: `CLAUDE.md:245-249`, `CLAUDE.md:514-526`, `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:246-295`, `apps/web/deploy.sh:51-55`, `apps/web/deploy.sh:99-104`.
-
-Why this is a problem:
-
-The app deliberately relies on edge-level nginx rate limiting for dynamic public SSR pages. `CLAUDE.md:245-249` documents the single-writer topology and says public pages are throttled at nginx, not app-layer. The committed nginx template defines `zone=public` and `zone=nextimage` at `apps/web/nginx/default.conf:1-19`, applies the Next image limiter at `apps/web/nginx/default.conf:246-263`, and applies the public catch-all limiter at `apps/web/nginx/default.conf:274-295`. The same template warns that real-IP handling is topology-sensitive at `apps/web/nginx/default.conf:20-29` and `59-71`.
-
-But deploy only rebuilds/restarts the app container at `apps/web/deploy.sh:51-55` and prunes Docker at `apps/web/deploy.sh:99-104`. `CLAUDE.md:514-526` explicitly says deploys do not touch host nginx and that a committed config change is inert until an operator applies and verifies it.
-
-Concrete failure scenario:
-
-A cycle marks public SSR rate limiting or `/_next/image` flood protection as fixed because `apps/web/nginx/default.conf` is committed and tests pass. The production host still runs an older nginx config, or sits behind a load balancer without realip configuration. Public dynamic pages remain unthrottled, or all visitors share the load balancer's single nginx bucket and legitimate traffic gets 429s.
-
-Fix:
-
-Add a deploy-time read-only verification step that inspects the live host nginx config (`nginx -T` or an operator-owned equivalent) for required zones, locations, and real-IP topology. Fail or loudly warn before declaring deploy complete when the expected limiter blocks are absent. Longer-term, move nginx config into managed deployment automation so `npm run deploy` can apply/test/reload it safely, or record a signed/manual host verification artifact per cycle.
-
-### CRIT34-05 - Production semantic search activation still has a host-weight/manual preflight gap
-
-- Severity: Medium
-- Confidence: Medium
-- Status: Manual-validation/operator-safety risk
-- Region: `CLAUDE.md:558-620`, `apps/web/package.json:21-24`, `.github/workflows/clip-preflight.yml:3-45`, `.github/workflows/quality.yml:54-83`, `apps/web/src/lib/gallery-config.ts:64-69`, `apps/web/src/lib/gallery-config.ts:123-126`, `apps/web/src/app/actions/settings.ts:102-104`, `apps/web/src/app/api/search/semantic/route.ts:186-201`, `apps/web/src/app/api/search/semantic/route.ts:247-260`.
-
-Why this is a problem:
-
-The production semantic-search code is deliberately operator-gated: `gallery-config.ts:64-69` documents that stored `production` heals to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, and `gallery-config.ts:123-126` implements that gate. The Settings UI rejects saving `production` at `apps/web/src/app/actions/settings.ts:102-104`; activation requires env + DB row + weights. The public semantic route returns 503 unless mode is `stub` or `production` at `apps/web/src/app/api/search/semantic/route.ts:186-201`, then production embedding failures return 503 at `route.ts:247-260`.
-
-The risk is operational, not type-level. `CLAUDE.md:558-620` says model weights are not baked into the image, must be seeded on the deploy host, and the env-gated integration suites are the only real offline-load proof before flipping the DB row. The package has a local preflight script at `apps/web/package.json:21-24`, and GitHub has a manual/scheduled workflow at `.github/workflows/clip-preflight.yml:3-45`. Main CI does not run this; `.github/workflows/quality.yml:54-83` runs standard gates only.
-
-Concrete failure scenario:
-
-An operator sets `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and flips `admin_settings.semantic_search_mode='production'` after a normal deploy, but the host bind-mounted `/app/data/models/clip` is missing, stale, or seeded under a different path. CI stays green because it never proves the deployed host's weights. Visitors see the semantic UI as production-enabled, but semantic searches fail with 503 on first real encoder load.
-
-Fix:
-
-Before allowing or documenting production activation as complete, require a host-side preflight against the same env file and bind mount the running container will use. The safest shape is a deploy/activation check that runs `npm run test:clip:preflight --workspace=apps/web` or a smaller encoder-load probe inside a sidecar with `CLIP_MODELS_ROOT=/app/data/models/clip` and `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`. Surface the result in deploy logs or an admin health/status warning so a DB-row flip cannot silently outrun host readiness.
-
-## Product And UX Notes
-
-No confirmed product-constraint breach was found in this pass. The repo still states the photographer-intent boundary clearly: no edit/culling/scoring features, and photos arrive after editing (`CLAUDE.md:305-307`). The public semantic search and similar-photo features are search/discovery surfaces, not scoring/culling, and similar photos are gated to production semantic mode (`apps/web/src/app/api/search/similar/[id]/route.ts:14-20`, `apps/web/src/components/similar-photos.tsx:50-58`, `apps/web/src/components/similar-photos.tsx:141` from the repo search sweep). The main UX concern I confirmed is CRIT34-01: browser upload transient DB failures can escape as framework errors instead of recoverable localized action errors.
+- Classification: Known/manual validation risk
+- Region: `CLAUDE.md:657-663`, `AGENTS.md:17-20`
+- Scenario: The app enforces 200 MB per file and a default 2 GiB batch window, but framework multipart parsing can transiently pin roughly each file size in RSS before disk streaming and Sharp processing. Concurrent uploads on the constrained host can exceed memory before app-level caps feel safe in practice.
+- Suggested fix / validation: Measure RSS on the deploy host for the largest realistic concurrent upload batch and tune container/host memory, concurrency, or upload limits from that measurement.
 
 ## Final Sweep
 
-Common missed-issue checks and result:
+Commonly missed issue classes checked:
 
-- Admin API auth wrappers: passed `lint:api-auth`.
-- Mutating server-action same-origin guards: passed `lint:action-origin`.
-- Public mutating/expensive route rate-limit guards: passed `lint:public-route-rate-limit`.
-- Type-level privacy/schema/test compilation: passed `typecheck`.
-- Restore drain/maintenance, upload tracker, LR upload behavior, and service-worker template contracts: targeted tests passed.
-- Migration runbook/schema dual-write rule is documented in `AGENTS.md:25-31` and `CLAUDE.md:467-489`; no new migration was authored in this lane.
-- Deploy disk-prune safety was inspected at `apps/web/deploy.sh:79-104`; no code change made.
-- Existing unrelated dirty file observed: `.context/reviews/perf-reviewer.md`; not touched.
+- Auth bypass and public mutation guard drift: checked with route/action guard scripts; passed.
+- Privacy leaks through public data projections: checked public share/search/map paths plus privacy fixture tests; passed.
+- Migration journal drift and legacy baseline swallowing: checked migration docs/script/journal and targeted migration tests; passed.
+- Deployment data loss from Docker pruning: checked deploy script order and persistence docs; prune runs after health and uses bind mounts / `volume prune` without `-a`.
+- Stale test masking: checked `.only`/`.skip`; no `.only`, skips are explicit env/local gates.
+- Tracked secrets/runtime artifacts: no committed real env files, `.next`, upload data, or obvious credential artifact found in the tracked sweep.
 
-Residual risk:
-
-This was a critic-lane review, not a release certification. Full lint/build/audit/e2e and production host validation remain necessary before claiming deploy safety. The highest-value next fix is CRIT34-01 because it is narrow, user-visible, and currently preserved by a source-contract test.
+Stop condition: review report written to this file, with no product-code edits and no new confirmed/likely findings to hand off for implementation.
