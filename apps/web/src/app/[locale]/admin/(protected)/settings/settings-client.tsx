@@ -884,35 +884,23 @@ export function SettingsClient({ initialSettings, hasExistingImages, resolvedSem
                     <CardDescription>{t('settings.navigationDesc')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                            <Label htmlFor="show-timeline-nav">{t('settings.showTimelineNav')}</Label>
-                            <p id="show-timeline-nav-help" className="text-xs text-muted-foreground">
-                                {t('settings.showTimelineNavHint')}
-                            </p>
-                        </div>
+                    <div className="flex flex-row items-center justify-between gap-3">
+                        <Label htmlFor="show-timeline-nav" className="min-w-0">{t('settings.showTimelineNav')}</Label>
                         <Switch
                             id="show-timeline-nav"
                             className="shrink-0"
                             checked={settings.show_timeline_nav !== 'false'}
                             onCheckedChange={(checked) => handleChange('show_timeline_nav', checked ? 'true' : 'false')}
-                            aria-describedby="show-timeline-nav-help"
                             aria-label={t('settings.showTimelineNav')}
                         />
                     </div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0">
-                            <Label htmlFor="show-map-nav">{t('settings.showMapNav')}</Label>
-                            <p id="show-map-nav-help" className="text-xs text-muted-foreground">
-                                {t('settings.showMapNavHint')}
-                            </p>
-                        </div>
+                    <div className="flex flex-row items-center justify-between gap-3">
+                        <Label htmlFor="show-map-nav" className="min-w-0">{t('settings.showMapNav')}</Label>
                         <Switch
                             id="show-map-nav"
                             className="shrink-0"
                             checked={settings.show_map_nav !== 'false'}
                             onCheckedChange={(checked) => handleChange('show_map_nav', checked ? 'true' : 'false')}
-                            aria-describedby="show-map-nav-help"
                             aria-label={t('settings.showMapNav')}
                         />
                     </div>
