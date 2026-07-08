@@ -3,7 +3,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { checkActionSource, walkForActionFiles } from '../../scripts/check-action-origin';
+import {
+    checkActionSource,
+    findUnscannedUseServerFiles,
+    walkForActionFiles,
+} from '../../scripts/check-action-origin';
 
 /**
  * C5R-RPL-04 / AGG5R-06 — fixture-based coverage for the
@@ -1083,6 +1087,63 @@ describe('walkForActionFiles — recursive action discovery (C6R-RPL-02 / AGG6R-
         expect(found.find((p) => p === 'auth.ts')).toBeDefined();
         expect(found.find((p) => p === path.join('sub', 'auth.ts'))).toBeDefined();
         expect(found.find((p) => p.endsWith('public.tsx'))).toBeDefined();
+    });
+});
+
+describe('findUnscannedUseServerFiles — app-wide server action placement', () => {
+    let tempRoot: string;
+    let appRoot: string;
+
+    beforeEach(() => {
+        tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'action-origin-app-'));
+        appRoot = path.join(tempRoot, 'src', 'app');
+        fs.mkdirSync(appRoot, { recursive: true });
+    });
+
+    afterEach(() => {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+    });
+
+    const writeAppFile = (relative: string, source: string) => {
+        const full = path.join(appRoot, relative);
+        fs.mkdirSync(path.dirname(full), { recursive: true });
+        fs.writeFileSync(full, source);
+        return full;
+    };
+
+    it('flags top-level use-server modules outside the approved scanner set', () => {
+        const approvedAction = writeAppFile('actions/images.ts', `
+            'use server';
+            export async function updateImage() {}
+        `);
+        const unscannedAction = writeAppFile('[locale]/admin/(protected)/analytics/actions.ts', `
+            'use server';
+            export async function deleteMetric() {}
+        `);
+
+        const discoveries = findUnscannedUseServerFiles(appRoot, [approvedAction]);
+
+        expect(discoveries).toEqual([
+            { file: unscannedAction, kind: 'top-level' },
+        ]);
+    });
+
+    it('flags inline function-level use-server actions in route components', () => {
+        const page = writeAppFile('[locale]/admin/(protected)/analytics/page.tsx', `
+            export default function AnalyticsPage() {
+                async function deleteMetric(formData: FormData) {
+                    'use server';
+                    await db.delete(metrics);
+                }
+                return <form action={deleteMetric} />;
+            }
+        `);
+
+        const discoveries = findUnscannedUseServerFiles(appRoot, []);
+
+        expect(discoveries).toEqual([
+            { file: page, kind: 'inline' },
+        ]);
     });
 });
 

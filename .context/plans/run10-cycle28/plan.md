@@ -1,6 +1,6 @@
 # Run-10 Cycle 28/100 Implementation Plan
 
-Status: IMPLEMENTED - FULL LOCAL GATES PASSED; SIGNED PUSH/DEPLOY PENDING
+Status: COMPLETED LOCALLY - SIGNED PUSHED AS `d985f549`; DEPLOY EVIDENCE SUPERSEDED BY CYCLE 29
 Aggregate: `.context/reviews/run10-cycle28/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `8753b939a780984b2c988fb6b75ed23ebad98ec9`
@@ -143,8 +143,8 @@ Deferred in `deferred.md`: `AGG-C28-05`, `AGG-C28-08`.
 - [x] WP4 ledger closure source edits.
 - [x] WP5 restore-maintenance landmark neutrality.
 - [x] Required gates.
-- [ ] Signed commit/push for implementation.
-- [ ] Per-cycle deploy and live smoke.
+- [x] Signed commit/push for implementation.
+- [ ] Per-cycle deploy and live smoke. Not recorded before Cycle 29; Cycle 29's per-cycle deploy supersedes production evidence for this pushed history.
 
 ## Gate Evidence
 
@@ -157,3 +157,9 @@ Deferred in `deferred.md`: `AGG-C28-05`, `AGG-C28-08`.
 - Production build passed: `npm run build --workspace=apps/web`.
 - Full unit suite passed: `npm test --workspace=apps/web` (361 files passed, 2 skipped; 3382 tests passed, 4 skipped).
 - E2E not run: selected changes are source/component contracts for image fallback URL selection, scanner placement, public-page source ordering/freshness, and a layout-neutral maintenance wrapper; no interactive browser-only flow changed. Authenticated all-admin-page e2e expansion is explicitly deferred in `deferred.md` as `AGG-C28-05`.
+
+## Terminal Evidence
+
+- Signed implementation commit: `d985f549afa73b23cdccf5d8fea30f4bfc840847` (`git log --format='%h %G? %s'` reports `G`).
+- Push state before Cycle 29 implementation: `d985f549` was `HEAD`, `origin/master`, and `origin/HEAD` at Cycle 29 start.
+- Deploy/live-smoke evidence: not committed before Cycle 29. Cycle 29's required per-cycle deploy is the current production closure pass for all pushed history through Cycle 29.

@@ -70,7 +70,8 @@ describe('cycle 28 source contracts', () => {
 
         expect(scanner).toContain("path.join(REPO_SRC, 'app')");
         expect(scanner).toContain('UNSCANNED SERVER ACTION MODULE');
-        expect(scanner).toContain("hasTopLevelUseServerDirective(file)");
+        expect(scanner).toContain('INLINE SERVER ACTION');
+        expect(scanner).toContain('findUnscannedUseServerFiles(appDir, actionFiles)');
     });
 
     it('keeps dense admin image tables horizontally scrollable with stable columns', () => {

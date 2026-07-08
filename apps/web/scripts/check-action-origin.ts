@@ -114,10 +114,20 @@ function discoverActionFiles(): string[] {
     return found.sort();
 }
 
-function hasTopLevelUseServerDirective(file: string): boolean {
+function parseSourceFile(file: string): ts.SourceFile {
     const content = fs.readFileSync(file, 'utf-8');
-    const sourceFile = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true);
+    let scriptKind = ts.ScriptKind.TS;
+    if (file.endsWith('.tsx')) {
+        scriptKind = ts.ScriptKind.TSX;
+    } else if (file.endsWith('.jsx')) {
+        scriptKind = ts.ScriptKind.JSX;
+    } else if (/\.[cm]?js$/.test(file)) {
+        scriptKind = ts.ScriptKind.JS;
+    }
+    return ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, scriptKind);
+}
 
+function sourceFileHasTopLevelUseServerDirective(sourceFile: ts.SourceFile): boolean {
     for (const statement of sourceFile.statements) {
         if (
             ts.isExpressionStatement(statement)
@@ -130,6 +140,54 @@ function hasTopLevelUseServerDirective(file: string): boolean {
     }
 
     return false;
+}
+
+function blockHasUseServerDirective(body: ts.Block): boolean {
+    for (const statement of body.statements) {
+        if (
+            ts.isExpressionStatement(statement)
+            && ts.isStringLiteral(statement.expression)
+        ) {
+            if (statement.expression.text === 'use server') return true;
+            continue;
+        }
+        return false;
+    }
+    return false;
+}
+
+function getFunctionBody(node: ts.Node): ts.Block | undefined {
+    if (
+        (
+            ts.isFunctionDeclaration(node)
+            || ts.isFunctionExpression(node)
+            || ts.isArrowFunction(node)
+            || ts.isMethodDeclaration(node)
+            || ts.isGetAccessorDeclaration(node)
+            || ts.isSetAccessorDeclaration(node)
+            || ts.isConstructorDeclaration(node)
+        )
+        && node.body
+        && ts.isBlock(node.body)
+    ) {
+        return node.body;
+    }
+    return undefined;
+}
+
+function sourceFileHasInlineUseServerDirective(sourceFile: ts.SourceFile): boolean {
+    let found = false;
+    const visit = (node: ts.Node) => {
+        if (found) return;
+        const body = getFunctionBody(node);
+        if (body && blockHasUseServerDirective(body)) {
+            found = true;
+            return;
+        }
+        ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sourceFile, visit);
+    return found;
 }
 
 function discoverAppSourceFiles(root: string): string[] {
@@ -152,20 +210,45 @@ function discoverAppSourceFiles(root: string): string[] {
     return out;
 }
 
-function checkForUnscannedUseServerFiles(actionFiles: string[]): void {
-    const approved = new Set(actionFiles.map((file) => path.resolve(file)));
-    const appDir = path.join(REPO_SRC, 'app');
-    const unscanned = discoverAppSourceFiles(appDir)
-        .filter((file) => hasTopLevelUseServerDirective(file))
-        .filter((file) => !approved.has(path.resolve(file)))
-        .sort();
+export type UseServerDiscovery = {
+    file: string;
+    kind: 'inline' | 'top-level';
+};
 
-    for (const file of unscanned) {
-        const relative = path.relative(process.cwd(), file);
-        console.error(
-            `UNSCANNED SERVER ACTION MODULE: ${relative} has a top-level 'use server' directive but is outside the approved lint:action-origin scan set. ` +
-            `Move it under src/app/actions/, add an explicit scanner entry with review, or keep the module free of server-action exports.`,
-        );
+export function findUnscannedUseServerFiles(appRoot: string, actionFiles: string[]): UseServerDiscovery[] {
+    const approved = new Set(actionFiles.map((file) => path.resolve(file)));
+    return discoverAppSourceFiles(appRoot)
+        .flatMap((file): UseServerDiscovery[] => {
+            const sourceFile = parseSourceFile(file);
+            const discoveries: UseServerDiscovery[] = [];
+            if (sourceFileHasTopLevelUseServerDirective(sourceFile) && !approved.has(path.resolve(file))) {
+                discoveries.push({ file, kind: 'top-level' });
+            }
+            if (sourceFileHasInlineUseServerDirective(sourceFile)) {
+                discoveries.push({ file, kind: 'inline' });
+            }
+            return discoveries;
+        })
+        .sort((a, b) => `${a.file}:${a.kind}`.localeCompare(`${b.file}:${b.kind}`));
+}
+
+function checkForUnscannedUseServerFiles(actionFiles: string[]): void {
+    const appDir = path.join(REPO_SRC, 'app');
+    const unscanned = findUnscannedUseServerFiles(appDir, actionFiles);
+
+    for (const discovery of unscanned) {
+        const relative = path.relative(process.cwd(), discovery.file);
+        if (discovery.kind === 'top-level') {
+            console.error(
+                `UNSCANNED SERVER ACTION MODULE: ${relative} has a top-level 'use server' directive but is outside the approved lint:action-origin scan set. ` +
+                `Move it under src/app/actions/, add an explicit scanner entry with review, or keep the module free of server-action exports.`,
+            );
+        } else {
+            console.error(
+                `INLINE SERVER ACTION: ${relative} has a function-level 'use server' directive, which bypasses the export-based lint:action-origin scanner. ` +
+                `Move the action into src/app/actions/ with a direct exported async function/const so same-origin and mutation-barrier checks can be verified.`,
+            );
+        }
         failed = true;
     }
 }
