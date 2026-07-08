@@ -33,8 +33,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 37/100 Implementation Plan - active ledger from Cycle 37 aggregate: complete navigation visibility/typecheck fixes, re-scope LR upload restore mutation slot, align photo-page SW offline docs, surface OSM tile privacy note, run full gates, signed push, and per-cycle deploy (`run10-cycle37/plan.md`)
-- Run-10 Cycle 37/100 Deferred Findings - Cycle 37 deferred performance/topology/test/operator/product items with preserved severity/confidence and exit criteria (`run10-cycle37/deferred.md`)
+- Run-10 Cycle 38/100 Implementation Plan - recovery ledger after Cycle 38 subagent usage-limit failure: preserve partial reviews, finish aggregate/deferred register, center remaining admin pages, clarify analytics/GPS docs, close default raw-input touch-target scanner gap, run full gates, signed push, and per-cycle deploy (`run10-cycle38/plan.md`)
+- Run-10 Cycle 38/100 Deferred Findings - Cycle 38 deferred architecture/topology/performance/operator/test items with preserved severity/confidence and exit criteria (`run10-cycle38/deferred.md`)
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
@@ -45,6 +45,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 37/100 Implementation Plan - completed, pushed, deployed, and recovery-deployed through signed `54083a2c`; covered navigation visibility settings, LR restore-slot re-scope, photo-page SW docs, OSM privacy note, admin centering, nav-toggle accessibility/touch-target recovery, gates, and production smoke (`run10-cycle37/plan.md`)
+- Run-10 Cycle 37/100 Deferred Findings - superseded by Cycle 38 deferred register where findings remain open or are re-raised (`run10-cycle37/deferred.md`)
 - Run-10 Cycle 36/100 Implementation Plan - completed/pushed before Cycle 37; review artifacts from Cycle 37 started from signed commits through `dc1845c4` plus current uncommitted Cycle 37 worktree fixes (`run10-cycle36/plan.md`)
 - Run-10 Cycle 36/100 Deferred Findings - superseded by Cycle 37 deferred register where findings remain open or are re-raised (`run10-cycle36/deferred.md`)
 - Run-10 Cycle 35/100 Implementation Plan - implemented and pushed as signed `c62c8c1e`; local full gates are recorded green in the plan. No committed Cycle 35 deploy transcript was found during Cycle 36 planning, so Cycle 36's per-cycle deploy is scheduled to supersede production evidence for the pushed Cycle 35 history (`run10-cycle35/plan.md`)

@@ -252,7 +252,9 @@ export const rateLimitBuckets = mysqlTable("rate_limit_buckets", {
 }));
 
 // US-P44 (Phase 4.4): Per-photo / per-topic / per-shared-group analytics views.
-// Privacy: no full IPs stored — only country_code (2-char) derived from IP.
+// Privacy: view rows store no full IPs — only country_code (2-char) derived
+// from IP. The separate rate_limit_buckets table may temporarily keep raw IPs
+// as abuse-control keys until old buckets are pruned.
 // referrer_host stores TLD+1 only (never full URL). bot flag records crawler views
 // but they are excluded from public-facing counts.
 export const imageViews = mysqlTable("image_views", {

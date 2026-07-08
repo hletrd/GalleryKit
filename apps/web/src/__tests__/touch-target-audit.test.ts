@@ -237,12 +237,12 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // The scanner still counts bare size="icon" conservatively because it
     // cannot see cva variant CSS. Re-open: if button.tsx removes the size-11
     // floor, or if explicit h-8/h-9/h-10 overrides reappear.
-    'app/[locale]/admin/(protected)/categories/topic-manager.tsx': 7,
+    'app/[locale]/admin/(protected)/categories/topic-manager.tsx': 3,
     // tag-manager.tsx: same shape — back arrow + edit/delete buttons use
     // runtime-compliant size="icon" and are counted only by the conservative
     // static pattern. Re-open: if the Button primitive floor changes or compact
     // overrides return.
-    'app/[locale]/admin/(protected)/tags/tag-manager.tsx': 7,
+    'app/[locale]/admin/(protected)/tags/tag-manager.tsx': 3,
     // settings-client.tsx: single back-arrow `size="icon"`.
     'app/[locale]/admin/(protected)/settings/settings-client.tsx': 1,
     // seo-client.tsx: single back-arrow `size="icon"`.

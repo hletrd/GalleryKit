@@ -234,7 +234,7 @@ operator-enabled rather than assumed live in production.
 - `MYSQL_PWD` env var used for mysqldump/restore (not `-p` flag)
 
 ### Privacy
-- GPS coordinates (`latitude`, `longitude`) excluded from public API responses
+- GPS coordinates (`latitude`, `longitude`) excluded from normal public photo/list/search API responses. The public GPS map is the explicit opt-in exception: topics with `map_visible=true` may expose coordinates through the map projection so the map can render.
 - `strip_gps_on_upload` additionally scrubs the on-disk ORIGINAL: lossless byte-level GPS-IFD / GPS-bearing-XMP neutralization for JPEG / TIFF / HEIF-AVIF-HEIC / WebP via `apps/web/src/lib/gps-exif-strip.ts`; PNG and most structurally anomalous formats (JPEG/WebP/TIFF/AVIF) take a metadata-free re-encode (autoOrient + keepIccProfile, explicit high-quality settings). Structurally anomalous HEIC/HEIF and any unrecognized extension instead FAIL CLOSED (VER-01, run-10 c2): `stripGpsFromOriginal` returns `false` (Sharp's bundled build has no HEVC encoder to re-encode with), and both upload paths delete the just-saved original and reject the upload rather than persisting GPS. Never use Sharp `withMetadata()` for stripping — `withMetadata()` keeps most input metadata (EXIF/XMP/IPTC) including GPS coordinates; in Sharp 0.33+ this behaviour is explicit (R4C8 COR-R4C8-01)
 - `filename_original` and `user_filename` excluded from public queries
 - `adminSelectFields` includes all fields (including PII) for authenticated admin routes

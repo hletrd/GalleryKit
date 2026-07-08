@@ -1,78 +1,80 @@
-# Run-10 Cycle 36 Tracer Review
+# Cycle 38 Tracer Review
 
 Date: 2026-07-08 KST
-Role: cycle-36 tracer + causal/data-flow review worker
+Role: cycle-38 tracer / causal-flow review
 Workspace: `/Users/hletrd/flash-shared/gallery`
-Review HEAD: `c62c8c1e` on `master` / `origin/master`
-Mode: review-only; no production-code edits
+Review HEAD: `5c6a45a5`
+Mode: review-only. Required output file only; no source edits, commits, pushes, deploys, or production access.
 
-## Inventory
+## Provenance and Inventory
 
-Required instructions read first: `AGENTS.md`, `CLAUDE.md`, and the code-review skill instructions.
+Read first: `AGENTS.md`, `CLAUDE.md`, and the local `code-review` skill instructions. Worktree before this edit already had unrelated modified review files: `.context/reviews/critic.md`, `.context/reviews/security-reviewer.md`, `.context/reviews/verifier.md`; I did not touch them.
 
-Relevant repo surfaces inventoried before tracing:
+Inventory method: built a tracing inventory with `rg --files` plus flow keywords before reviewing. The repo slice under `apps/web/src/app`, `apps/web/src/lib`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, and `apps/web/src/__tests__` contains 580 files; 411 matched tracing keywords such as restore, maintenance, upload, delete, backfill, queue, pending, advisory lock, semantic/similar search, public/admin selectors, rate limits, same-origin, and admin mutation barriers. I reviewed the matching flow clusters rather than sampling a small hand-picked subset.
 
-- Operating docs and provenance: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `.context/reviews/_aggregate.md`, `.context/plans/README.md`, `.context/plans/run10-cycle35/{plan,deferred}.md`, previous root `tracer.md` and `document-specialist.md`.
-- Runtime/deploy/schema: root `package.json`, `apps/web/package.json`, `.github/workflows/*`, `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`, `apps/web/scripts/migrate.js`, `apps/web/drizzle/meta/_journal.json`.
-- Causal/data-flow source clusters: admin/server actions under `apps/web/src/app/actions/`, admin restore in `apps/web/src/app/[locale]/admin/db-actions.ts`, public routes under `apps/web/src/app/api/**` and `apps/web/src/app/[locale]/(public)/**`, data/privacy selectors in `apps/web/src/lib/data.ts`, upload/delete/processing in `apps/web/src/app/actions/images.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/serve-upload.ts`, sidecar and in-app backfills, semantic search/CLIP modules, restore drains, rate limiters, and service-worker caching.
+Tracing-relevant clusters reviewed:
+
+- Restore/import and maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, `restore-maintenance*.ts`, `restore-drain-checklist.ts`, `admin-mutation-barrier.ts`, `queue-shutdown.ts`, `background-db-writes.ts`, `maintenance-scheduler.ts`, `pending-file-deletions.ts`, `pending-session-revocations.ts`.
+- Upload/delete/processing: `actions/images.ts`, LR upload route, `image-queue.ts`, `process-image.ts`, `upload-paths.ts`, upload tracker and upload-processing contract lock, delete retry ledger.
+- Backfills/sidecars: in-app color runner, color sidecar, CLIP embedding sidecar/action, alt-text sidecar, migrations and schema journal.
+- Public/admin data-flow invariants: public semantic and similar routes, public search/timeline/map selectors, admin/public select-field privacy guards, same-origin/admin-auth lint surfaces, public route rate-limit tests.
 
 ## Findings
 
-### TRC-C36-01 - Independent background capacity budgets can over-subscribe the shared DB pool
+### TRC-C38-01 - Independent in-process background budgets can over-subscribe the shared DB pool
 
-- Classification: confirmed
+- Classification: confirmed issue
 - Severity: High
 - Confidence: High
-- Region: `apps/web/src/db/index.ts:31-42`; `apps/web/src/lib/image-queue.ts:121-153`; `apps/web/src/lib/admin-backfill-runner.ts:97-143`; `apps/web/src/lib/background-db-writes.ts:8-75`
-- Failure scenario: the image queue and in-app color backfill each reserve roughly half of the same 10-connection pool as if they were the only background owner. With `QUEUE_CONCURRENCY` effectively 2 and admin color backfill effectively 2, the queue can pin about four processing/claim connections while the backfill pins one whole-run advisory connection plus four worker/update connections. Analytics writes can also run two DB writes. Foreground photo routes that fan out DB reads then queue behind encode-duration work despite each subsystem's local "leave live headroom" proof.
-- Suggested fix: add a process-wide background resource coordinator shared by image processing, in-app color backfill, semantic embedding work, maintenance, and analytics. The coordinator should admit work against one pool/CPU budget and expose current reservations. Add a small-pool regression that starts queue processing plus admin backfill plus analytics writes and proves foreground DB acquisition still has reserved headroom or that one background lane is refused/throttled.
+- Region: `apps/web/src/db/index.ts:31-42`; `apps/web/src/lib/image-queue.ts:121-153` and `761-918`; `apps/web/src/lib/admin-backfill-runner.ts:97-143`, `330-397`, and `681-827`; `apps/web/src/lib/background-db-writes.ts:8-75`
+- Failure scenario: the web process has one MySQL pool capped at 10 connections (`connectionLimit: POOL_CONNECTION_LIMIT`). The image queue reserves roughly half the pool and clamps itself to 2 workers at the default limit, assuming it is the only background owner. The in-app color backfill independently does the same, also allowing 2 workers while holding a whole-run advisory-lock connection. Each queue/backfill worker can hold a per-image lock connection plus transient DB work; analytics writes can add two more background DB operations. When queue processing, in-app backfill, and analytics overlap, their local proofs compose to roughly all pool capacity instead of preserving the intended live headroom, so foreground public/admin reads can queue behind encode-duration work.
+- Concrete fix: introduce one process-wide background admission/budget coordinator for image queue, in-app backfill, semantic embedding bootstrap/post-upload work, maintenance sweeps, and analytics writes. The coordinator should account for advisory-lock connections and transient DB work, then either throttle or refuse a background lane once the shared reserve is consumed. Add a regression that starts queue workers + admin backfill + analytics at the default pool size and proves either foreground DB acquisition still has reserved headroom or one background lane is paused.
 
-### TRC-C36-02 - Semantic embeddings have multiple active writers that do not share one ownership gate
+### TRC-C38-02 - Semantic embedding writers do not share the semantic backfill ownership gate
 
-- Classification: likely
+- Classification: likely issue
 - Severity: Medium
 - Confidence: High
-- Region: `apps/web/src/lib/image-queue.ts:501-539`; `apps/web/src/lib/image-queue.ts:542-637`; `apps/web/src/lib/image-queue.ts:981-1008`; `apps/web/scripts/backfill-clip-embeddings.ts:114-130`; `apps/web/src/app/actions/embeddings.ts:113-134`; `apps/web/src/lib/clip-model.ts:53-173`
-- Failure scenario: a production CLIP sidecar holds `LOCK_SEMANTIC_EMBEDDING_BACKFILL`, but live upload side effects and `bootstrapMissingActiveEmbeddings()` do not observe that lock before scanning, embedding, and upserting rows. The DB upsert/model-version design prevents duplicate rows, so this is not a data-corruption finding. The failure mode is resource contention and duplicate ONNX inference: live bootstrap or post-upload embedding can consume the same in-process CLIP queue and DB pool while the operator backfill is trying to converge production rows, causing visitor semantic searches to hit queue-full/timeout or extending activation backfill time.
-- Suggested fix: have live semantic bootstrap/upload embedding observe the semantic backfill advisory lock, or move all embedding writes through one durable queue/lease table. If live uploads must keep embedding during backfill, make the policy explicit with shared admission limits and tests proving visitor query slots remain available.
+- Region: `apps/web/scripts/backfill-clip-embeddings.ts:122-130` and `195-238`; `apps/web/src/app/actions/embeddings.ts:113-134` and `173-211`; `apps/web/src/lib/image-queue.ts:501-539`, `542-637`, and `981-1008`; `apps/web/src/lib/clip-model.ts:53-173`; public consumers at `apps/web/src/app/api/search/semantic/route.ts:247-284` and `apps/web/src/app/api/search/similar/[id]/route.ts:137-190`
+- Failure scenario: the canonical CLIP sidecar and the unwired admin action both acquire `LOCK_SEMANTIC_EMBEDDING_BACKFILL`. Live queue side effects and `bootstrapMissingActiveEmbeddings()` skip only restore maintenance; they do not check or acquire that semantic lock before scanning missing rows, running image inference, and upserting `image_embeddings`. The primary key/model-version upsert shape prevents duplicate-row corruption, so this is not a confirmed data-integrity bug. The likely failure is competing ownership over scarce inference and DB capacity: a production backfill can run while live queue embedding and missing-embedding bootstrap consume the same process-local CLIP queue used by public text search, increasing visitor 503/timeout risk and extending activation convergence.
+- Concrete fix: make live embedding writes observe the same semantic ownership policy as the sidecar: skip/defer while `LOCK_SEMANTIC_EMBEDDING_BACKFILL` is held, or move all embedding writes through one durable embedding job/lease table. If uploads must keep writing during operator backfill, split public query inference from background image inference with explicit reservations and tests proving public semantic/similar requests retain slots under backfill pressure.
 
-### TRC-C36-03 - Color sidecar batch flushing weakens per-image claim ownership
+### TRC-C38-MV-01 - Sidecar backfills can exceed web-process capacity assumptions at the host/database level
 
-- Classification: risk
-- Severity: Low-Medium
+- Classification: manual-validation risk, not a confirmed source defect
+- Severity: Medium
 - Confidence: Medium
-- Region: `apps/web/scripts/backfill-color-pipeline.ts:471-527`; `apps/web/scripts/backfill-color-pipeline.ts:557-603`
-- Failure scenario: each sidecar worker acquires a per-image processing claim, re-encodes, pushes its row into global `updateBatch` / `derivativeBatch`, then calls `flushBatch()` before releasing its claim. Because those batches are process-global, worker A can splice and persist worker B's queued row. Worker B can then see no pending update in its own `flushBatch()`, return, and release B's per-image claim while worker A's transaction is still updating B. Current global color-backfill locking and processed-row filters make the practical blast radius low, but the code no longer strictly guarantees that the worker holding an image's claim also holds it until that image's DB persistence is complete.
-- Suggested fix: make `flushBatch()` operate on caller-owned items, or attach per-item completion/release callbacks so a row's claim cannot be released until the transaction that includes that row has committed and deleted-mid-reencode cleanup has been scheduled. Add a concurrency regression with two workers where one flushes the other's item and assert the second claim remains held through commit.
+- Region: `apps/web/src/db/index.ts:31-42`; `apps/web/scripts/backfill-color-pipeline.ts:349-420`; `apps/web/scripts/backfill-clip-embeddings.ts:114-130` and `195-238`; `apps/web/scripts/backfill-alt-text.ts:55-158`
+- Failure scenario: sidecar scripts run in a separate Node process and create their own MySQL pool from the same `src/db` module. Their advisory locks prevent duplicate sidecars and block restore, and per-image locks coordinate color re-encode with queue processing, but the web app's pool-reserve arithmetic does not bound total MySQL connections across processes. A production operator running color backfill, CLIP backfill, or alt-text backfill while the web app is busy can therefore double-count DB capacity at the host level. This depends on MySQL `max_connections`, host CPU/RSS, and operator scheduling, so it needs production/manual validation.
+- Concrete fix: add an operator preflight for sidecars that checks live DB capacity (`max_connections`, current connection count, and maybe active web queue/backfill state) before starting, or implement a cross-process DB budget/lease table distinct from the per-task advisory locks. Document sidecar concurrency as host-wide, not only script-local, and default production sidecars to low-traffic windows unless the preflight passes.
 
-## Cross-File Interactions Cleared
+## Competing Hypotheses Resolved
 
-- Restore/import path: `restoreDatabase()` acquires restore, upload-contract, color-backfill, semantic-backfill, and alt-text locks before setting durable maintenance; it then drains shared-group view counts, image queue, background DB writes, maintenance sweeps, and admin mutation slots before import. No new restore-over-live-write defect was found.
-- Migration path: `migrate.js` still separates pending migrations from drift, refuses unsafe DML baselining, reconciles fresh DBs, and asserts all journal hashes after Drizzle migrate. No new schema cursor/hash defect was found.
-- Public rate-limit path: public search, similar search, OG, feed, load-more, and view-recording flows pre-increment or check rate limits before expensive DB/processing work in the inspected routes/actions.
-- Privacy selectors: public data, map data, search enrichment, and semantic/similar enrichment continue to use explicit sensitive-field omissions plus compile/source tests. No new GPS/original filename leak was found.
-- Upload/delete path: browser upload, LR upload, queue processing, delete, deleted-mid-processing cleanup, and pending file deletions remain fenced by restore checks/locks and durable retry rows in the inspected source.
+- Previous sidecar batch-flush ownership concern rechecked: I do not carry it as a cycle-38 finding. In `backfill-color-pipeline.ts`, JavaScript runs each worker's push into the process-global batch and entry into `flushBatch()` synchronously until the first `await`; `flushBatch()` immediately splices the batch before awaiting DB work. That means another worker cannot later splice an item that the first worker has already handed to its own in-flight transaction, and the per-image claim is released in that worker's `finally` after its awaited flush path. I found no confirmed claim-release-before-persist race there.
+- Restore/delete stale-ledger concern rechecked: `deleteImage` and `deleteImages` insert `pending_file_deletions` rows before deleting image rows, then `cleanupPendingFileDeletion()` removes the ledger only after all file deletes succeed (`apps/web/src/app/actions/images.ts:678-728`, `809-917`; `apps/web/src/lib/pending-file-deletions.ts:82-138`). Restore drains pending file deletions after clearing maintenance and the hourly scheduler retries (`db-actions.ts:720-731`; `maintenance-scheduler.ts:35-50`). Failures can leave retry rows temporarily, but that is the intended durable retry state.
+
+## Cross-Flow Invariants Cleared
+
+- Restore/import ordering: `restoreDatabase()` acquires restore, upload-processing contract, color-backfill, semantic-backfill, and alt-text locks before beginning durable maintenance, then drains shared-group view counts, image queue, background DB writes, maintenance sweeps, and admin mutations before import (`apps/web/src/app/[locale]/admin/db-actions.ts:470-667`). I found no restore-over-live-write path in the inspected source.
+- Upload admission: browser and LR uploads both re-check restore state, hold an admin mutation slot for the mutation window, acquire the upload-processing contract lock before topic/save/insert/enqueue, and settle upload quota claims on early failures (`actions/images.ts:87-610`; LR route `85-430` and later post-save block).
+- Public/admin privacy: public image selectors explicitly omit sensitive fields and carry compile-time guards (`data.ts:251-488`, `1590-1626`). Semantic/similar search enrichment uses shared compile-guarded fields and strips scores before response (`search-enrichment-fields.ts:29-47`; semantic route `330-368`; similar route `241-285`). No new public leak of GPS/original filenames/admin-only pipeline fields was found.
+- Public expensive-route ordering: semantic and similar routes perform same-origin/maintenance checks, then pre-increment the semantic rate limiter before DB-backed mode lookup and embedding scans (`semantic/route.ts:107-184`; `similar/[id]/route.ts:68-131`). No free expensive probe path was found in these routes.
 
 ## Validation Evidence
 
-Fresh commands run:
+Fresh static commands included:
 
 ```bash
-git status --short
-git log --oneline --decorate -8
-git show --show-signature -s --format='%h %G? %GS%n%B' HEAD
-rg --files ...
-rg -n "withAdminAuth|requireSameOriginAdmin|preIncrement|isRestoreMaintenanceActive|..." apps/web/src apps/web/scripts scripts apps/web/nginx
+git rev-parse --short HEAD && git status --short
+rg --files apps/web/src/app apps/web/src/lib apps/web/scripts apps/web/drizzle apps/web/e2e apps/web/src/__tests__
+rg -n "requireNoRestoreMaintenance|requireSameOriginAdmin|withAdminAuth|trackAdminMutation|withAdminMutationSlot|assertNoDurableRestoreMaintenanceForScript|beginDurableRestoreMaintenance|drainPendingFileDeletions|GET_LOCK|RELEASE_LOCK|semantic|similar|adminSelectFields|publicSelectFields|PrivacySensitive|pending_file_deletions|queueImageProcessing|bootstrapMissingActiveEmbeddings|storeImageEmbeddingForMode" apps/web/src/app apps/web/src/lib apps/web/scripts apps/web/drizzle apps/web/src/__tests__
+find apps/web/src/app/actions apps/web/src/app/api apps/web/src/lib apps/web/scripts apps/web/drizzle apps/web/e2e apps/web/src/__tests__ -type f | wc -l
 ```
 
-Observed:
-
-- Worktree was clean before this report edit.
-- `HEAD` and `origin/master` both pointed at signed commit `c62c8c1e`.
-- The previous C35 nginx public-limiter documentation mismatch is fixed in `CLAUDE.md:248` and `apps/web/nginx/default.conf:274-295`.
+No automated test suite was run because this was a review-only lane with no production-code changes. The validation evidence is static tracing and exact code-region inspection.
 
 ## Final Missed-Issue Sweep
 
-Explicitly swept: restore races, untracked background writes, upload/LR restore admission, delete/processing orphan windows, migration drift/baseline hazards, public API rate-limit order, admin action origin/mutation barriers, semantic-search activation gates, CLIP model-version reads/writes, service-worker cached-image freshness, Docker deploy/prune guarantees, nginx catch-all routing, and public privacy field leakage.
+Final sweep covered restore locks/drains/finalizers, upload and LR upload restore windows, queue processing and deleted-mid-processing cleanup, pending deletion retry state, in-app and sidecar backfills, semantic activation/model-version paths, CLIP inference queue ownership, public route rate-limit ordering, public/admin selector privacy, admin mutation barriers, advisory-lock release patterns, migration/journal schema surfaces, and relevant regression tests.
 
-Skipped or sampled: historical archive reviews/plans, binary fixtures/assets, runtime upload/resource/backups directories, `.next`, `node_modules`, and live production host state. No browser, deployment, production DB, nginx reload, or CLIP real-weight smoke was performed in this review-only lane.
+Skipped files: no tracing-relevant source file from the keyword inventory was intentionally skipped. Non-relevant or non-source artifacts were skipped: binary/static assets, runtime upload/resource/backups directories, `.next`, `node_modules`, and live production host/database state. No deployment, browser, nginx reload, production DB inspection, or real CLIP-weight smoke was performed.

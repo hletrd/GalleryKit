@@ -426,7 +426,7 @@ export function UploadDropzone({
                     enforced for real — useDropzone({ disabled }) already drops
                     the root onClick/onKeyDown and the tabIndex when disabled
                     (verified: tabIndex=undefined, handlers removed) and the
-                    inner <input> is disabled. The cursor was the one dishonest
+                    inner file input is disabled. The cursor was the one dishonest
                     cue: an unconditional base `cursor-pointer` raced the
                     disabled-branch `cursor-not-allowed` (equal Tailwind
                     specificity → source-order-independent winner). Cursor is
@@ -444,7 +444,7 @@ export function UploadDropzone({
                         ${uploading || !hasTopics ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-primary/50 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'}
                     `}
                 >
-                    <input {...getInputProps()} disabled={uploading || !hasTopics} />
+                    <input type="file" {...getInputProps()} disabled={uploading || !hasTopics} />
                     <UploadCloud className="h-10 w-10 text-muted-foreground mb-4" />
                     <p className="text-lg font-medium">{t('upload.dragDrop')}</p>
                     <p className="text-sm text-muted-foreground">{t('upload.orClick')}</p>

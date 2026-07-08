@@ -335,7 +335,9 @@ export async function searchImagesAction(query: string): Promise<SearchImagesRes
 // same-origin admin auth — they are intentionally public, rate-limited, and
 // validate targets before durable writes.
 // Bot views are recorded with bot=true and excluded from public-facing counts.
-// Full IPs are never stored; only country_code derived from the IP.
+// View event rows never store full IPs; only country_code derived from the IP.
+// The durable rate-limit bucket may temporarily keep the raw client IP as an
+// abuse-control key until the bucket retention/prune window expires.
 // ---------------------------------------------------------------------------
 
 // C9RPF-MED-01: in-memory per-IP rate limit for analytics view-recording
