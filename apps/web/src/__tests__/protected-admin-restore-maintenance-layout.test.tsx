@@ -87,7 +87,9 @@ describe('protected admin restore-maintenance layout gate', () => {
         const result = await AdminLayout({ children: child });
 
         expect(result.props.children[0]).toBeNull();
-        expect(result.props.children[1].props.children).toBe(child);
+        // The admin <main> wraps its children in a centered max-width container
+        // (`mx-auto`), so the child sits one level deeper than the <main>.
+        expect(result.props.children[1].props.children.props.children).toBe(child);
         expect(mocks.getCurrentUser).not.toHaveBeenCalled();
     });
 });

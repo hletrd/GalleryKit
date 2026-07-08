@@ -31,8 +31,13 @@ export default async function AdminLayout({
                 the global "Skip to content" link pointing at nothing on every
                 admin page. The admin layout therefore renders NO separate skip
                 link (the global one is the single source of truth). */}
-            <main id="main-content" tabIndex={-1} className="flex-1 w-full py-6 px-4 overflow-auto focus:outline-none">
-                {children}
+            <main id="main-content" tabIndex={-1} className="flex-1 w-full overflow-auto focus:outline-none">
+                {/* Center the admin content in a responsive max-width container
+                    (matches the public site's `container mx-auto`) instead of
+                    letting it span the full viewport width on wide monitors. */}
+                <div className="container mx-auto py-6 px-4">
+                    {children}
+                </div>
             </main>
         </div>
     );
