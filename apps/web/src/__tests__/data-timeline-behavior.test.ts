@@ -54,7 +54,42 @@ vi.mock('@/db', () => ({
     tags: mocks.tableProxy('tags'),
 }));
 
-import { getYearInReviewImages } from '@/lib/data-timeline';
+import { archiveRange, getYearInReviewImages } from '@/lib/data-timeline';
+
+describe('data-timeline.ts — archiveRange month boundary', () => {
+    // Cycle 10b AGG-C10b-06 (code-reviewer F1): the December (month === 12) wrap
+    // must roll BOTH endYear and endMonth over, otherwise a per-month December
+    // archive query binds an invalid `YYYY-13-01 00:00:00` MySQL DATETIME and
+    // silently returns zero rows (or errors). Currently dormant (no caller passes
+    // `month` today), so this pins the range values before a per-month view wires it.
+    it('wraps December (month 12) to January of the next year', () => {
+        expect(archiveRange(2025, 12)).toEqual({
+            start: '2025-12-01 00:00:00',
+            end: '2026-01-01 00:00:00',
+        });
+    });
+
+    it('advances a mid-year month to the next month, same year', () => {
+        expect(archiveRange(2025, 6)).toEqual({
+            start: '2025-06-01 00:00:00',
+            end: '2025-07-01 00:00:00',
+        });
+    });
+
+    it('spans the whole year when month is omitted', () => {
+        expect(archiveRange(2025)).toEqual({
+            start: '2025-01-01 00:00:00',
+            end: '2026-01-01 00:00:00',
+        });
+    });
+
+    it('zero-pads single-digit months on both bounds', () => {
+        expect(archiveRange(2025, 1)).toEqual({
+            start: '2025-01-01 00:00:00',
+            end: '2025-02-01 00:00:00',
+        });
+    });
+});
 
 describe('data-timeline.ts — getYearInReviewImages behavior', () => {
     beforeEach(() => {

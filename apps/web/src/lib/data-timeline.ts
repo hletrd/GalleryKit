@@ -90,10 +90,13 @@ function padDatePart(value: number): string {
     return String(value).padStart(2, '0');
 }
 
-function archiveRange(year: number, month?: number): { start: string; end: string } {
+export function archiveRange(year: number, month?: number): { start: string; end: string } {
     const startMonth = month ?? 1;
     const endYear = month === undefined || month === 12 ? year + 1 : year;
-    const endMonth = month === undefined ? 1 : month + 1;
+    // December (month === 12) must wrap to January of the next year — endYear
+    // already advances above, so endMonth must reset to 1 too (otherwise a
+    // per-month December range would emit an invalid `YYYY-13-01` DATETIME).
+    const endMonth = month === undefined || month === 12 ? 1 : month + 1;
     return {
         start: `${year}-${padDatePart(startMonth)}-01 00:00:00`,
         end: `${endYear}-${padDatePart(endMonth)}-01 00:00:00`,
