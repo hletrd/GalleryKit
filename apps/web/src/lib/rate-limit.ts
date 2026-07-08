@@ -173,6 +173,19 @@ export function getTrustedProxyHopCount(value: string | undefined = process.env.
 }
 
 export function getClientIp(headerStore: HeaderLike): string {
+    // TEMP-CLIENTIP-DIAG (remove after diagnosis): privacy-safe — logs header
+    // PRESENCE/shape only, never the actual IP. Gated on a request header so
+    // only an explicit probe triggers it.
+    if (headerStore.get('x-clientip-diag') === '1') {
+        const xff = headerStore.get('x-forwarded-for') || '';
+        console.error('[CLIENTIP-DIAG]', JSON.stringify({
+            trust: process.env.TRUST_PROXY ?? '(unset)',
+            hops: process.env.TRUSTED_PROXY_HOPS ?? '(unset)',
+            hasXff: !!xff,
+            xffParts: xff ? xff.split(',').filter(Boolean).length : 0,
+            hasXReal: !!headerStore.get('x-real-ip'),
+        }));
+    }
     // Only trust proxy headers when TRUST_PROXY is explicitly set.
     // Without it, an attacker can spoof X-Forwarded-For to bypass rate limits.
     if (process.env.TRUST_PROXY === 'true') {
