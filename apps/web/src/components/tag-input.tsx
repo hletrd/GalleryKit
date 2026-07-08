@@ -215,7 +215,7 @@ export function TagInput({
                             type="button"
                             disabled={disabled}
                             onClick={(e) => { e.stopPropagation(); removeTag(tag); }}
-                            className="inline-flex size-6 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 opacity-70 hover:opacity-100 transition-all shrink-0"
+                            className="ml-1 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full hover:bg-destructive hover:text-destructive-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 opacity-70 hover:opacity-100 transition-all shrink-0"
                             aria-label={t('aria.removeTag', { tag })}
                         >
                             <X className="h-3 w-3" />
