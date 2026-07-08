@@ -1,98 +1,104 @@
-# Cycle 25 Code Reviewer Report
+# Run-10 Cycle 34 Code Reviewer Report
 
 Date: 2026-07-08 KST
-Review HEAD: `7c0c4db810cc2b99c8d221eb4f74512e3e710adc`
+Review HEAD: `5124d17ec6bf801f302c180cabf6a58539d892c5`
 Role: code-reviewer lane
-Scope: deep whole-repo review for code quality, logic correctness, maintainability, SOLID boundaries, data flow, races, shared state, error handling, invalid assumptions, and cross-file interactions. Product code was not edited.
+Scope: comprehensive whole-repository code-quality, logic, maintainability, race/shared-state, error-handling, invariant, and cross-file interaction review. Product code was not edited.
 
 ## Inventory
 
-Relevant tracked inventory was built before source inspection, excluding generated/runtime payloads. The review covered 3,527 tracked files, including 626 TypeScript/TSX source files, 12 App Router route handlers, 14 server-action files, 115 shared library files, 31 operational scripts, 34 migration/meta files, 373 tests, and the root/project docs.
+Authority and context read first: `AGENTS.md`, `CLAUDE.md`, the current review target, and the existing `.context/reviews/code-reviewer.md` baseline.
 
-Docs and authority read: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, current plan/deferred history relevant to sidecars, restore, image processing, semantic search, and deployment.
+Relevant tracked code inventory reviewed:
 
-High-risk source areas examined in detail: admin/browser/LR upload ingestion, image queue, color backfill sidecar and in-app runner, gallery config accessors, restore/backup maintenance, DB pool/advisory locks, rate limiting, admin auth, semantic/similar search, public data projections, storage, background DB writes, pending cleanup queues, migrations, and source-contract tests.
+- 692 tracked implementation/operations files in the active review set: `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/nginx`, `apps/web/docker-compose.yml`, `apps/web/next.config.ts`, and `scripts/check-proxy-topology.mjs`.
+- 624 tracked TypeScript/TSX source files under `apps/web/src`: 80 `app` files, 61 component files, 115 library files, 3 DB files, 1 i18n file, 1 type file, and 364 tests.
+- 67 tracked operational/schema/config files outside `src`: 29 scripts, 34 migration/meta files, nginx config, Docker Compose, Next config, and the proxy-topology checker.
 
-## Findings
+High-risk cross-file areas examined in detail: admin auth/API wrappers, mutating server-action origin and mutation barriers, public route rate limits, semantic/similar search admission, public data privacy projections, smart collections, topic routes, restore/backup maintenance, background DB writers, pending cleanup queues, image-processing queue, color re-encode backfill, advisory locks, DB pool budgeting, upload/original-file path safety, nginx/proxy assumptions, migration baselining, and source-contract tests.
 
-### CR25-01: Color re-encode write paths fail open to default settings when `admin_settings` cannot be read
+Intentionally not reviewed as source: `node_modules`, build outputs, runtime uploads/backups, and historical `.context` plans/reviews except where they documented current invariants or prior findings. Final sweep checked that no relevant tracked implementation/config path in the inventory above was skipped.
 
-Severity: High
-Confidence: High
-Status: Confirmed correctness/data-quality risk
+## Confirmed Issues
 
-Code regions:
-
-- `apps/web/src/lib/gallery-config.ts:168-184`
-- `apps/web/src/lib/gallery-config.ts:219-237`
-- `apps/web/src/lib/admin-backfill-runner.ts:701-714`
-- `apps/web/src/lib/admin-backfill-runner.ts:615-629`
-- `apps/web/scripts/backfill-color-pipeline.ts:355-368`
-- `apps/web/scripts/backfill-color-pipeline.ts:466-492`
-
-`_getGalleryConfig()` catches any settings-read error, logs a warning, and returns defaults (`gallery-config.ts:168-175`). `getGalleryConfigDetached()` calls that same fail-open helper (`gallery-config.ts:219-237`). Both color re-encode writers then use the resolved values to select quality, size, chroma, color-conversion, effort, and wide-gamut limits: the in-app runner at `admin-backfill-runner.ts:701-714`, and the sidecar at `backfill-color-pipeline.ts:355-368`. On success, both persist new derivative metadata and can advance `pipeline_version` to the current version (`admin-backfill-runner.ts:615-629`, `backfill-color-pipeline.ts:466-492`).
-
-Concrete failure scenario:
-
-An admin starts "Re-encode existing photos" or an operator runs `scripts/backfill-color-pipeline.ts` during a transient `admin_settings` read failure. Instead of aborting like upload/retry ingest paths do with `getGalleryConfigStrict`, the re-encode proceeds with default quality/sizes/color policy. The newly written derivative files can be produced with the wrong processing contract, and rows are marked current with `pipeline_version = IMAGE_PIPELINE_VERSION`, so normal backfill retry logic will not revisit them. This is especially risky for photographer-intent settings such as forced sRGB derivatives, JPEG chroma, AVIF effort, and configured image sizes.
-
-Suggested fix:
-
-Add a strict detached accessor, or call `getGalleryConfigStrict()` from both re-encode write paths after the shared backfill lock/restore guard and before any row work. If settings cannot be read, release the lock and fail the run without writing derivatives or advancing `pipeline_version`. Update the source-contract test that currently expects the sidecar to call `getGalleryConfig()` and add behavior tests that mock settings-read failure for both in-app and sidecar paths and assert no encode/update occurs.
-
-### CR25-02: Image queue and admin backfill each reserve live DB headroom independently, so running both can nearly saturate the shared pool
+### CR34-01: Image queue and admin backfill each reserve live DB headroom independently, so running both can nearly saturate the shared pool
 
 Severity: Medium
 Confidence: High
-Status: Confirmed resource/race risk, already documented but not fixed
+Status: Confirmed resource/race risk
 
 Code regions:
 
 - `apps/web/src/db/index.ts:31-42`
 - `apps/web/src/lib/image-queue.ts:121-153`
 - `apps/web/src/lib/admin-backfill-runner.ts:106-143`
-- `apps/web/src/lib/admin-backfill-runner.ts:324-378`
-- `CLAUDE.md:269-284`
+- `apps/web/src/lib/admin-backfill-runner.ts:716-727`
+- `CLAUDE.md:272-285`
 
-The app ships with a 10-connection MySQL pool and queue limit 20 (`db/index.ts:31-42`). `resolveImageQueueConcurrency()` reserves `max(3, ceil(pool / 2))` for live traffic and caps the queue independently (`image-queue.ts:121-153`). `resolveBackfillConcurrency()` performs similar arithmetic for the admin color backfill, including one global lock plus per-image claim connections (`admin-backfill-runner.ts:106-143`, `admin-backfill-runner.ts:324-378`). The formulas do not coordinate with each other. `CLAUDE.md:269-284` explicitly documents the same mutual over-subscription window, but the code still has no shared background budget.
+Evidence:
 
-Concrete failure scenario:
+The app ships with `POOL_CONNECTION_LIMIT = 10` and `queueLimit: 20` (`db/index.ts:31-42`). `resolveImageQueueConcurrency()` reserves `max(3, ceil(pool / 2))` for live traffic and caps the image queue in isolation (`image-queue.ts:121-153`). `resolveBackfillConcurrency()` uses a similar isolated formula for admin color backfill, including the global backfill lock plus per-image claim/update connections (`admin-backfill-runner.ts:106-143`), and the runner applies that cap when starting the PQueue (`admin-backfill-runner.ts:716-727`). `CLAUDE.md:272-285` documents that these two background consumers do not subtract each other, but the code still has no shared budget, pause, or semaphore between them.
 
-With the default pool of 10, an active upload queue at effective concurrency 2 and an admin-triggered color re-encode at effective concurrency 2 can overlap because they use different locks. The backfill can pin about 1 global lock plus 2 workers times 2 connections, while the upload queue can pin 2 workers times 2 connections. That leaves roughly 1 free connection, not the 5 live connections each resolver claims to reserve. A live photo page or search request that fans out several DB queries can then queue behind encode-duration connection holds and hit the pool `queueLimit` under ordinary admin maintenance plus upload activity.
+Failure scenario:
 
-Suggested fix:
+On the default 10-connection pool, an active upload/image-processing queue at effective concurrency 2 and an admin-triggered color re-encode at effective concurrency 2 can overlap because they use different locks. The backfill can pin roughly 1 global lock plus 2 workers times 2 connections, while the image queue can pin 2 workers times 2 connections. That leaves about one free pool connection, not the five live connections each formula independently claims to reserve. A live photo page, topic page, search, or admin view with DB fan-out can then queue behind encode-duration holds and hit the pool `queueLimit` under normal maintenance plus upload activity.
 
-Introduce a single background DB budget/semaphore shared by image queue processing and admin color backfill, or make backfill startup quiesce/pause the upload queue before it begins. The invariant should be "all background processing combined leaves live headroom", not "each background processor leaves live headroom in isolation." Add a regression/source-contract test that proves queue concurrency plus backfill concurrency cannot exceed the shared pool budget at `POOL_CONNECTION_LIMIT = 10`.
+Concrete fix:
 
-### CR25-03: Restore temp-file ownership is transferred before `spawn()` is known to have succeeded
+Introduce a single shared background DB connection budget for all long-running background processors, or make admin backfill explicitly quiesce/pause the image-processing queue before it starts. The invariant should be "combined background work leaves live headroom" rather than "each background worker class leaves live headroom in isolation." Add a regression/source-contract test that proves `imageQueueBudget + backfillBudget + long-held locks` cannot exceed the shared pool budget at `POOL_CONNECTION_LIMIT = 10`.
 
-Severity: Low
+## Likely Issues
+
+No likely-but-unconfirmed code defects were retained after the final sweep. Older Cycle 25 findings for fail-open color config and restore temp-file cleanup were rechecked against current code and are no longer current: the re-encode paths now call strict detached config accessors, and `runRestore()` transfers temp-file cleanup only after `spawn()` returns and handlers are registered.
+
+## Manual-Validation Risks
+
+### CR34-MV01: Effective per-client rate-limit identity still depends on deployed proxy topology
+
+Severity: Medium
 Confidence: Medium
-Status: Edge-case cleanup leak
+Status: Manual-validation risk, not a confirmed repository-code defect
 
-Code regions:
+Code/config regions:
 
-- `apps/web/src/app/[locale]/admin/db-actions.ts:887-900`
-- `apps/web/src/app/[locale]/admin/db-actions.ts:977-980`
+- `apps/web/src/lib/rate-limit.ts:175-216`
+- `apps/web/nginx/default.conf:1-29`
+- `apps/web/nginx/default.conf:59-71`
+- `scripts/check-proxy-topology.mjs:12-16`
+- `scripts/check-proxy-topology.mjs:131-133`
+- `CLAUDE.md:97-98`
+- `CLAUDE.md:248`
+- `CLAUDE.md:753`
 
-`runRestore()` sets `cleanupTransferredToRestoreProcess = true` immediately before constructing the `spawn('mysql', ...)` promise (`db-actions.ts:887-900`). The `finally` block only unlinks the uploaded temporary SQL file when that flag is false (`db-actions.ts:977-980`). In the common failure mode where `spawn` emits an `error`, the child-process handler performs cleanup. But if `spawn()` throws synchronously before handlers are attached, ownership has already been marked transferred and the fallback cleanup is skipped.
+Evidence:
 
-Concrete failure scenario:
+App-side rate limiting trusts `X-Forwarded-For`/`X-Real-IP` only when `TRUST_PROXY=true`; otherwise `getClientIp()` returns the shared key `"unknown"` and logs once (`rate-limit.ts:175-216`). The shipped nginx limiter keys on `$binary_remote_addr` (`default.conf:1-29`) and the config comments correctly warn that this is only the true client IP when nginx sees the real client as its TCP peer; in an upstream LB/CDN topology, operators must configure real-IP/PROXY protocol for nginx and adjust XFF/hop behavior (`default.conf:59-71`). The repo includes a read-only `check:proxy-topology` script, but its own help/output says it verifies forwarded host/proto spoof resistance and explicitly does not verify the effective client-IP bucket or XFF overwrite (`check-proxy-topology.mjs:12-16`, `131-133`). Running `npm run check:proxy-topology` locally without `--url` / `PROXY_TOPOLOGY_URL` failed before any live validation.
 
-A malformed runtime environment or unexpected Node child-process option failure causes `spawn()` to throw synchronously. The restore reports failure, but the temp SQL file remains in the OS temp directory because the outer `finally` believes cleanup belongs to the restore process.
+Failure scenario:
 
-Suggested fix:
+If production is behind a CDN or load balancer and nginx still sees only the upstream peer, nginx `limit_req_zone $binary_remote_addr` buckets all visitors together. If app `TRUST_PROXY`/`TRUSTED_PROXY_HOPS` does not match the real chain, app-layer login/search/share/semantic buckets can also collapse to a shared key or select the wrong hop. A small number of failed logins or public requests from one client can then throttle unrelated users, while spoofed or mis-selected forwarding chains weaken per-client limits.
 
-Move `cleanupTransferredToRestoreProcess = true` until after `spawn()` returns and error/close handlers are registered, or wrap `spawn()` in its own `try` that resets the flag before rethrowing. Add a small unit test that mocks synchronous `spawn` failure and asserts the temp file cleanup path is still taken.
+Concrete validation/fix:
 
-## Missed-Issue Sweep
+On the deployed host, run `npm run check:proxy-topology -- --url <public-origin> [--direct-url <direct-app-url>]` for forwarded host/proto resistance, then verify real-IP behavior with edge logs or a diagnostic that exposes only the effective bucket key class, not raw secrets. If an LB/CDN is in front, configure nginx `set_real_ip_from`/`real_ip_header` or PROXY protocol so `$binary_remote_addr` reflects the client, switch XFF handling to append mode where appropriate, and set `TRUSTED_PROXY_HOPS` to the real trusted-hop count.
 
-- Searched all config accessor call sites. Request/page/route reads mostly use cached `getGalleryConfig()`, upload/retry ingest uses strict accessors, and the re-encode paths above are the write-path fail-open exceptions.
-- Searched advisory locks, `PQueue`, concurrency formulas, and DB pool usage. The unshared image-queue/admin-backfill pool budget is the remaining concrete saturation issue found.
-- Searched raw SQL, `sql.raw`, and password/secret handling. No untrusted string-concatenated SQL or unsanitized DB-password logging issue was confirmed in this pass.
-- Checked runtime/export shape for route handlers and mutating server actions against the documented lint contracts. No new missing auth/origin/rate-limit issue was confirmed.
-- Reviewed restore maintenance fencing, durable marker checks, background DB write draining, pending deletion/session queues, and sidecar restore guards. Only the restore temp ownership edge case above was confirmed.
+## Missed-Issue / File-Skip Sweep
+
+- Re-ran the custom guard scripts: API admin routes are wrapped by `withAdminAuth`, mutating server actions enforce same-origin and mutation-barrier contracts, and public route handlers have the required rate-limit posture or explicit exemption.
+- Reviewed restore sequencing across durable maintenance, upload-processing contract lock, backfill locks, image queue quiesce/resume, background DB drains, maintenance sweep drain, admin mutation drain, temp-file cleanup, child-process watchdogs, and post-restore migrations. No current restore data-corruption or temp-file ownership issue was confirmed.
+- Reviewed public data projection guards in `data.ts`/`data-timeline.ts`, semantic/similar route output shaping, and smart collection query compilation. No confirmed privacy field leak, SQL injection path, or unbounded public query path was found.
+- Reviewed advisory lock call sites and the raw `RELEASE_LOCK` allowlist. Fail-fast pooled lock paths use the shared destroy-on-ambiguous-acquire / destroy-on-release-failure helpers; script-only raw releases remain allowlisted by source-contract tests.
+- Reviewed upload/original-file path handling, derivative cleanup, pending file deletions, and serve-upload path safety. No confirmed traversal/symlink cleanup issue was found.
+- Reviewed migration journal/baseline contracts and current drizzle files. No confirmed journal ordering, DML-baseline, or reconcile parity issue was found in this pass.
 
 ## Verification
 
-This was a read-only review plus report write. I did not run the full quality gates because the task was a code review and no product code changed. Static inventory and targeted source sweeps were run with `rg`, `git ls-files`, and line-numbered reads. Current recommendation: request changes for CR25-01 before treating color re-encode maintenance as fail-closed.
+Commands run:
+
+- `npm run lint:api-auth --workspace=apps/web` — passed.
+- `npm run lint:action-origin --workspace=apps/web` — passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` — passed.
+- `npm test --workspace=apps/web -- --run src/__tests__/rate-limit.test.ts src/__tests__/nginx-config.test.ts src/__tests__/restore-drain-checklist.test.ts src/__tests__/advisory-lock-release-contract.test.ts src/__tests__/admin-backfill-runner-batching.test.ts src/__tests__/image-queue-r10c1-contracts.test.ts` — 6 files / 61 tests passed.
+- `npm run check:proxy-topology` — not completed because no `--url` / `PROXY_TOPOLOGY_URL` was provided; retained as manual-validation risk only.
+
+No implementation was performed. The only reportable confirmed code issue from this pass is CR34-01; CR34-MV01 requires live deployment validation.
