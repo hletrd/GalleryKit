@@ -25,6 +25,7 @@
     "lint:api-auth": "tsx scripts/check-api-auth.ts",
     "lint:action-origin": "tsx scripts/check-action-origin.ts",
     "lint:public-route-rate-limit": "tsx scripts/check-public-route-rate-limit.ts",
+    "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "typecheck:app": "node scripts/typecheck-app.mjs",
     "typecheck:scripts": "npm run check:js-scripts && tsc -p tsconfig.scripts.json --noEmit"
   },

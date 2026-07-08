@@ -7,7 +7,16 @@ const ROOT = resolve(__dirname, '..', '..', '..', '..');
 describe('cycle 12 operational proof surfaces', () => {
     it('keeps production dependency audit in the default quality workflow', () => {
         const quality = readFileSync(resolve(ROOT, '.github/workflows/quality.yml'), 'utf8');
-        expect(quality).toContain('npm audit --workspace=apps/web --omit=dev --audit-level=moderate');
+        const rootPackage = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8')) as {
+            scripts: Record<string, string>;
+        };
+        const webPackage = JSON.parse(readFileSync(resolve(ROOT, 'apps/web/package.json'), 'utf8')) as {
+            scripts: Record<string, string>;
+        };
+
+        expect(quality).toContain('npm run audit:prod');
+        expect(rootPackage.scripts['audit:prod']).toBe('npm audit --workspace=apps/web --omit=dev --audit-level=moderate');
+        expect(webPackage.scripts['audit:prod']).toBe('npm audit --omit=dev --audit-level=moderate');
     });
 
     it('pins Docker production bases to the reviewed node:24-slim digest', () => {

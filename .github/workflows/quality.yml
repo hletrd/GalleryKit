@@ -64,7 +64,7 @@ jobs:
           npm run lint:public-route-rate-limit
 
       - name: Production dependency audit
-        run: npm audit --workspace=apps/web --omit=dev --audit-level=moderate
+        run: npm run audit:prod
 
       - name: Unit tests
         run: npm test

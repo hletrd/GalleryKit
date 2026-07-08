@@ -35,6 +35,7 @@ This file is the canonical short-form reference for AI agents and contributors. 
 - `npm run typecheck --workspace=apps/web` — `typecheck:app` (tsc against `tsconfig.typecheck.json`, which INCLUDES `src/__tests__/`) + `typecheck:scripts`; test-file type errors only surface here, not through the build
 - `npm run build --workspace=apps/web` — Next.js + tsc
 - `npm test --workspace=apps/web` — Vitest 3000+ unit tests including the touch-target audit (≥ 44 px) and the `_PrivacySensitiveKeys` symmetric privacy guard
+- `npm run audit:prod` — production dependency audit (`npm audit --workspace=apps/web --omit=dev --audit-level=moderate`), matching CI's blocking "Production dependency audit" step
 - `npm run test:e2e --workspace=apps/web` — Playwright end-to-end tests in `apps/web/e2e/` when browser-flow coverage is required
 
 ## Plans, reviews, conventions

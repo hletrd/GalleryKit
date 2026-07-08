@@ -680,6 +680,7 @@ The repository has a formal test surface:
 - `CLIP_MODELS_ROOT=<abs-models-root> npm run test:clip:preflight --workspace=apps/web` — real CLIP offline-load + ranking proof before production semantic-search activation
 - `npm run lint --workspace=apps/web` — ESLint
 - `npm run typecheck --workspace=apps/web` — blocking type gate: `typecheck:app` (tsc against `tsconfig.typecheck.json`, which INCLUDES `src/__tests__/`) + `typecheck:scripts` (JS script checker). Production builds embed the app config, but test-file type errors only surface through this command — run it before committing test changes.
+- `npm run audit:prod` — blocking production dependency audit, equivalent to CI's `npm audit --workspace=apps/web --omit=dev --audit-level=moderate` step.
 
 **i18n plural convention (DOC-R5C3-07):** the i18n key-parity check requires the SAME key set in `en.json` and `ko.json`, but the VALUE shape may differ by language. English count strings use ICU plural syntax (`{count, plural, one {# photo} other {# photos}}`); Korean uses a single fixed form (`{count}장`) with no `plural` block — Korean has no grammatical plural, so an ICU `plural` wrapper would be redundant noise. This asymmetry is intentional and expected; do NOT "fix" the ko side to add a `plural` block to match en.
 

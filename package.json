@@ -25,6 +25,7 @@
         "lint:api-auth": "npm run lint:api-auth --workspace=apps/web",
         "lint:action-origin": "npm run lint:action-origin --workspace=apps/web",
         "lint:public-route-rate-limit": "npm run lint:public-route-rate-limit --workspace=apps/web",
+        "audit:prod": "npm audit --workspace=apps/web --omit=dev --audit-level=moderate",
         "check:proxy-topology": "node scripts/check-proxy-topology.mjs",
         "deploy": "./scripts/deploy-remote.sh"
     },

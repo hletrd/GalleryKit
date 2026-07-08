@@ -36,6 +36,7 @@ After the dev server starts, log in at `/en/admin`, review Settings before any r
 | `npm run init` | Apply committed migrations, then seed admin |
 | `npm test` | Vitest unit suite |
 | `npm run typecheck` | Type gate (app + scripts) |
+| `npm run audit:prod` | Production dependency audit (`--omit=dev --audit-level=moderate`) |
 | `npm run test:e2e` | Playwright end-to-end tests |
 | `npm run test:e2e:admin` | Authenticated admin Playwright proof; requires local/remote e2e admin credentials as described below |
 | `CLIP_MODELS_ROOT=<abs-models-root> npm run test:clip:preflight` | Real CLIP offline-load + ranking preflight before production semantic-search activation |

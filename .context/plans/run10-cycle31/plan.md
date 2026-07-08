@@ -1,6 +1,6 @@
 # Run-10 Cycle 31/100 Implementation Plan
 
-Status: IMPLEMENTED - full gates passed; signed push and deploy pending
+Status: IMPLEMENTED - signed pushed as `4a728335`; deploy evidence absent and superseded by Cycle 32
 Aggregate: `.context/reviews/run10-cycle31/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `707470083a27c78e1c9d1da176ade75f94ad6af4`
@@ -88,8 +88,8 @@ Deferred this cycle: none.
 - [x] WP2 terminal-status wording repair.
 - [x] WP3 carry-forward checkpoint label refresh.
 - [x] Required full gates.
-- [ ] Signed commit/push for implementation.
-- [ ] Per-cycle deploy and live smoke.
+- [x] Signed commit/push for implementation.
+- [ ] Per-cycle deploy and live smoke evidence was not committed before Cycle 32; Cycle 32's per-cycle deploy is scheduled to supersede production state for this pushed ledger fix.
 
 ## Gate Evidence
 
@@ -101,3 +101,9 @@ Deferred this cycle: none.
 - Production build passed: `npm run build --workspace=apps/web` (Next.js 16.2.10).
 - Full unit suite passed: `npm test --workspace=apps/web` (361 files passed, 2 skipped; 3389 tests passed, 4 skipped).
 - Browser e2e not run: Cycle 31 changed review/plan ledgers only; no browser-flow behavior changed.
+
+## Terminal Evidence
+
+- Signed implementation commit: `4a728335` (`docs(cycle31): repair review-plan ledgers`) is present on `origin/master`.
+- Push: the Cycle 31 implementation commit is in the committed master lineage before Cycle 32 start HEAD `4a728335ada304371743689de7f5bbf8670985b5`.
+- Deploy/live smoke: no committed Cycle 31 deploy transcript was found during Cycle 32 review. Cycle 32's per-cycle deploy will supersede production evidence for Cycle 31's ledger-only fix and all earlier pushed history.

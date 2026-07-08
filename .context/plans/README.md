@@ -33,8 +33,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 31/100 Implementation Plan - active ledger from Cycle 31 aggregate: repair stale active-cycle index state, close stale Cycle 30 / loop-B Cycle 10b terminal-status wording, refresh the carry-forward checkpoint labels, run full gates, signed push, and per-cycle deploy (`run10-cycle31/plan.md`)
-- Run-10 Cycle 31/100 Deferred Findings - no new Cycle 31 deferrals; earlier deferred rows remain in their authoritative registers and the consolidated carry-forward register (`run10-cycle31/deferred.md`)
+- Run-10 Cycle 32/100 Implementation Plan - active ledger from Cycle 32 aggregate: make Cycle 31 deploy-evidence status honest, align the production dependency audit docs/scripts/CI gate, run full gates, signed push, and per-cycle deploy (`run10-cycle32/plan.md`)
+- Run-10 Cycle 32/100 Deferred Findings - no new Cycle 32 deferrals; earlier deferred rows remain in their authoritative registers and the consolidated carry-forward register (`run10-cycle32/deferred.md`)
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
@@ -45,7 +45,9 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
-- Run-10 Cycle 30/100 Implementation Plan - completed and pushed as signed `f4174c7e`; local gates are recorded green in the plan. Its committed plan lacked deploy evidence before Cycle 31, so Cycle 31's per-cycle deploy supersedes production evidence for the pushed Cycle 30 history (`run10-cycle30/plan.md`)
+- Run-10 Cycle 31/100 Implementation Plan - completed and pushed as signed `4a728335`; local full gates are recorded green in the plan. Its committed plan lacked deploy/live-smoke evidence, so Cycle 32's per-cycle deploy is scheduled to supersede production evidence for the pushed Cycle 31 history (`run10-cycle31/plan.md`)
+- Run-10 Cycle 31/100 Deferred Findings - no new Cycle 31 deferrals (`run10-cycle31/deferred.md`)
+- Run-10 Cycle 30/100 Implementation Plan - completed and pushed as signed `f4174c7e`; local gates are recorded green in the plan. Its committed plan lacked deploy evidence before Cycle 31, and Cycle 31's committed ledger also lacks deploy evidence, so Cycle 32's per-cycle deploy is scheduled to supersede production evidence for the pushed Cycle 30 history (`run10-cycle30/plan.md`)
 - Run-10 Cycle 30/100 Deferred Findings - no new Cycle 30 deferrals (`run10-cycle30/deferred.md`)
 - Run-10 Cycle 10b (loop-B) Implementation Plan - implemented and pushed across signed commits `615398cb`, `bc43633b`, `93ed70f8`, and `70747008`; its committed plan stopped before terminal build/e2e/deploy evidence, so Cycle 31 records that evidence gap instead of treating it as silently closed (`cycle-10b-2026-07-08-plan.md`; "10b" per the 7b/8b/9b precedent)
 - Run-10 Cycle 10b (loop-B) Deferred Findings - grid-picture/WP11 behavioral-test peer-file conflicts, tracer self-healing races, cross-admin PAT feature gap, deleteImages N-insert perf (correctness-sensitive); five D10b rows are folded into the consolidated carry-forward register (`cycle-10b-2026-07-08-deferred.md`)
