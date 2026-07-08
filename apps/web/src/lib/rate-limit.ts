@@ -181,14 +181,17 @@ export function getClientIp(headerStore: HeaderLike): string {
         const parts = xff.split(',').map(p => p.trim()).filter(Boolean);
         const hop = getTrustedProxyHopCount();
         const idx = parts.length - hop;
+        let geoInfo: unknown = 'n/a';
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const geo = require('geoip-lite');
+            geoInfo = { resolved: require.resolve('geoip-lite'), lookup8888: geo.lookup('8.8.8.8')?.country ?? 'NULL' };
+        } catch (e) { geoInfo = { err: (e as Error).message }; }
         console.error('[CLIENTIP-DIAG2]', JSON.stringify({
             trust: process.env.TRUST_PROXY ?? '(unset)',
             hopCount: hop,
-            partsLen: parts.length,
-            clientIndex: idx,
-            pickedRaw: idx >= 0 ? parts[idx] : null,
-            pickedNorm: idx >= 0 ? normalizeIp(parts[idx]) : null,
-            xrealNorm: normalizeIp(headerStore.get('x-real-ip')),
+            picked: idx >= 0 ? normalizeIp(parts[idx]) : null,
+            geo: geoInfo,
         }));
     }
     // Only trust proxy headers when TRUST_PROXY is explicitly set.
