@@ -65,16 +65,17 @@ describe('uploadImages TOCTOU claim ordering (R16C16 CR-16-01)', () => {
         expect(windowSrc).not.toContain('.then(');
     });
 
-    it('settles the claim then re-throws if the topic-exists query throws (R17C17 CR-17-1)', () => {
+    it('settles the claim then returns a structured error if the topic-exists query throws', () => {
         // The topic SELECT sits AFTER the synchronous claim but the outer try is
         // finally-only (no catch), so an un-caught throw there would leak the
         // claim until the ~1 h window expires. Assert the SELECT is wrapped in a
-        // try/catch that settles (0,0) and re-throws — mirroring the disk check.
+        // try/catch that settles (0,0) and returns a normal Server Action error
+        // instead of surfacing an unstructured framework exception.
         const topicQueryIdx = SRC.indexOf('db.select({ slug: topics.slug })');
         expect(topicQueryIdx).toBeGreaterThan(0);
         const after = SRC.slice(topicQueryIdx);
         const catchMatch = after.match(
-            /catch \(err\) \{\s*settleClaim\(0,\s*0\);\s*throw err;\s*\}/,
+            /catch \(err\) \{\s*settleClaim\(0,\s*0\);\s*console\.error\('Failed to verify upload topic before accepting files', err\);\s*return \{ error: t\('failedToVerifyTopic'\) \};\s*\}/,
         );
         expect(catchMatch).not.toBeNull();
     });

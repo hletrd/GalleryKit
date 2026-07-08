@@ -8,6 +8,18 @@ const readApp = (rel: string) => readFileSync(resolve(appRoot, rel), 'utf8');
 const readRepo = (rel: string) => readFileSync(resolve(repoRoot, rel), 'utf8');
 
 describe('cycle 17 maintenance-lock and upload contracts', () => {
+    it('drains in-app admin backfill during graceful shutdown', () => {
+        const runnerSource = readApp('src/lib/admin-backfill-runner.ts');
+        const instrumentationSource = readApp('src/instrumentation.ts');
+
+        expect(runnerSource).toContain('activeRunPromise: Promise<void> | null');
+        expect(runnerSource).toContain('export async function shutdownAdminBackfillRunner()');
+        expect(runnerSource).toContain('const activeRunPromise = runBackfill(lockConnHandoff);');
+        expect(runnerSource).toContain('state.activeRunPromise = activeRunPromise;');
+        expect(instrumentationSource).toContain("const { shutdownAdminBackfillRunner } = await import('@/lib/admin-backfill-runner');");
+        expect(instrumentationSource).toContain('shutdownAdminBackfillRunner()');
+    });
+
     it('destroys pooled advisory-lock sessions when acquisition state is ambiguous', () => {
         const helperSource = readApp('src/lib/advisory-lock-release.ts');
         expect(helperSource).toContain('export function destroyPooledAdvisoryLockConnectionOnAcquireError');
@@ -41,6 +53,10 @@ describe('cycle 17 maintenance-lock and upload contracts', () => {
 
     it('settles Lightroom quota claims when upload storage setup fails', () => {
         const source = readApp('src/app/api/admin/lr/upload/route.ts');
+        expect(source).toContain("import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';");
+        expect(source).toContain('using mutationSlot = acquireAdminMutationSlot();');
+        expect(source).toContain('if (!mutationSlot.acquired)');
+
         const ensureIdx = source.indexOf('await ensureUploadDirectories()');
         const failureWindow = source.slice(ensureIdx, ensureIdx + 700);
 
@@ -64,6 +80,22 @@ describe('cycle 17 sidecar backfill contracts', () => {
         expect(lockIdx).toBeGreaterThan(-1);
         expect(postLockGuardIdx).toBeGreaterThan(lockIdx);
         expect(configIdx).toBeGreaterThan(postLockGuardIdx);
+    });
+
+    it('sidecar color backfill claims the per-image processing lock through persistence', () => {
+        const source = readApp('scripts/backfill-color-pipeline.ts');
+        expect(source).toContain("import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '../src/lib/advisory-lock-release';");
+        expect(source).toContain('getImageProcessingLockName');
+        expect(source).toContain('async function acquireImageProcessingClaim');
+        expect(source).toContain('SELECT GET_LOCK(?, 0) AS acquired');
+        expect(source).toContain('await flushBatch();');
+        expect(source).toContain('await releaseImageProcessingClaim(row.id, claimConn)');
+        expect(source.indexOf('const result = await reprocessRow(row, backfillSettings, rowExists);')).toBeGreaterThan(
+            source.indexOf('claimConn = await acquireImageProcessingClaim(connection, row.id);'),
+        );
+        expect(source.indexOf('await releaseImageProcessingClaim(row.id, claimConn)')).toBeGreaterThan(
+            source.indexOf('await flushBatch();'),
+        );
     });
 
     it('caps actual CLIP embedding attempts without letting failed prefixes starve later rows', () => {

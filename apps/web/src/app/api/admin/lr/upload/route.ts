@@ -42,6 +42,7 @@ import { assertBlurDataUrl } from '@/lib/blur-data-url';
 import { sanitizeAdminString } from '@/lib/sanitize';
 import { revalidateAllAppData } from '@/lib/revalidation';
 import { isRestoreMaintenanceActive, cleanupOriginalIfRestoreMaintenanceBegan } from '@/lib/restore-maintenance';
+import { acquireAdminMutationSlot } from '@/lib/admin-mutation-barrier';
 import { getUploadTracker, pruneUploadTracker, resetUploadTrackerWindowIfExpired } from '@/lib/upload-tracker-state';
 import { settleUploadTrackerClaim } from '@/lib/upload-tracker';
 import {
@@ -90,6 +91,18 @@ export const POST = withAdminAuth(
         const cookieUser = tokenUserId === null ? await getCurrentUser() : null;
         const actorUserId = tokenUserId ?? cookieUser?.id ?? null;
         const ip = getClientIp(request.headers);
+
+        // PAT uploads are intentionally cross-origin capable, but they are still
+        // foreground admin mutations. Hold the same restore-drain slot as server
+        // actions so a request admitted just before restore maintenance starts
+        // cannot write into the freshly restored database.
+        using mutationSlot = acquireAdminMutationSlot();
+        if (!mutationSlot.acquired) {
+            return NextResponse.json(
+                { error: 'Restore in progress; retry shortly' },
+                { status: 503, headers: NO_CACHE },
+            );
+        }
 
         if (isRestoreMaintenanceActive()) {
             return NextResponse.json(

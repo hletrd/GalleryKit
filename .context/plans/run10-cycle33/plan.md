@@ -1,6 +1,6 @@
 # Run-10 Cycle 33/100 Implementation Plan
 
-Status: IMPLEMENTED - full gates passed; signed push and deploy pending
+Status: IMPLEMENTED - signed push complete at `5124d17e`; deploy/live smoke superseded by Cycle 34
 Aggregate: `.context/reviews/run10-cycle33/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `959e45afdfcf901f9f88e3eb8e675a12545ced8c`
@@ -124,8 +124,8 @@ Deferred this cycle: none.
 - [x] WP3 alt-text restore serialization.
 - [x] WP4 Cycle 32 ledger update.
 - [x] Required full gates.
-- [ ] Signed commit/push.
-- [ ] Per-cycle deploy and live smoke.
+- [x] Signed commit/push (`5124d17e`).
+- [ ] Per-cycle deploy and live smoke superseded by Cycle 34's required per-cycle deploy.
 
 ## Gate Evidence
 

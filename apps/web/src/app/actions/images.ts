@@ -270,7 +270,8 @@ export async function uploadImages(formData: FormData) {
                 .limit(1);
         } catch (err) {
             settleClaim(0, 0);
-            throw err;
+            console.error('Failed to verify upload topic before accepting files', err);
+            return { error: t('failedToVerifyTopic') };
         }
         if (!topicRow) {
             settleClaim(0, 0);

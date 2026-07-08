@@ -51,9 +51,11 @@ export async function register() {
                 const { drainBackgroundDbWrites } = await import('@/lib/background-db-writes');
                 const { stopSingleWriterGuard } = await import('@/lib/single-writer-guard');
                 const { stopMaintenanceScheduler } = await import('@/lib/maintenance-scheduler');
+                const { shutdownAdminBackfillRunner } = await import('@/lib/admin-backfill-runner');
                 await Promise.race([
                     Promise.all([
                         shutdownImageProcessingQueue(),
+                        shutdownAdminBackfillRunner(),
                         stopMaintenanceScheduler({ timeoutMs: 15_000 }),
                         flushBufferedSharedGroupViewCounts(),
                         drainBackgroundDbWrites(),

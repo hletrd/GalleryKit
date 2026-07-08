@@ -1,170 +1,156 @@
-# Cycle 24 Critic Review
+# Run-10 Cycle 34 Critic Review
 
 Date: 2026-07-08 KST
 Role: `critic`
-Review HEAD: `4b43fad7ab471287b82fe5c8dac85c05c511220a`
-Scope: comprehensive repository critique across product, architecture, correctness, security, operations, test evidence, documentation, and maintainability. Review-only; no source code edited.
+Review HEAD: `53476e5d2454c9fb66f779cd33e6404913cf9ab5`
+Scope: skeptical whole-repo critique across product constraints, reliability, correctness, operator safety, maintainability, UX, and test evidence. Review-only; no implementation changes.
 
-## Inventory Built First
+## Inventory First
 
-I built a review inventory before assessing findings. Generated/runtime payloads (`node_modules`, `.next`, upload/data/resource output, Playwright artifacts, cache directories) were excluded as non-source. Concurrent uncommitted review-lane files were observed and left untouched.
+I read `AGENTS.md` and `CLAUDE.md` before judging code. I inventoried the repository with `rg --files`, then focused on source/config/docs that can affect production behavior. Generated/runtime payloads were out of scope unless they are committed contract artifacts such as `public/sw.js`.
 
-Relevant categories examined or swept:
+Relevant source/doc/test inventory:
 
-- Root control/docs: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.context/plans/README.md`, active/deferred plan registers, and current/prior review artifacts.
-- App Router surfaces: all route handlers, public/admin pages, layouts, metadata routes, server actions, and admin DB actions under `apps/web/src/app`.
-- Shared source: `apps/web/src/lib` auth/session/PAT, origin/rate-limit, upload/file serving, image processing, queue/backfill, restore, migration helpers, public data projections, smart collections, CSP/JSON-LD/OG, semantic search, service worker helpers, and i18n utilities.
-- Data layer: `apps/web/src/db`, all Drizzle migrations and metadata, migration/reconcile scripts.
-- UI: public gallery/photo/share/map/search components, admin components, upload/dropzone, navigation, lightbox, histogram, service-worker registration.
-- Operations/config: `package.json`, `apps/web/package.json`, `next.config.ts`, Dockerfile, Compose, nginx template, deploy scripts, entrypoint, root scripts.
-- Tests: unit/source-contract tests under `apps/web/src/__tests__`, Playwright specs under `apps/web/e2e`, and lint guard scripts.
+- Control docs and runbooks: `AGENTS.md`, `CLAUDE.md`, `README.md`, `apps/web/README.md`, `.context/plans`, `.context/reviews`, `plan/`.
+- App surfaces: 81 files under `apps/web/src/app`, including public pages, admin pages, server actions, API routes, metadata/OG routes, and DB restore actions.
+- Shared code: 115 files under `apps/web/src/lib`, including auth/session/PAT, origin/rate-limit, image processing, upload/file serving, queue/backfill, restore maintenance, pending deletions, semantic search/CLIP, service worker, data privacy projections, and config parsing.
+- Data/ops: `apps/web/src/db`, all `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/scripts/*`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `apps/web/nginx/default.conf`, `.github/workflows/*`.
+- Tests: 368 files under `apps/web/src/__tests__`, plus `apps/web/e2e`, lint guard scripts, CI workflow gates, and CLIP preflight workflow.
 
-Validation I ran:
+Validation evidence from this lane:
 
-- `npm run lint:api-auth --workspace=apps/web` passed.
 - `npm run lint:action-origin --workspace=apps/web` passed.
 - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-- Static sweeps checked route-handler guards, `dangerouslySetInnerHTML`/JSON-LD sinks, raw SQL patterns, TODO/FIXME risk markers, skipped/focused tests, service-worker drift, migration journal behavior, and plan/deferred provenance.
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm run typecheck --workspace=apps/web` passed.
+- Targeted tests passed: `npm test --workspace=apps/web -- --run src/__tests__/images-actions.test.ts src/__tests__/lr-upload-route-behavior.test.ts src/__tests__/db-restore.test.ts src/__tests__/sw-template-contract.test.ts` passed 76 tests.
 
-Full `lint`, `typecheck`, `build`, and `npm test` were not rerun by this critic lane; this is a review artifact, not a release verification artifact.
+Not rerun here: full `npm run lint`, `npm run build`, full `npm test`, `npm run audit:prod`, and Playwright e2e. CI defines those as blocking gates in `.github/workflows/quality.yml:54-83`.
 
-## Confirmed Issues
+## Confirmed Findings
 
-### CRIT24-01 - Cycle 24 has no active plan/register entry while the plan index still points at Cycle 23
-
-- Severity: Medium
-- Confidence: High
-- Status: Confirmed documentation/provenance issue
-- Region: `.context/plans/README.md:34-38`, `.context/plans/README.md:46-56`, `.context/plans/cycle-23-2026-07-08-plan.md:1-7`.
-
-Why this is a problem:
-The user invocation and current review files are for Cycle 24, but the plan index still lists Run-10 Cycle 23 as the active current-cycle plan/deferred pair at `.context/plans/README.md:34-38`. The same README later treats Cycle 22 and earlier cycles as recently completed, but there is no Cycle 24 active slot. The Cycle 23 plan also still says `Status: IMPLEMENTED - GATES PASSED; PUSH/DEPLOY PENDING` at `cycle-23-2026-07-08-plan.md:3`, while current HEAD is beyond the Cycle 23 fix lineage.
-
-Concrete failure scenario:
-A later planner or verifier follows `.context/plans/README.md` as instructed, treats Cycle 23 as still active, and schedules stale push/deploy/provenance work instead of consuming the Cycle 24 review aggregate. This weakens the review-plan-fix loop's main safety property: each cycle should have one clear current ledger and one clear deferred register.
-
-Suggested fix:
-Move Cycle 23 to recently completed with its final commit/push/deploy evidence or explicit supersession statement, then create/update the Cycle 24 active plan/deferred entries. Add a small plan-index consistency check that fails when current review artifacts mention a newer cycle than the active section.
-
-### CRIT24-02 - The carry-forward age register is internally stale, weakening the 8-cycle and 16-cycle budget rules
+### CRIT34-01 - Browser upload rethrows a post-quota topic lookup failure instead of returning a structured action error
 
 - Severity: Medium
 - Confidence: High
-- Status: Confirmed documentation/provenance issue
-- Region: `.context/plans/deferred-carry-forward.md:3-7`, `.context/plans/deferred-carry-forward.md:19-27`, `.context/plans/deferred-carry-forward.md:87-90`, `.context/plans/deferred-carry-forward.md:185-220`, `.context/plans/deferred-carry-forward.md:249-260`.
+- Status: Confirmed reliability/UX defect
+- Region: `apps/web/src/app/actions/images.ts:217-274`, `apps/web/src/app/actions/images.ts:608-610`, `apps/web/src/app/api/admin/lr/upload/route.ts:283-297`, `apps/web/src/__tests__/images-action-toctou-claim.test.ts:68-79`, `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:321-330`.
 
 Why this is a problem:
-The register says it must be updated every cycle at `.context/plans/deferred-carry-forward.md:6-7`, and its latest prose says the age-budget check is for run-10 Cycle 23 at lines 19-27. The table header still says `Age @ r10c21` at lines 87-90, while the table includes Cycle 23 rows at lines 249-256. Older rows also remain under-aged relative to Cycle 24; for example Cycle 20 rows are still age `1` at lines 196-220 even though the repo has progressed through Cycle 21, 22, 23, and now 24 review work.
+
+`uploadImages()` synchronously claims the admin/IP upload quota at `apps/web/src/app/actions/images.ts:217-227`, then performs awaited disk and topic checks. The topic lookup catch at `apps/web/src/app/actions/images.ts:271-274` correctly settles the quota claim, but then `throw err` escapes the server action. The only outer cleanup is the `finally` that releases the upload-processing lock at `apps/web/src/app/actions/images.ts:608-610`; there is no action-level catch converting this transient DB failure into `{ error: ... }`.
+
+The Lightroom upload route handles the same failure more safely: it settles the claim, logs, and returns a JSON 500 at `apps/web/src/app/api/admin/lr/upload/route.ts:283-297`. The browser path instead pushes an expected transient infrastructure fault into Next.js's server-action exception path. Worse, the source-contract test pins the rethrow shape at `apps/web/src/__tests__/images-action-toctou-claim.test.ts:68-79`, while the LR test pins structured JSON behavior at `apps/web/src/__tests__/lr-upload-hdr-gate.test.ts:321-330`.
 
 Concrete failure scenario:
-A deferred High finding crosses the 8-cycle scheduling threshold, but the stale age column makes it look younger. The planner then re-lists it without the required schedule/reclassify decision, allowing serious architectural or operational debt to evade the loop's explicit budget.
 
-Suggested fix:
-Refresh the register to a single `Age @ r10c24` basis, update every row's age, and add a mechanical check that the header/current-cycle note and newest cycle rows agree. Prefer deriving ages from first-deferred cycle metadata instead of manually editing many table cells.
+An admin starts a browser upload while MySQL restarts or the pool times out between the quota claim and the topic existence query. The claim is rolled back, but the action throws. The upload UI receives a framework-level failure instead of a localized recoverable upload error, so the admin sees a generic crash/error state or loses clean per-file feedback even though no file was accepted.
 
-### CRIT24-03 - Browser and Lightroom upload ingestion still duplicate the same critical pipeline
+Fix:
+
+Keep the `settleClaim(0, 0)` call, but replace `throw err` with a logged structured return such as `{ error: t('failedToFetchGallerySettings') }` or a dedicated localized upload-temporarily-unavailable message. Update `images-action-toctou-claim.test.ts` so it asserts settlement plus structured return, not settlement plus rethrow. Add a behavior test in `images-actions.test.ts` that mocks the topic select rejection and asserts the action resolves with `{ error: ... }`, does not call `saveOriginalAndGetMetadata`, and releases the upload lock.
+
+### CRIT34-02 - Browser and Lightroom upload ingestion still duplicate a critical privacy/color pipeline
 
 - Severity: Medium
 - Confidence: High
-- Status: Confirmed maintainability/architecture issue
-- Region: `apps/web/src/app/actions/images.ts:87-610`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-633`, `.context/plans/deferred-carry-forward.md:249-251`.
+- Status: Confirmed maintainability/correctness risk
+- Region: `apps/web/src/app/actions/images.ts:87-610`, `apps/web/src/app/api/admin/lr/upload/route.ts:84-633`, `apps/web/src/app/actions/images.ts:397-516`, `apps/web/src/app/api/admin/lr/upload/route.ts:204-214`, `apps/web/src/app/api/admin/lr/upload/route.ts:327-345`, `apps/web/src/app/api/admin/lr/upload/route.ts:398-427`, `apps/web/src/app/api/admin/lr/upload/route.ts:550-586`.
 
 Why this is a problem:
-The browser upload action and Lightroom token route each implement their own full ingest pipeline: restore fencing, upload-processing contract lock, quota claim/settle, topic validation, config snapshot, disk preflight, original save, HDR/GPS gates, EXIF/color extraction, image insert shape, queue job shape, audit, and revalidation. The LR route contains repeated parity comments pointing back to the browser path, including filename parity at `route.ts:204-211`, disk-space parity at `route.ts:327-340`, HDR parity at `route.ts:398-407`, GPS parity at `route.ts:421-427`, and queue-setting parity at `route.ts:560-586`. The carry-forward register also keeps this class open as Cycle 23 High rows at `.context/plans/deferred-carry-forward.md:249-251`.
+
+The browser upload action and Lightroom/PAT route independently implement the same ingest lifecycle: quota claim/settle, upload-processing contract lock, topic verification, disk preflight, original save, HDR rejection, GPS stripping, EXIF/color normalization, insert value construction, queue job construction, audit, and revalidation. The LR file contains repeated parity comments documenting prior drift fixes: filename sanitation parity at `route.ts:204-214`, disk precheck parity at `route.ts:327-345`, HDR/GPS parity at `route.ts:398-427`, and queue-setting/color parity at `route.ts:550-586`. The browser insert/enqueue contract at `apps/web/src/app/actions/images.ts:397-516` is the parallel shape that future changes must remember to mirror.
 
 Concrete failure scenario:
-A future privacy or color-pipeline column is added to the browser path's insert/enqueue block at `apps/web/src/app/actions/images.ts:397-516`, but the parallel LR payload at `apps/web/src/app/api/admin/lr/upload/route.ts:454-587` is missed. Browser uploads then record the new setting while API-token uploads silently omit it, producing inconsistent public behavior until another review finds the drift or a backfill repairs rows.
 
-Suggested fix:
-Extract a shared ingest service after route-specific auth/form parsing. That service should own config snapshotting, topic verification, disk preflight, original save, HDR/GPS policy, EXIF/color normalization, insert value construction, queue job construction, and post-commit bookkeeping inputs. Keep the browser action and LR route as adapters for auth, localization/error shaping, and HTTP status. Add behavior tests proving both adapters produce the same insert/enqueue contract for representative JPEG, HDR-rejected, GPS-stripped, RAW-rejected, and processing-setting cases.
+A future admin-only color/HDR field or processing setting is added to the browser insert/enqueue block at `apps/web/src/app/actions/images.ts:397-516`, but the LR route's duplicate payload at `apps/web/src/app/api/admin/lr/upload/route.ts:550-586` is missed. Browser uploads then preserve the photographer-intent setting while external publish uploads silently omit it until a backfill repairs rows, causing source-dependent public rendering differences.
 
-## Likely Issues
+Fix:
 
-### CRIT24-04 - Background DB/CPU budgets are local to each subsystem, not global to the host
+Extract a shared ingest service after route-specific auth and form parsing. The service should own config snapshotting, topic verification, disk preflight, original save, HDR/GPS policy, EXIF/color normalization, insert values, queue job values, and post-commit bookkeeping. Keep the browser action and LR route as adapters for localization, auth/PAT context, and HTTP status. Add behavior tests proving both adapters produce the same insert/enqueue contract for representative JPEG, HDR-rejected, GPS-stripped, RAW-rejected, and processing-setting cases.
+
+## Likely Risks
+
+### CRIT34-03 - Source-contract tests encode implementation shapes strongly enough to preserve defects
+
+- Severity: Low
+- Confidence: Medium
+- Status: Likely maintainability/test-design risk
+- Region: `apps/web/src/__tests__/images-action-toctou-claim.test.ts:68-79`, `apps/web/src/__tests__/cycle-22-source-contracts.test.ts:125-138`, `apps/web/src/__tests__/sw-template-contract.test.ts:13-15`, `apps/web/src/__tests__/sw-template-contract.test.ts:60-88`, `apps/web/src/__tests__/sw-template-contract.test.ts:171-214`.
+
+Why this is a problem:
+
+Some source-contract tests intentionally guard brittle cross-file invariants, which is appropriate for the service worker template and generated worker parity. The risk is that the same style is also used where a behavior test would be safer. `images-action-toctou-claim.test.ts:68-79` requires `settleClaim(0, 0); throw err;`, preserving CRIT34-01's bad browser-action error surface. `cycle-22-source-contracts.test.ts:125-138` checks broad source snippets around the same upload claim region rather than a failing DB-select behavior. The service-worker suite is explicit about template/source drift at `sw-template-contract.test.ts:13-15`, and its checks at `sw-template-contract.test.ts:60-88` and `171-214` are reasonable because the shipped template cannot import the reference implementation directly.
+
+Concrete failure scenario:
+
+A developer fixes the browser upload path to return a structured error after a topic lookup failure. The behavior is better, but the source-contract test fails because the implementation no longer rethrows. Under time pressure, the developer may keep the rethrow to satisfy the test rather than updating the contract to assert the actual safety property.
+
+Fix:
+
+Keep source contracts only where import/runtime constraints force them. For server-action and route logic, prefer mocked behavior tests that assert externally visible outcomes and side effects: quota settled, no file saved, lock released, localized error returned. Where a source contract remains, make it assert semantic ingredients and explicitly avoid pinning harmful control flow such as `throw err`.
+
+## Manual-Validation Risks
+
+### CRIT34-04 - Public-page and Next image rate limiting depends on manually applied host nginx, but deploy does not verify it
+
+- Severity: High if the deployed host has stale nginx; otherwise Low
+- Confidence: High for the manual gap, unknown for current production state
+- Status: Manual-validation risk
+- Region: `CLAUDE.md:245-249`, `CLAUDE.md:514-526`, `apps/web/nginx/default.conf:1-29`, `apps/web/nginx/default.conf:246-295`, `apps/web/deploy.sh:51-55`, `apps/web/deploy.sh:99-104`.
+
+Why this is a problem:
+
+The app deliberately relies on edge-level nginx rate limiting for dynamic public SSR pages. `CLAUDE.md:245-249` documents the single-writer topology and says public pages are throttled at nginx, not app-layer. The committed nginx template defines `zone=public` and `zone=nextimage` at `apps/web/nginx/default.conf:1-19`, applies the Next image limiter at `apps/web/nginx/default.conf:246-263`, and applies the public catch-all limiter at `apps/web/nginx/default.conf:274-295`. The same template warns that real-IP handling is topology-sensitive at `apps/web/nginx/default.conf:20-29` and `59-71`.
+
+But deploy only rebuilds/restarts the app container at `apps/web/deploy.sh:51-55` and prunes Docker at `apps/web/deploy.sh:99-104`. `CLAUDE.md:514-526` explicitly says deploys do not touch host nginx and that a committed config change is inert until an operator applies and verifies it.
+
+Concrete failure scenario:
+
+A cycle marks public SSR rate limiting or `/_next/image` flood protection as fixed because `apps/web/nginx/default.conf` is committed and tests pass. The production host still runs an older nginx config, or sits behind a load balancer without realip configuration. Public dynamic pages remain unthrottled, or all visitors share the load balancer's single nginx bucket and legitimate traffic gets 429s.
+
+Fix:
+
+Add a deploy-time read-only verification step that inspects the live host nginx config (`nginx -T` or an operator-owned equivalent) for required zones, locations, and real-IP topology. Fail or loudly warn before declaring deploy complete when the expected limiter blocks are absent. Longer-term, move nginx config into managed deployment automation so `npm run deploy` can apply/test/reload it safely, or record a signed/manual host verification artifact per cycle.
+
+### CRIT34-05 - Production semantic search activation still has a host-weight/manual preflight gap
 
 - Severity: Medium
 - Confidence: Medium
-- Status: Likely architecture/availability issue; needs load evidence for live impact
-- Region: `apps/web/src/db/index.ts:21-42`, `apps/web/src/lib/image-queue.ts:121-153`, `apps/web/src/lib/admin-backfill-runner.ts:97-143`, `apps/web/src/lib/clip-model.ts:53-72`.
+- Status: Manual-validation/operator-safety risk
+- Region: `CLAUDE.md:558-620`, `apps/web/package.json:21-24`, `.github/workflows/clip-preflight.yml:3-45`, `.github/workflows/quality.yml:54-83`, `apps/web/src/lib/gallery-config.ts:64-69`, `apps/web/src/lib/gallery-config.ts:123-126`, `apps/web/src/app/actions/settings.ts:102-104`, `apps/web/src/app/api/search/semantic/route.ts:186-201`, `apps/web/src/app/api/search/semantic/route.ts:247-260`.
 
 Why this is a problem:
-The DB pool is fixed at 10 connections with queue limit 20 (`db/index.ts:31-42`). The image queue reserves about half the pool and caps itself independently (`image-queue.ts:121-153`). The admin backfill runner independently reserves about half the pool and can pin one advisory-lock connection plus two connections per worker (`admin-backfill-runner.ts:113-125`). CLIP inference has a separate in-process concurrency queue up to 4 slots (`clip-model.ts:53-72`). Each subsystem is reasonable alone, but the repository does not define a shared background budget when queue work, backfill, semantic scans, and CLIP inference overlap.
+
+The production semantic-search code is deliberately operator-gated: `gallery-config.ts:64-69` documents that stored `production` heals to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`, and `gallery-config.ts:123-126` implements that gate. The Settings UI rejects saving `production` at `apps/web/src/app/actions/settings.ts:102-104`; activation requires env + DB row + weights. The public semantic route returns 503 unless mode is `stub` or `production` at `apps/web/src/app/api/search/semantic/route.ts:186-201`, then production embedding failures return 503 at `route.ts:247-260`.
+
+The risk is operational, not type-level. `CLAUDE.md:558-620` says model weights are not baked into the image, must be seeded on the deploy host, and the env-gated integration suites are the only real offline-load proof before flipping the DB row. The package has a local preflight script at `apps/web/package.json:21-24`, and GitHub has a manual/scheduled workflow at `.github/workflows/clip-preflight.yml:3-45`. Main CI does not run this; `.github/workflows/quality.yml:54-83` runs standard gates only.
 
 Concrete failure scenario:
-An operator starts a color/semantic backfill while uploads are still being processed and visitors issue semantic/similar searches. Backfill can pin up to 5 DB connections, the image queue can pin several more, and public/admin requests still need transient DB connections. The pool queues or times out requests even though every lane locally "reserved" live headroom. CPU/RAM pressure from CLIP inference can compound the latency spike because it is budgeted separately from DB work.
 
-Suggested fix:
-Introduce a shared background permit system for DB-pinning work, or make queue/backfill concurrency mutually aware. As a minimal fix, reduce queue concurrency while backfill is active and vice versa. Validate with a combined stress test covering uploads, image queue processing, admin backfill, semantic search, and normal photo-page traffic before raising any concurrency defaults.
+An operator sets `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true` and flips `admin_settings.semantic_search_mode='production'` after a normal deploy, but the host bind-mounted `/app/data/models/clip` is missing, stale, or seeded under a different path. CI stays green because it never proves the deployed host's weights. Visitors see the semantic UI as production-enabled, but semantic searches fail with 503 on first real encoder load.
 
-### CRIT24-05 - Local E2E evidence can look green while authenticated admin/browser coverage is skipped
+Fix:
 
-- Severity: Low-Medium
-- Confidence: High
-- Status: Likely test-evidence issue
-- Region: `apps/web/e2e/admin.spec.ts:6-13`, `apps/web/e2e/origin-guard.spec.ts:27-31`, `apps/web/e2e/origin-guard.spec.ts:55-73`, `apps/web/package.json:21-23`.
+Before allowing or documenting production activation as complete, require a host-side preflight against the same env file and bind mount the running container will use. The safest shape is a deploy/activation check that runs `npm run test:clip:preflight --workspace=apps/web` or a smaller encoder-load probe inside a sidecar with `CLIP_MODELS_ROOT=/app/data/models/clip` and `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`. Surface the result in deploy logs or an admin health/status warning so a DB-row flip cannot silently outrun host readiness.
 
-Why this is a problem:
-The default `test:e2e` script at `apps/web/package.json:21` runs all Playwright specs, but admin workflows are skipped unless `E2E_ADMIN_ENABLED=true` (`admin.spec.ts:11-13`). The origin-guard suite only proves authenticated cross-origin rejection when admin E2E credentials are configured (`origin-guard.spec.ts:55-73`), and local runs explicitly skip the CI credential assertion (`origin-guard.spec.ts:27-31`, `admin.spec.ts:6-9`). This is intentional, but it makes "e2e passed" an ambiguous evidence claim unless the exact env and skip summary are recorded.
+## Product And UX Notes
 
-Concrete failure scenario:
-A cycle report states `npm run test:e2e` passed from a local run. The admin login, admin navigation, authenticated origin-guard, upload/settings, and restore-adjacent browser paths may all have been skipped, so a regression in those flows ships with a green-looking browser gate.
-
-Suggested fix:
-Require release/provenance notes to distinguish default public E2E from `npm run test:e2e:admin` at `apps/web/package.json:22`. Add a small reporter/check that fails when admin specs are skipped in a release-designated environment, or writes an explicit `admin_e2e_skipped=true` artifact that planners cannot miss.
-
-## Risks Needing Manual Validation
-
-### CRIT24-06 - Proxy topology and public SSR edge limiting remain deployment assumptions, not repo-proven guarantees
-
-- Severity: Low-Medium
-- Confidence: Medium
-- Status: Risk needing manual validation
-- Region: `apps/web/docker-compose.yml:15-22`, `apps/web/nginx/default.conf:52-71`, `apps/web/nginx/default.conf:274-295`, `apps/web/src/lib/rate-limit.ts:175-216`, `scripts/check-proxy-topology.mjs:7-17`, `scripts/check-proxy-topology.mjs:131-134`.
-
-Why this is a problem:
-The container runs on host networking and sets `TRUST_PROXY=true` while depending on host nginx for rate limiting/security headers (`docker-compose.yml:15-22`). The nginx template explicitly warns that its X-Forwarded-For overwrite mode is correct only for certain topologies and collapses all app-side per-IP limits into one bucket if an upstream LB is the real peer (`nginx/default.conf:59-71`). The public SSR limiter lives in nginx and must be manually applied/reloaded (`nginx/default.conf:274-295`). The provided topology checker is useful, but it explicitly says it does not verify effective client-IP buckets or XFF overwrite behavior (`scripts/check-proxy-topology.mjs:12-17`, `131-134`).
-
-Concrete failure scenario:
-Production sits behind a CDN/LB that connects to nginx from one private address, but nginx overwrites `X-Forwarded-For` with `$remote_addr`. The app sees the LB as every visitor, so one abusive client can consume login/search/share/OG rate limits for everyone. If the nginx template was not applied, public SSR pages also lose the documented edge flood backstop.
-
-Suggested fix:
-Add a deployment validation runbook/artifact that captures `nginx -T`, confirms the public `location /` limiter is active, and proves two distinct external clients map to distinct app-side client keys. If an upstream LB exists, use append-mode XFF plus the correct `TRUSTED_PROXY_HOPS`, or configure `real_ip` before overwrite-mode headers.
-
-## No Confirmed Runtime Security/Correctness Defect Found
-
-I did not confirm a new source-level auth bypass, SQL injection, XSS, path traversal, restore write race, public PII leak, upload cleanup leak, or route-handler guard omission in this pass.
-
-Evidence from the sweep:
-
-- Admin API routes are guarded by `withAdminAuth`, and `lint:api-auth` passed.
-- Mutating server actions enforce same-origin provenance or documented exemptions, and `lint:action-origin` passed.
-- Public mutating/expensive route handlers use pre-increment rate-limit helpers or approved exemptions, and `lint:public-route-rate-limit` passed.
-- Public JSON-LD sinks use `safeJsonLd`; the remaining inline script path is the Google Analytics ID path using JSON stringification.
-- Public field projections have compile-time privacy guards, and map GPS exposure is constrained by map-visible topic filtering.
-- Semantic/similar search routes enforce same-origin, content-type/size or id validation, restore maintenance guards, and rate-limit ordering before DB/embedding work.
-- Restore/backup code has advisory locks, durable maintenance markers, bounded drain stages, SQL scan checks, dump header/trailer checks, and post-restore cleanup hooks.
-- Drizzle migration reconciliation has explicit guards for historical non-monotonic journal entries and post-condition hash coverage.
+No confirmed product-constraint breach was found in this pass. The repo still states the photographer-intent boundary clearly: no edit/culling/scoring features, and photos arrive after editing (`CLAUDE.md:305-307`). The public semantic search and similar-photo features are search/discovery surfaces, not scoring/culling, and similar photos are gated to production semantic mode (`apps/web/src/app/api/search/similar/[id]/route.ts:14-20`, `apps/web/src/components/similar-photos.tsx:50-58`, `apps/web/src/components/similar-photos.tsx:141` from the repo search sweep). The main UX concern I confirmed is CRIT34-01: browser upload transient DB failures can escape as framework errors instead of recoverable localized action errors.
 
 ## Final Sweep
 
-File categories examined:
+Common missed-issue checks and result:
 
-- App pages/layouts/routes/actions, admin DB actions, public metadata routes, upload serving, semantic/OG/feed routes.
-- Shared libraries for auth/session/PAT, origin/rate limiting, data projection, uploads, image processing, queue/backfill, restore, migrations, smart collections, CSP/JSON-LD/OG, service worker, and config.
-- DB schema, migrations, migration metadata, and migration/reconcile scripts.
-- Components for public gallery/photo/share/map/search, admin tables/forms, upload dropzone, navigation, lightbox, histogram, and service-worker registration.
-- Tests and guard scripts, including unit/source-contract tests and Playwright specs.
-- Operational files: Dockerfile, Compose, nginx, deploy scripts, entrypoint, package scripts, env examples, and plan/review docs.
+- Admin API auth wrappers: passed `lint:api-auth`.
+- Mutating server-action same-origin guards: passed `lint:action-origin`.
+- Public mutating/expensive route rate-limit guards: passed `lint:public-route-rate-limit`.
+- Type-level privacy/schema/test compilation: passed `typecheck`.
+- Restore drain/maintenance, upload tracker, LR upload behavior, and service-worker template contracts: targeted tests passed.
+- Migration runbook/schema dual-write rule is documented in `AGENTS.md:25-31` and `CLAUDE.md:467-489`; no new migration was authored in this lane.
+- Deploy disk-prune safety was inspected at `apps/web/deploy.sh:79-104`; no code change made.
+- Existing unrelated dirty file observed: `.context/reviews/perf-reviewer.md`; not touched.
 
-Common missed issue classes checked:
+Residual risk:
 
-- Admin API exports missing auth wrappers.
-- Mutating server actions admitted without same-origin or restore-mutation barriers.
-- Public route handlers doing mutation/expensive work without rate limits.
-- PII/internal fields leaking through public selects, map/search/timeline/feed helpers, or JSON-LD.
-- Unsafe raw SQL interpolation, `dangerouslySetInnerHTML`, open redirects, SSRF-adjacent fetches, and CSP nonce gaps.
-- Upload quota claim leaks, orphaned originals, GPS/HDR policy drift, and browser/LR ingest divergence.
-- Restore windows clearing maintenance before drains/revocations/pending file deletions complete.
-- Migration journal skip/drift and reconcile/baseline mismatch.
-- Service-worker cache privacy, revocable-page caching, and generated `sw.js` template drift.
-- E2E skip/focus markers and ambiguous release evidence.
+This was a critic-lane review, not a release certification. Full lint/build/audit/e2e and production host validation remain necessary before claiming deploy safety. The highest-value next fix is CRIT34-01 because it is narrow, user-visible, and currently preserved by a source-contract test.

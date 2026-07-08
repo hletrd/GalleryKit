@@ -563,6 +563,7 @@
     "invalidTagNames": "Tag names must be 1-100 characters and cannot contain commas",
     "invalidTopicFormat": "Invalid topic format",
     "topicRequired": "Topic required",
+    "failedToVerifyTopic": "Could not verify the selected topic. Please try again.",
     "insufficientDiskSpace": "Insufficient disk space for upload",
     "totalUploadSizeExceeded": "Total upload size exceeds limit",
     "cumulativeUploadSizeExceeded": "Cumulative upload size exceeds limit per hour",

@@ -188,6 +188,21 @@ async function main() {
   const { connection, db, images, imageTags, sharedGroupImages, sharedGroups, smartCollections, tags, topicAliases, topics } = await import('../src/db');
 
   const dirs = getUploadDirs();
+  const allowedSeedBases = new Set(seedImages.map((image) => image.key));
+  const seedFileNameRe = /^(?<base>e2e-(?:landscape|portrait))(?:_\d+)?\.(?:jpe?g|webp|avif)$/;
+  function safeSeedFile(dir: string, filename: string): string | null {
+    const match = seedFileNameRe.exec(filename);
+    const base = match?.groups?.base;
+    if (!base || !allowedSeedBases.has(base) || path.basename(filename) !== filename) {
+      console.warn(`[seed-e2e] Skipping unexpected DB filename during cleanup: ${filename}`);
+      return null;
+    }
+    return path.join(dir, filename);
+  }
+  function cleanupSeedFile(dir: string, filename: string) {
+    const safePath = safeSeedFile(dir, filename);
+    return safePath ? fs.rm(safePath, { force: true }) : Promise.resolve();
+  }
 
   try {
     await db.insert(topics).values(seedTopic).onDuplicateKeyUpdate({
@@ -221,14 +236,14 @@ async function main() {
       await db.delete(images).where(inArray(images.id, existingIds));
 
       await Promise.all(existing.flatMap((row) => [
-        fs.rm(path.join(dirs.original, row.filename_original), { force: true }),
-        fs.rm(path.join(dirs.jpeg, row.filename_jpeg), { force: true }),
-        fs.rm(path.join(dirs.webp, row.filename_webp), { force: true }),
-        fs.rm(path.join(dirs.avif, row.filename_avif), { force: true }),
+        cleanupSeedFile(dirs.original, row.filename_original),
+        cleanupSeedFile(dirs.jpeg, row.filename_jpeg),
+        cleanupSeedFile(dirs.webp, row.filename_webp),
+        cleanupSeedFile(dirs.avif, row.filename_avif),
         ...SEED_IMAGE_SIZES.flatMap((size) => [
-          fs.rm(path.join(dirs.jpeg, row.filename_jpeg.replace('.jpg', `_${size}.jpg`)), { force: true }),
-          fs.rm(path.join(dirs.webp, row.filename_webp.replace('.webp', `_${size}.webp`)), { force: true }),
-          fs.rm(path.join(dirs.avif, row.filename_avif.replace('.avif', `_${size}.avif`)), { force: true }),
+          cleanupSeedFile(dirs.jpeg, row.filename_jpeg.replace('.jpg', `_${size}.jpg`)),
+          cleanupSeedFile(dirs.webp, row.filename_webp.replace('.webp', `_${size}.webp`)),
+          cleanupSeedFile(dirs.avif, row.filename_avif.replace('.avif', `_${size}.avif`)),
         ]),
       ]));
     }

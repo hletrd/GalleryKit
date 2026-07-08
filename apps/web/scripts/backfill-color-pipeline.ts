@@ -46,11 +46,13 @@ dotenv.config({ path: '.env.local' });
 import fs from 'fs/promises';
 import PQueue from 'p-queue';
 import type { RowDataPacket, ResultSetHeader } from 'mysql2';
+import type { PoolConnection } from 'mysql2/promise';
 import sharp from 'sharp';
 import { processImageFormats, IMAGE_PIPELINE_VERSION, MAX_INPUT_PIXELS, resolveColorPipelineDecision, deleteImageVariants, type ImageQualitySettings } from '../src/lib/process-image';
 import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '../src/lib/upload-paths';
-import { LOCK_COLOR_PIPELINE_BACKFILL, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
+import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
+import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '../src/lib/advisory-lock-release';
 import { parseBoundedPositiveInteger } from '../src/lib/env';
 import { getGalleryConfigDetachedStrict } from '../src/lib/gallery-config';
 import type { JpegChromaSubsampling } from '../src/lib/gallery-config-shared';
@@ -314,6 +316,36 @@ export async function reprocessRow(
 
 const BATCH_SIZE = 100;
 
+async function acquireImageProcessingClaim(
+    connection: { getConnection: () => Promise<PoolConnection> },
+    imageId: number,
+): Promise<PoolConnection | null> {
+    const lockConn = await connection.getConnection();
+    try {
+        const [rows] = await lockConn.query<(RowDataPacket & { acquired: unknown })[]>(
+            'SELECT GET_LOCK(?, 0) AS acquired',
+            [getImageProcessingLockName(imageId)],
+        );
+        if (isAdvisoryLockAcquired(rows[0]?.acquired)) {
+            return lockConn;
+        }
+    } catch (err) {
+        destroyPooledAdvisoryLockConnectionOnAcquireError(lockConn, `sidecar image processing claim ${imageId}`, err);
+        throw err;
+    }
+    lockConn.release();
+    return null;
+}
+
+async function releaseImageProcessingClaim(imageId: number, lockConn: PoolConnection | null) {
+    if (!lockConn) return;
+    await releasePooledAdvisoryLocks(
+        lockConn,
+        [getImageProcessingLockName(imageId)],
+        `sidecar image processing claim ${imageId}`,
+    );
+}
+
 async function main() {
     const forceReencode = process.argv.includes('--force-reencode');
 
@@ -387,6 +419,7 @@ async function main() {
     });
     const queue = new PQueue({ concurrency });
     let skipped = 0;
+    let skippedLocked = 0;
     let processed = 0;
     let errors = 0;
     // AGG-C3-04 (CR3-01 / tracer D3): rows whose re-encode SUCCEEDED but whose
@@ -526,34 +559,52 @@ async function main() {
         for (const row of rows) {
             queuedTasks.push(queue.add(async () => {
                 assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME);
-                const result = await reprocessRow(row, backfillSettings, rowExists);
-                if (result.outcome === 'processed') {
-                    processed++;
-                    const files = rowFilenames(row);
-                    if (result.signals) {
-                        updateBatch.push({ id: row.id, signals: result.signals, files });
-                    } else if (result.derivativeOnly) {
-                        // AGG2-01: detection failed but encode succeeded — persist
-                        // the derivative columns without bumping pipeline_version.
-                        // AGG-C3-04: track these so the exit code/summary can flag
-                        // a run that left color metadata stale despite re-encoding.
-                        detectionFailures++;
-                        derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly, files });
-                    }
-                    if (pendingUpdates() >= BATCH_SIZE) {
+                let claimConn: PoolConnection | null;
+                try {
+                    claimConn = await acquireImageProcessingClaim(connection, row.id);
+                } catch (err) {
+                    console.warn(`[backfill-color-pipeline] id=${row.id} claim acquire failed:`, err);
+                    skippedLocked++;
+                    return;
+                }
+                if (!claimConn) {
+                    skippedLocked++;
+                    return;
+                }
+                try {
+                    const result = await reprocessRow(row, backfillSettings, rowExists);
+                    if (result.outcome === 'processed') {
+                        processed++;
+                        const files = rowFilenames(row);
+                        if (result.signals) {
+                            updateBatch.push({ id: row.id, signals: result.signals, files });
+                        } else if (result.derivativeOnly) {
+                            // AGG2-01: detection failed but encode succeeded — persist
+                            // the derivative columns without bumping pipeline_version.
+                            // AGG-C3-04: track these so the exit code/summary can flag
+                            // a run that left color metadata stale despite re-encoding.
+                            detectionFailures++;
+                            derivativeBatch.push({ id: row.id, derivative: result.derivativeOnly, files });
+                        }
+                        // Hold the per-image claim through persistence. This keeps
+                        // the sidecar's lock window aligned with the in-app runner
+                        // and live queue: re-encode, detect, and DB update are one
+                        // protected sequence for this row.
                         await flushBatch();
+                    } else if (result.outcome === 'skipped') {
+                        skipped++;
+                    } else if (result.outcome === 'deleted-mid-reencode') {
+                        deletedMidReencode++;
+                    } else {
+                        errors++;
                     }
-                } else if (result.outcome === 'skipped') {
-                    skipped++;
-                } else if (result.outcome === 'deleted-mid-reencode') {
-                    deletedMidReencode++;
-                } else {
-                    errors++;
+                } finally {
+                    await releaseImageProcessingClaim(row.id, claimConn).catch(() => undefined);
                 }
 
-                if ((processed + skipped + errors + deletedMidReencode) % reportEvery === 0) {
+                if ((processed + skipped + skippedLocked + errors + deletedMidReencode) % reportEvery === 0) {
                     console.log(
-                        `  [progress] candidates=${totalCandidates} processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures}`,
+                        `  [progress] candidates=${totalCandidates} processed=${processed} skipped=${skipped} skippedLocked=${skippedLocked} errors=${errors} detectionFailures=${detectionFailures}`,
                     );
                 }
             }));
@@ -589,7 +640,7 @@ async function main() {
         console.log(`[backfill-color-pipeline] ${totalCandidates} candidate image(s) scanned across ${pageCount} page(s). (force=${forceReencode})`);
     }
 
-    console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} errors=${errors} detectionFailures=${detectionFailures} deletedMidReencode=${deletedMidReencode}`);
+    console.log(`\n[backfill-color-pipeline] Done. processed=${processed} skipped=${skipped} skippedLocked=${skippedLocked} errors=${errors} detectionFailures=${detectionFailures} deletedMidReencode=${deletedMidReencode}`);
     if (detectionFailures > 0) {
         // AGG-C3-04: re-encode succeeded but color detection failed on these
         // rows; pipeline_version was deliberately NOT advanced so they remain

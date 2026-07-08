@@ -563,6 +563,7 @@
     "invalidTagNames": "태그명은 1~100자 사이여야 하며 쉼표를 포함할 수 없습니다",
     "invalidTopicFormat": "카테고리 형식이 올바르지 않습니다",
     "topicRequired": "카테고리를 선택해 주세요",
+    "failedToVerifyTopic": "선택한 카테고리를 확인하지 못했습니다. 다시 시도해 주세요.",
     "insufficientDiskSpace": "업로드할 디스크 공간이 부족합니다",
     "totalUploadSizeExceeded": "전체 업로드 크기가 제한을 초과합니다",
     "cumulativeUploadSizeExceeded": "누적 업로드 크기가 시간당 제한을 초과합니다",

@@ -1,254 +1,154 @@
-# Cycle 24 Architect Review
+# Run-10 Cycle 34 Architect Review
 
-Role: architect
-Date: 2026-07-08 09:29 KST
-Reviewed HEAD: `4b43fad7ab471287b82fe5c8dac85c05c511220a`
-Status: review-only; no source-code edits.
+Role: architect lane
+Date: 2026-07-08 KST
+Status: review-only; no source-code edits, no commit, no push, no deploy.
 
-## Inventory
+## Scope And Inventory
 
-I first inventoried architecture-relevant files with repository file listing and targeted symbol searches, then inspected the relevant source, scripts, config, migrations, tests, and planning records. Generated/runtime artifacts such as `.next`, `.omc`, `test-results`, uploads, and dependency folders were excluded.
+Reviewed whole-repo architecture/design/layering/coupling risks with emphasis on Next app boundaries, data layer, migrations, queues/backfills, admin actions, rate-limit/lint gates, storage abstraction, service worker behavior, and deploy/runtime topology.
 
-Relevant categories examined:
+Inventory inspected:
 
-- Operating context and plans: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, Cycle 23 plan/deferred ledgers, and existing review files for carry-forward context.
-- App/runtime topology: `apps/web/src/instrumentation.ts`, `apps/web/src/proxy.ts`, `apps/web/src/lib/single-writer-guard.ts`, `apps/web/next.config.ts`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`.
-- Schema and migrations: `apps/web/src/db/schema.ts`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, restore SQL scanners and migration tests.
-- Upload, storage, and processing boundaries: browser upload action, Lightroom/PAT upload route, upload path helpers, storage abstraction modules, direct upload serving, image queue, CLIP/semantic processing, pending file deletion cleanup.
-- Auth, restore, queue, and state ownership: admin auth/session/token modules, restore maintenance modules, admin mutation barrier, pending revocations, pending file deletions, background DB write queue, admin backfill runner, maintenance scheduler.
-- Public/admin route layering: App Router public pages/routes, protected admin layouts/pages, admin API routes, public API routes, rate-limit/auth/origin lint scanners.
-- Frontend component architecture: large client components including viewer, upload, search, map, settings, image manager, histogram, bottom sheet, color details, lightbox, and admin navigation components.
-- Tests and static contracts: privacy/schema tests, migration journal/reconcile tests, auth/origin/rate-limit scanners, upload/queue/restore tests, touch-target audit, component and route tests.
+- Repo guidance and operating context: `AGENTS.md`, `CLAUDE.md`, existing `.context/reviews/architect.md`.
+- Next/runtime boundaries: `apps/web/src/proxy.ts`, `apps/web/src/instrumentation.ts`, `apps/web/next.config.ts`, `apps/web/package.json`, root `package.json`.
+- Data/migrations: `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`.
+- Queues/backfills/maintenance: `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/clip-model.ts`, `apps/web/scripts/backfill-color-pipeline.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`, restore-maintenance helpers.
+- Admin actions and gates: `apps/web/src/app/actions/*.ts`, `apps/web/src/app/api/**/route.*`, `apps/web/src/lib/api-auth.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`.
+- Storage/upload/service worker: `apps/web/src/lib/storage/**`, `apps/web/src/lib/upload-paths.ts`, `apps/web/src/lib/serve-upload.ts`, public upload routes, service-worker/public asset files.
+- Deploy/runtime topology: `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`.
 
-Validation evidence: this was a read-only architecture review. I did not run destructive commands. I did not run the full gate suite because the requested output is a review artifact, not implementation.
+Validation evidence collected:
 
-## Confirmed Issues
+- `npm run lint:api-auth --workspace=apps/web`: passed.
+- `npm run lint:action-origin --workspace=apps/web`: passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web`: passed.
 
-### ARCH-C24-01 - Browser and Lightroom uploads duplicate the same multi-phase ingest transaction
+Full build/test/audit/e2e and live production/proxy validation were not run because this lane is review-only and the task requested a written architecture review artifact.
 
-Severity: High
-Confidence: High
-Status: confirmed design issue
+## Confirmed Findings
 
-Evidence:
-
-- Browser upload owns auth/origin, processing-slot reservation, upload tracker claim, topic validation, original file write, HDR/GPS decisions, restore rechecks, DB insert, and queue enqueue in one action: `apps/web/src/app/actions/images.ts:87-106`, `apps/web/src/app/actions/images.ts:156-221`, `apps/web/src/app/actions/images.ts:265-278`, `apps/web/src/app/actions/images.ts:325-516`.
-- Lightroom/PAT upload separately repeats the same lifecycle with its own tracker, restore rechecks, upload contract lock, file write, HDR/GPS handling, insert, and enqueue: `apps/web/src/app/api/admin/lr/upload/route.ts:84-99`, `apps/web/src/app/api/admin/lr/upload/route.ts:130-178`, `apps/web/src/app/api/admin/lr/upload/route.ts:254-280`, `apps/web/src/app/api/admin/lr/upload/route.ts:357-580`.
-- The route contains parity comments tying one path to the other, which confirms this is maintained by manual mirroring rather than a shared boundary.
-
-Why this is a problem:
-
-The core ingest transaction is a bounded context, but it is implemented twice at route/action level. The duplicated code has to preserve the same ordering across quota reservation, disk writes, metadata extraction, privacy stripping, topic validation, restore maintenance checks, DB insert, queue enqueue, and cleanup. That is too much cross-cutting state for manual parity.
-
-Concrete failure scenario:
-
-A future fix adds a new privacy field, post-restore guard, upload setting, or queue snapshot value to browser upload only. Browser uploads remain correct, but Lightroom uploads persist different metadata or enqueue stale settings. The failure may appear later as inconsistent derivative generation, unstripped GPS data, bad quota accounting, or files present on disk without matching DB rows.
-
-Suggested fix:
-
-Extract a shared ingest service with one transaction-shaped API, for example `ingestUploadedImage({ principal, source, file, topicId, settingsSnapshot, quotaClaim })`. Keep transport-specific concerns at the edge: browser form parsing and PAT auth stay in their callers, while file persistence, metadata policy, restore rechecks, DB insert, cleanup, and queue enqueue live in the service. Add parity tests that drive both transports through the same service and assert equivalent persisted/enqueued records.
-
-### ARCH-C24-02 - The storage abstraction is not the live storage boundary
-
-Severity: Medium
-Confidence: High
-Status: confirmed design issue
-
-Evidence:
-
-- The storage index explicitly states that production upload, processing, and serving still use direct filesystem paths and that the abstraction is only future-facing: `apps/web/src/lib/storage/index.ts:4-12`.
-- The storage interface repeats that not all gallery storage goes through it and exposes future stream methods: `apps/web/src/lib/storage/types.ts:4-9`, `apps/web/src/lib/storage/types.ts:51-76`.
-- The local backend maps storage keys to `UPLOAD_ROOT` and local originals: `apps/web/src/lib/storage/local.ts:38-61`, `apps/web/src/lib/storage/local.ts:159-167`.
-- Production upload/serve paths bypass the abstraction through direct filesystem helpers: `apps/web/src/lib/upload-paths.ts:12-23`, `apps/web/src/lib/upload-paths.ts:28-41`, `apps/web/src/lib/upload-paths.ts:59-88`, `apps/web/src/lib/serve-upload.ts:198-229`, `apps/web/src/app/actions/images.ts:336-373`.
-- Repository search found no production callers of `getStorage()`, `switchStorageBackend()`, or `StorageBackend` outside the storage module itself.
-
-Why this is a problem:
-
-The codebase has a named storage boundary, but the authoritative upload, processing, derivative, and serving flows are still coupled to local disk paths. That creates a false extension point: future maintainers can switch or extend the storage module and believe the app is backend-agnostic when the operationally important paths remain local-only.
-
-Concrete failure scenario:
-
-An object-storage backend is added behind `StorageBackend` and enabled through configuration. Tests around the storage module pass, but browser uploads still write to `public/uploads/originals`, image serving still realpaths local files, and processors still derive local paths. The deployment now has split storage, missing originals, or URLs that point at objects never written by the active upload path.
-
-Suggested fix:
-
-Either retire the unused abstraction until a real migration is scheduled, or make it the enforced boundary. A real migration should route original writes, derivative writes, reads, deletion queueing, and URL generation through a single storage service. Keep local filesystem as one backend and add contract tests at the upload/process/serve level, not only at the storage-module level.
-
-### ARCH-C24-03 - Background work budgets are independent and can oversubscribe shared DB and CPU resources
-
-Severity: High
-Confidence: High for source design; Medium for production saturation threshold
-Status: confirmed design issue
-
-Evidence:
-
-- Image queue state is process-local and has its own concurrency reservation logic: `apps/web/src/lib/image-queue.ts:100-153`, `apps/web/src/lib/image-queue.ts:313-372`, `apps/web/src/lib/image-queue.ts:389-472`.
-- Admin backfill has a separate concurrency resolver and its own process-local status state: `apps/web/src/lib/admin-backfill-runner.ts:12-51`, `apps/web/src/lib/admin-backfill-runner.ts:97-142`, `apps/web/src/lib/admin-backfill-runner.ts:145-180`.
-- Analytics/background writes have another process-local queue and fixed write concurrency: `apps/web/src/lib/background-db-writes.ts:3-10`, `apps/web/src/lib/background-db-writes.ts:42-75`, `apps/web/src/lib/background-db-writes.ts:77-112`.
-- CLIP inference has a separate process-local queue with independent concurrency, pending limit, and timeout settings: `apps/web/src/lib/clip-model.ts:53-72`, `apps/web/src/lib/clip-model.ts:117-173`.
-
-Why this is a problem:
-
-The repo has several subsystems that correctly limit themselves locally, but there is no shared background-work budget across image processing, admin backfill, analytics writes, semantic embedding, and restore drains. Each subsystem can be locally "safe" while the aggregate exceeds MySQL pool, CPU, memory, or disk I/O capacity.
-
-Concrete failure scenario:
-
-An admin starts a color/embedding backfill while uploads are processing and public traffic is writing analytics events. The queue and backfill both compute available DB headroom independently, analytics drains with its own concurrency, and CLIP inference queues separately. Under load, request handlers contend with background jobs for DB connections and CPU, causing admin API timeouts, queue retries, or public page latency spikes even though no individual subsystem violated its own cap.
-
-Suggested fix:
-
-Introduce a shared background budget coordinator for DB write slots, CPU/inference slots, and long-running maintenance slots. Queue, backfill, analytics drains, semantic embedding, restore cleanup, and future maintenance jobs should acquire leases from the same coordinator. Add stress tests that run queue processing plus backfill plus analytics drain against a small configured DB pool and assert foreground requests keep reserved capacity.
-
-### ARCH-C24-04 - The single-writer guard detects unsafe multi-instance topology but does not enforce it
+### ARCH-C34-01 - Sidecar color backfill can race the live per-image processing lock
 
 Severity: High
 Confidence: High
-Status: confirmed design issue
+Status: confirmed
 
 Evidence:
 
-- The guard documents that the app is intended for one web instance and one startup process, but that startup guard is intentionally warn-only: `apps/web/src/lib/single-writer-guard.ts:7-16`.
-- The topology warning states that multiple instances are unsafe while startup continues: `apps/web/src/lib/single-writer-guard.ts:218-235`.
-- Startup runs the guard as a non-fatal fire-and-forget check: `apps/web/src/instrumentation.ts:22-31`.
-- Process-local mutation and queue state are initialized during runtime startup: `apps/web/src/instrumentation.ts:1-10`, `apps/web/src/lib/image-queue.ts:313-372`, `apps/web/src/lib/background-db-writes.ts:3-10`.
-
-Why this is a problem:
-
-The app's correctness relies on process-local state: queue de-duplication, upload tracking, mutation barriers, rate limiter memory, background write queues, and graceful shutdown drains. A second app process is therefore a data-consistency event, not merely an operational warning. The current guard surfaces the condition but lets both processes serve traffic.
+- The sidecar imports only the global color backfill lock, not the per-image processing lock helper: `apps/web/scripts/backfill-color-pipeline.ts:50-54`.
+- The sidecar `reprocessRow()` writes derivatives and refreshes color metadata without acquiring `gallerykit:image-processing:{id}`: `apps/web/scripts/backfill-color-pipeline.ts:218-309`.
+- The sidecar holds only the global run lock: `apps/web/scripts/backfill-color-pipeline.ts:327-348`, then queues rows directly into `reprocessRow()`: `apps/web/scripts/backfill-color-pipeline.ts:524-530`.
+- The in-app admin backfill explicitly documents the same race and acquires the per-image processing claim before re-encoding: `apps/web/src/lib/admin-backfill-runner.ts:355-391`, `apps/web/src/lib/admin-backfill-runner.ts:520-544`.
+- The live image queue also acquires and releases the same per-image claim around processing: `apps/web/src/lib/image-queue.ts:683-714`, `apps/web/src/lib/image-queue.ts:767-818`.
+- Admin retry can re-enqueue a failed image into the live queue while an operator sidecar backfill is running: `apps/web/src/app/actions/images.ts:1242-1348`.
 
 Concrete failure scenario:
 
-An operator scales Docker replicas to two or briefly runs an old and new container during a manual deploy. Both processes bootstrap queues and accept uploads. They can double-process images, split upload quota/tracker state, run independent background drains, and disagree about restore or mutation barriers. Logs show the topology warning, but the damage can occur before an operator sees it.
+An operator runs `backfill-color-pipeline.ts --force-reencode` while an admin retries a failed image, or while a restarted live queue rediscovers a failed/pending row. The live queue and the sidecar can both call `processImageFormats()` for the same image and derivative filenames. Two writers can interleave temp/rename/backup writes and DB updates, so final derivative bytes can come from one run while `pipeline_version`, HDR/color columns, `was_downscaled`, `avif_10bit`, or `processing_error` describe the other. The in-app runner already fixed this class of race, but the sidecar did not inherit that lock discipline.
 
-Suggested fix:
+Recommendation:
 
-Make topology enforcement match the product contract. For a single-instance product, fail startup or fail readiness when another live writer is detected, with an explicit emergency override such as `ALLOW_UNSAFE_MULTI_WRITER=1`. If multi-instance support is desired, move queue ownership, upload locks, mutation barriers, rate limits, and background budgets to durable DB/Redis-backed leases before allowing multiple writers.
+Make the sidecar use the same per-image processing claim as `admin-backfill-runner.ts` and `image-queue.ts`. Prefer extracting a shared helper for acquire/release semantics, including destroy-on-release-failure behavior. If the claim is held, skip the row without bumping `pipeline_version` so a later run can retry. Add a regression test or static contract that the sidecar imports/uses `getImageProcessingLockName()` before calling `processImageFormats()`.
 
-## Likely Issues
-
-### ARCH-C24-05 - Smart collections are a partial bounded context without an operable admin lifecycle
+### ARCH-C34-02 - Background DB connection budgets are fragmented across queue and in-app backfill
 
 Severity: Medium
+Confidence: High
+Status: confirmed
+
+Evidence:
+
+- The shared MySQL pool is hard-limited to 10 connections with queue limit 20: `apps/web/src/db/index.ts:31-42`.
+- The live image queue independently reserves half the pool and clamps `QUEUE_CONCURRENCY`: `apps/web/src/lib/image-queue.ts:121-153`.
+- The in-app admin backfill independently reserves half the pool and clamps `ADMIN_BACKFILL_CONCURRENCY`: `apps/web/src/lib/admin-backfill-runner.ts:97-143`, `apps/web/src/lib/admin-backfill-runner.ts:716-727`.
+- Each subsystem's arithmetic is locally valid, but neither one subtracts the other's active reservations.
+
+Concrete failure scenario:
+
+On the default pool of 10, the queue can run at effective concurrency 2 while an admin backfill also runs at effective concurrency 2. The backfill pins one global lock connection plus per-image claims and transient update connections; the queue pins per-image claims and transient row/update connections. Together they can consume most of the pool, leaving foreground page queries, admin actions, rate-limit checks, and config reads queued behind long-running encode/detect work. Under a burst, mysql2's `queueLimit: 20` can reject foreground work even though both background systems stayed inside their own caps.
+
+Recommendation:
+
+Introduce a shared background-resource budget for DB-bearing jobs. Queue processing, in-app color backfill, semantic embedding backfill, analytics/background writes, and restore maintenance should acquire tokens from the same coordinator, with explicit foreground reserve. Add a stress/regression test using a small configured pool that runs queue + backfill together and asserts total background leases never exceed the shared cap.
+
+### ARCH-C34-03 - Semantic embedding bootstrap and semantic sidecars do not coordinate on one work owner
+
+Severity: Medium
+Confidence: High
+Status: confirmed design risk
+
+Evidence:
+
+- Live queue bootstrap scans processed images missing the active embedding version and calls `storeImageEmbeddingForMode()` without acquiring `LOCK_SEMANTIC_EMBEDDING_BACKFILL`: `apps/web/src/lib/image-queue.ts:542-637`.
+- The CLI semantic backfill acquires `LOCK_SEMANTIC_EMBEDDING_BACKFILL`, but that only excludes another semantic backfill/restore path, not live bootstrap: `apps/web/scripts/backfill-clip-embeddings.ts:109-130`.
+- The admin semantic backfill action uses the same semantic lock, again not observed by live bootstrap: `apps/web/src/app/actions/embeddings.ts:113-131`.
+- CLIP inference is bounded by an in-process queue with its own pending limit and timeout: `apps/web/src/lib/clip-model.ts:53-72`, `apps/web/src/lib/clip-model.ts:117-173`.
+
+Concrete failure scenario:
+
+Production semantic mode is enabled and an operator starts the semantic embedding sidecar for a large backlog. At the same time, normal image queue bootstrap continues scanning for missing embeddings and running CLIP inference on the same candidates. Upsert/idempotent writes may converge, but CPU/inference slots and DB reads are duplicated. Public similar/semantic search requests can then wait behind maintenance work or hit the CLIP queue timeout even though a single semantic backfill owner would have been sufficient.
+
+Recommendation:
+
+Make live bootstrap observe semantic backfill ownership. A low-risk design is a non-blocking check for `LOCK_SEMANTIC_EMBEDDING_BACKFILL`: if held, skip bootstrap for that pass and let the sidecar/admin action own the backlog. A stronger design is a durable embedding work queue with a single lease mechanism shared by bootstrap, admin action, and CLI sidecar. Include metrics/logs that distinguish "skipped because a semantic backfill owner is active" from actual embedding failures.
+
+## Likely Findings
+
+### ARCH-C34-04 - Operator color sidecar bypasses the in-app DB pool clamp
+
+Severity: Medium
+Confidence: Medium-High
+Status: likely
+
+Evidence:
+
+- The sidecar accepts `BACKFILL_CONCURRENCY` with fallback 2 and max 8, independent of DB pool headroom: `apps/web/scripts/backfill-color-pipeline.ts:384-388`.
+- The in-app admin runner has a pool-aware cap and logs clamp-down when requested concurrency exceeds the pool budget: `apps/web/src/lib/admin-backfill-runner.ts:130-143`, `apps/web/src/lib/admin-backfill-runner.ts:716-727`.
+- The sidecar imports the same app DB pool module in a separate Node process, so it has its own local pool limit rather than participating in the live app process's cap: `apps/web/src/db/index.ts:31-42`.
+
+Concrete failure scenario:
+
+An operator raises `BACKFILL_CONCURRENCY=8` for a maintenance run while the live app is serving traffic and processing uploads. The sidecar can run up to eight concurrent Sharp/detection/update tasks from its own process and its own pool, while the live app also has a 10-connection pool. The in-app pool clamps do not protect the MySQL server, CPU, or disk I/O from aggregate sidecar + app pressure. Foreground requests can slow or fail even when the admin UI backfill path would have clamped the same workload.
+
+Recommendation:
+
+Reuse the in-app backfill concurrency resolver in the sidecar or add a server-wide maintenance budget lock/table that all background processes share. At minimum, clamp sidecar concurrency from DB pool size and expose a warning matching the in-app clamp. Prefer one backfill engine used by both CLI and admin action, with transport-specific wrappers only.
+
+## Manual-Validation Risks
+
+### ARCH-C34-05 - Public SSR rate limiting depends on manually applied host Nginx config
+
+Severity: High if drifted in production; Medium as a repository risk
 Confidence: Medium
-Status: likely issue; functional need and operator expectations need product validation
+Status: manual-validation risk
 
 Evidence:
 
-- Smart collections have schema and public metadata fields: `apps/web/src/db/schema.ts:328-342`.
-- Server actions can create, update, and delete collections: `apps/web/src/app/actions/collections.ts:16-68`, `apps/web/src/app/actions/collections.ts:71-123`, `apps/web/src/app/actions/collections.ts:125-150`.
-- The read helper was removed because there are no current callers and endpoint hardening was not needed yet: `apps/web/src/app/actions/collections.ts:152-158`.
-- Public collection pages read and compile saved collection rules: `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx:84-111`.
-- Admin navigation exposes dashboard, categories, tags, SEO, settings, tokens, password, users, DB, and analytics, but no collection management surface: `apps/web/src/components/admin-nav.tsx:15-26`.
-- User-facing copy says custom collections are not editable in the admin UI yet and can require direct database edits when deleting referenced topics: `messages/en.json:507-508`.
-
-Why this is a problem:
-
-The bounded context is neither fully internal nor fully operable. Schema, public rendering, and mutating actions exist, but the admin lifecycle is incomplete. That creates a feature island whose records can affect public behavior while normal administrators cannot list, validate, repair, or safely detach them.
+- Public and image optimizer limiter zones live in the Nginx config template: `apps/web/nginx/default.conf:1-19`.
+- The limiter key caveat requires real-client-IP configuration in LB-fronted topologies, otherwise all clients share the LB's bucket or the limiter sees the wrong address: `apps/web/nginx/default.conf:20-29`.
+- The public SSR catch-all limiter is applied only in the Nginx location block: `apps/web/nginx/default.conf:274-295`.
+- The config itself says deploys do not touch this file and an operator must apply/reload it manually: `apps/web/nginx/default.conf:290-293`.
+- The app deploy script rebuilds/restarts Docker services and prunes Docker artifacts, but does not copy or reload host Nginx: `apps/web/deploy.sh:51-55`, `apps/web/deploy.sh:79-104`.
 
 Concrete failure scenario:
 
-A collection references a topic that needs deletion. The delete flow blocks because the topic is referenced by a collection, but the admin UI has no collection editor to remove that reference. The operator is pushed toward direct DB edits, bypassing application validation and risking malformed collection rules or broken public collection pages.
+`npm run deploy` succeeds on a host whose live Nginx config predates the public SSR limiter or lacks realip configuration. Dynamic public pages remain unthrottled at the edge, or all visitors collapse into one limiter bucket behind a load balancer and receive false 429s. App-level tests and deployment success would not reveal the drift because the safety control is outside the app deployment unit.
 
-Suggested fix:
+Recommendation:
 
-Either complete the bounded context or hide it behind a clear feature flag. Completing it means an admin collection list/editor, validation preview, reference management during topic/tag deletion, and tests for rule compile/render behavior. If it remains intentionally dormant, remove or harden unused mutating actions and keep public routes disabled unless records are managed through a supported path.
+Add a non-mutating post-deploy/proxy-topology verification step that records the live Nginx checksum/effective config and confirms public page burst behavior plus real-client-IP behavior. Keep reload/application manual if required by ops policy, but make stale proxy safety controls visible as a failed operational check. If production cannot reliably prove the edge limiter, add an app-layer fallback limiter for public dynamic page requests.
 
-### ARCH-C24-06 - Large client components concentrate unrelated UI state and domain side effects
+## Non-Findings And Guardrails Confirmed
 
-Severity: Medium
-Confidence: High for source shape; Medium for defect likelihood
-Status: likely issue
+- Admin API route auth gate passed. Current admin API route exports are wrapped by `withAdminAuth(...)` per `npm run lint:api-auth --workspace=apps/web`.
+- Mutating server action origin gate passed. Current mutating server actions either call `requireSameOriginAdmin()` or carry explicit approved exemptions per `npm run lint:action-origin --workspace=apps/web`.
+- Public App Router rate-limit gate passed. Current public route handlers either call approved rate-limit helpers or carry explicit exemptions per `npm run lint:public-route-rate-limit --workspace=apps/web`.
+- `proxy.ts` excludes `/api/*`, but admin API protection is handled by the route-level `withAdminAuth(...)` gate; no confirmed boundary gap was found in the inspected admin API routes.
+- The storage abstraction remains quarantined/future-facing rather than a misleading active backend switch in the inspected runtime paths. I found no evidence of `getStorage()` being used as the production upload/process/serve boundary.
+- Migration safety has explicit journal/hash and reconcile safeguards in `migrate.js`; no current migration-ordering defect was confirmed during this pass. Live DB state was not inspected.
+- Service-worker/runtime-cache risks were reviewed at the file-interaction level; no confirmed admin/private cache boundary defect was found. Browser-level service-worker behavior was not manually exercised.
 
-Evidence:
+## Final Sweep / Skipped Files
 
-- `apps/web/src/components/photo-viewer.tsx` is 1064 lines and imports routing, sharing, lightbox state, histogram, color detail, similar image fetches, URL transforms, display capability checks, and download labels in one component region: `apps/web/src/components/photo-viewer.tsx:47-71`.
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx` is 895 lines and mixes settings form state, backfill polling/timers, validation, save actions, and trigger actions: `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:55-75`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:91-149`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:160-253`.
-- `apps/web/src/components/image-manager.tsx` is 696 lines and combines table presentation, selection, tag editing, deletion, upload/processing status, and mutation handling: `apps/web/src/components/image-manager.tsx:72-120`, `apps/web/src/components/image-manager.tsx:427-620`.
-- `apps/web/src/components/search.tsx` is 581 lines and keeps query state, filters, semantic/text mode behavior, async result loading, and rendering together: `apps/web/src/components/search.tsx:131-260`.
-
-Why this is a problem:
-
-These components are doing container, state-machine, data-fetch, mutation, accessibility, and presentation work at the same layer. The architecture makes it hard to reason about invariants such as "which async result is current," "which modal owns focus," "which mutation is allowed during restore," or "which state resets when filters change."
-
-Concrete failure scenario:
-
-A seemingly visual change to the photo viewer or admin settings page changes local state ordering and accidentally leaves stale async results visible, double-triggers a backfill action, breaks keyboard focus, or bypasses an existing disabled state during restore. Because behavior and rendering are interleaved, review has to re-audit the whole component for each localized edit.
-
-Suggested fix:
-
-Refactor incrementally by behavior boundary, not by cosmetic sections. Move async/search/backfill/viewer state into focused hooks or reducers, split pure presentational children from mutation containers, and add interaction tests for the extracted state machines. Keep the public props narrow so domain decisions remain in one container per workflow.
-
-## Risks Needing Manual Validation
-
-### ARCH-C24-07 - Nginx and real-client-IP behavior are operator-owned but safety-critical
-
-Severity: Medium
-Confidence: Medium
-Status: risk needing manual validation
-
-Evidence:
-
-- Nginx rate-limit zones and comments depend on client IP behavior: `apps/web/nginx/default.conf:1-29`.
-- The config explicitly documents an operator contract around `X-Forwarded-For` and trusted proxy topology: `apps/web/nginx/default.conf:59-71`.
-- Admin DB restore upload limits are enforced in Nginx config: `apps/web/nginx/default.conf:115-120`.
-- Next image and public SSR limiters live in the same config: `apps/web/nginx/default.conf:254-295`.
-- App deploy rebuilds/restarts compose services but does not apply external Nginx config: `apps/web/deploy.sh:51-55`, `apps/web/deploy.sh:79-104`.
-
-Why this is a problem:
-
-Several security and availability controls live outside the app deployment unit. If the live reverse proxy config drifts from the repository copy, app tests and app deploy success do not prove that public/admin rate limits, DB restore caps, or real-client-IP behavior are active in production.
-
-Concrete failure scenario:
-
-The app deploy succeeds, but the host Nginx config was never reloaded after a repository change. Public SSR requests are rate-limited by proxy IP instead of client IP, or a restore upload cap remains at an old value. The app appears healthy, but production abuse controls or admin upload behavior differ from reviewed source.
-
-Suggested fix:
-
-Add an operator validation step that compares the live Nginx config/checksum and effective `real_ip` behavior against the repository contract during deploy or post-deploy health checks. Keep app deploy non-destructive, but make drift visible and fail the operational checklist when safety-critical proxy config is stale.
-
-### ARCH-C24-08 - Build-time and runtime environment split can produce stale image/site behavior after restart-only operations
-
-Severity: Medium
-Confidence: Medium
-Status: risk needing manual validation
-
-Evidence:
-
-- Next image remote patterns are built from `IMAGE_BASE_URL` at module/build configuration time: `apps/web/next.config.ts:32-38`, `apps/web/next.config.ts:121-125`.
-- Docker build args bake `BASE_URL`, `IMAGE_BASE_URL`, upload limits, and related public values into the build step: `apps/web/Dockerfile:91-99`, `apps/web/Dockerfile:117-120`.
-- Runtime uses an env file and mounts site config, while compose comments state that `src/site-config.json` is build-time inlined and the runtime mount is inert unless the image was built with that file: `apps/web/docker-compose.yml:18-32`.
-- Remote deploy is config-driven through an env file and then runs the remote deploy command: `scripts/deploy-remote.sh:22-29`, `scripts/deploy-remote.sh:55-80`, `scripts/deploy-remote.sh:87-93`.
-
-Why this is a problem:
-
-Some values are runtime configuration, while others affect compiled Next output. The boundary is documented, but it is easy for an operator to perform a restart-only change and expect new image host/site values to apply. The result can be a running container whose runtime env and compiled Next config disagree.
-
-Concrete failure scenario:
-
-An operator changes `IMAGE_BASE_URL` or site config in the deploy env file and restarts the container instead of rebuilding. Server code sees one value, but Next's image optimizer remote allowlist or inlined site metadata still reflects the old build. Public pages then fail to optimize images from the new host or display stale site metadata until a full rebuild occurs.
-
-Suggested fix:
-
-Make build-scoped settings explicit in tooling. The deploy helper should print or validate a build-required-change list when build-time env/site config differs from the image labels used to build the current container. Alternatively, move values that truly need runtime mutability out of Next build config and into runtime-serving paths with tests that prove restart-only changes work.
-
-## Final Sweep
-
-Relevant file categories examined:
-
-- App Router public pages, admin protected pages, public/admin API routes, and server actions.
-- Auth/session/token/origin/rate-limit boundaries, including scanner tests and route wrappers.
-- Restore maintenance, mutation barriers, pending session revocations, pending file deletions, graceful shutdown, and startup instrumentation.
-- Upload, direct filesystem paths, storage abstraction modules, direct upload serving, image processing queue, CLIP model/inference, semantic search and similar-image APIs.
-- Database schema, migration journal, migration runner, DML baseline guard, and legacy schema reconciliation.
-- Runtime/deploy topology: Dockerfile, compose, deploy scripts, Nginx config, Next config, instrumentation, and single-writer guard.
-- Frontend component architecture, especially large client components and admin/public workflow containers.
-- Existing plan/deferred ledgers to avoid re-filing already resolved Cycle 23 items as new defects.
-
-Common missed issues checked:
-
-- Migration journal/schema contract: no new finding. The migration runner has a journal/hash postcondition and DML baseline guard, and the schema reconciliation path mirrors committed schema state in the inspected regions.
-- Admin API auth wrappers and action origin policy: no new finding from architecture inspection; these boundaries are covered by dedicated scanners.
-- Privacy-sensitive admin-only fields: no new finding from the reviewed schema/data privacy guard pattern.
-- Restore maintenance coverage: Cycle 23 appears to have addressed the protected-admin gate class that existed in the previous architect review; I did not re-raise it.
-- Public map/search/semantic scale risks: still architecturally relevant and partly documented as deferred scale work, but I did not raise them as new confirmed defects beyond the manual-validation/operator and shared-budget risks above.
-- Upload/storage abstraction, background budget ownership, single-writer topology, frontend component boundaries, smart collection lifecycle, and deploy/operator boundaries remain the primary architectural risk areas for this cycle.
+Final sweep covered route handlers, admin action scanners, upload/processing/backfill paths, DB pool ownership, storage imports, proxy/deploy topology, and migration journal/migrator interactions. Generated/build artifacts, dependency folders, uploaded media, live MySQL contents, and live host Nginx state were intentionally not inspected. The remaining risks above are the highest-confidence architecture/coupling issues found in this review pass.

@@ -146,6 +146,7 @@ const adminBackfillStateKey = Symbol.for('gallerykit.adminBackfillState');
 
 interface AdminBackfillState {
     running: boolean;
+    activeRunPromise: Promise<void> | null;
     /** Total candidate count from the last started run, for status disclosure. */
     lastQueuedCount: number;
     /**
@@ -219,6 +220,8 @@ interface AdminBackfillState {
     deletedMidReencode: number;
 }
 
+type AdminBackfillStateSnapshot = Omit<AdminBackfillState, 'activeRunPromise'>;
+
 function getState(): AdminBackfillState {
     const g = globalThis as typeof globalThis & {
         [adminBackfillStateKey]?: AdminBackfillState;
@@ -226,6 +229,7 @@ function getState(): AdminBackfillState {
     if (!g[adminBackfillStateKey]) {
         g[adminBackfillStateKey] = {
             running: false,
+            activeRunPromise: null,
             lastQueuedCount: 0,
             processed: 0,
             errors: 0,
@@ -243,6 +247,7 @@ function getState(): AdminBackfillState {
     // Defensive backfill for state objects created before these fields existed
     // (e.g. a globalThis symbol seeded by an older module version or a test).
     const s = g[adminBackfillStateKey]!;
+    s.activeRunPromise ??= null;
     s.processed ??= 0;
     s.errors ??= 0;
     s.skippedMissingOriginal ??= 0;
@@ -286,6 +291,7 @@ export function _resetAdminBackfillStateForTesting(): void {
     };
     g[adminBackfillStateKey] = {
         running: false,
+        activeRunPromise: null,
         lastQueuedCount: 0,
         processed: 0,
         errors: 0,
@@ -302,7 +308,7 @@ export function _resetAdminBackfillStateForTesting(): void {
 }
 
 /** Public read-only view of runner state, exposed via getAdminBackfillStatus(). */
-export function readAdminBackfillState(): Readonly<AdminBackfillState> {
+export function readAdminBackfillState(): Readonly<AdminBackfillStateSnapshot> {
     const s = getState();
     return {
         running: s.running,
@@ -861,8 +867,20 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         console.error('[admin-backfill] Run aborted:', err);
     } finally {
         state.running = false;
+        if (state.activeRunPromise) {
+            state.activeRunPromise = null;
+        }
         await releaseBackfillLock(lockConn).catch(() => undefined);
     }
+}
+
+export async function shutdownAdminBackfillRunner(): Promise<void> {
+    const state = getState();
+    const activeRun = state.activeRunPromise;
+    if (!activeRun) return;
+    await activeRun.catch((err) => {
+        console.error('[admin-backfill] runner rejected during shutdown drain:', err);
+    });
 }
 
 /**
@@ -914,7 +932,9 @@ export async function triggerAdminBackfill(): Promise<AdminBackfillStatus> {
         // (e.g. a `getState()` re-entrancy bug), we swallow the rejection
         // here rather than escalate to an unhandledRejection that newer
         // Node versions will use to terminate the process.
-        runBackfill(lockConnHandoff).catch((err) => {
+        const activeRunPromise = runBackfill(lockConnHandoff);
+        state.activeRunPromise = activeRunPromise;
+        activeRunPromise.catch((err) => {
             console.error('[admin-backfill] runner rejected synchronously:', err);
         });
         return { status: 'queued', affectedRows: candidateCount };

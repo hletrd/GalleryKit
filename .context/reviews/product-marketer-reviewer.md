@@ -1,18 +1,74 @@
-# Product Marketer Reviewer - Cycle 24
+# Product Marketer Reviewer - Run-10 Cycle 34
 
-Review target: current `HEAD` `4b43fad7`.
+Review target: current `HEAD` `e94455d3`.
 
-Role surface: product/docs/user-facing claim truthfulness and market-positioning risk for GalleryKit as a self-hosted photo gallery. BurstPick-specific assumptions were not used.
+Role surface: registered `~/.codex/agents/product-marketer-reviewer.md` reviewer-style lane, adapted to GalleryKit. I treated the BurstPick-specific text in that surface as non-applicable and used the underlying mandate: verify public/product/operator claims against source evidence.
+
+Scope: product-facing messaging, public UX copy, SEO/discoverability, docs/product-promise alignment, no-payment/no-editing photographer constraints, i18n copy, and operator-facing communication. Review-only: this artifact is the only intended file change.
+
+## Relevant Inventory
+
+Primary docs and operator promises:
+
+- `AGENTS.md`
+- `CLAUDE.md`
+- `README.md`
+- `apps/web/README.md`
+- `apps/web/src/site-config.json`
+- `apps/web/src/site-config.example.json`
+- `apps/web/scripts/ensure-site-config.mjs`
+
+Public metadata, SEO, and discoverability:
+
+- `apps/web/src/app/[locale]/layout.tsx`
+- `apps/web/src/app/[locale]/(public)/layout.tsx`
+- `apps/web/src/app/sitemap.ts`
+- `apps/web/src/app/robots.ts`
+- `apps/web/src/app/feed.xml/route.ts`
+- `apps/web/src/lib/data.ts`
+- `apps/web/src/components/footer.tsx`
+- `apps/web/src/components/nav-client.tsx`
+
+Public UX copy and i18n:
+
+- `apps/web/messages/en.json`
+- `apps/web/messages/ko.json`
+- `apps/web/src/app/[locale]/(public)/about-gallerykit/page.tsx`
+- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
+- `apps/web/src/components/search.tsx`
+- `apps/web/src/components/similar-photos.tsx`
+- `apps/web/src/components/download-button.tsx`
+- `apps/web/src/components/photo-lightbox.tsx`
+
+Admin/operator communication:
+
+- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
+- `apps/web/src/app/actions/settings.ts`
+- `apps/web/src/app/[locale]/admin/(protected)/db-tools/db-tools-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
+- `apps/web/src/app/[locale]/admin/(protected)/upload/upload-client.tsx`
+
+Product-claim source checks:
+
+- `apps/web/src/lib/gallery-config-shared.ts`
+- `apps/web/src/lib/storage/index.ts`
+- `apps/web/src/lib/storage/types.ts`
+- `apps/web/src/lib/analytics.ts`
+- `apps/web/src/db/schema.ts`
+- `apps/web/src/__tests__/privacy-fields.test.ts`
+- `apps/web/src/__tests__/cycle-24-source-contracts.test.ts`
+- `apps/web/e2e/semantic-search.spec.ts`
+- historical `docs/`, `plan/`, and `.context/plans|reviews` references for payment/editing/search drift
 
 ## Executive Summary
 
-One confirmed trust/positioning issue remains: the repository tracks a real Atik deployment `site-config.json`, and the production validation path accepts it as a valid canonical fallback. A fresh self-hosting operator can therefore ship the wrong public brand/canonical URL if they miss the config customization step.
+One confirmed product trust issue remains from the current repository state: the checked-in `site-config.json` is a real Atik deployment config, and the production validation path accepts it. That can make a fresh self-hosted install publish another operator's brand, canonical URL, OpenGraph metadata, sitemap URLs, and footer fallback if `BASE_URL` or DB SEO settings are absent.
 
-I did not find additional confirmed misleading claims in the reviewed docs/UI copy. The current README, app README, About/Privacy pages, settings copy, token copy, and source comments are mostly careful about the major product boundaries: semantic search is operator-gated and disabled by default, no Lightroom Classic plugin is bundled, no payment/proofing/editor/scoring feature is promised, DB backups are rows-only/plaintext-at-rest, HDR ingest is SDR delivery, admin users are root admins, storage is local filesystem only, and PWA support is not full offline sync.
+I did not find another confirmed current product-copy mismatch. The active docs and EN/KO UI copy are generally careful about the major constraints: no payment/proofing/editing/culling/scoring workflow, no bundled Lightroom Classic plugin, semantic search is operator-gated and disabled by default, stub search is explicitly non-semantic, public HDR delivery is not promised yet, auto alt text is EXIF-derived, storage is local filesystem only, and DB backups are rows-only/plaintext-at-rest.
 
 ## Confirmed Issues
 
-### PMR-C24-01 - Checked-in Atik site config can silently become a fresh deploy's public brand/canonical
+### PMR-C34-01 - Checked-in Atik config can become a fresh deploy's public brand and canonical URL
 
 Severity: Medium  
 Confidence: High  
@@ -21,73 +77,65 @@ Status: Confirmed
 Exact file/region:
 
 - `apps/web/src/site-config.json:2-10`
-- `README.md:60-77`, `README.md:121-122`, `README.md:171-172`, `README.md:198-200`
-- `apps/web/README.md:19-20`, `apps/web/README.md:49-50`, `apps/web/README.md:57`
-- `apps/web/scripts/ensure-site-config.mjs:6-12`, `apps/web/scripts/ensure-site-config.mjs:14-42`
+- `apps/web/scripts/ensure-site-config.mjs:4-12`, `apps/web/scripts/ensure-site-config.mjs:14-42`
+- `apps/web/src/lib/data.ts:1851-1872`, `apps/web/src/lib/data.ts:1887-1896`
 - `apps/web/src/app/sitemap.ts:14-18`, `apps/web/src/app/sitemap.ts:70-113`
-- `apps/web/src/app/[locale]/layout.tsx:15-26`
+- `apps/web/src/app/[locale]/layout.tsx:15-48`
 - `apps/web/src/components/footer.tsx:33-37`
-- `apps/web/src/lib/data.ts:1866-1890`
+- `README.md:60-77`, `README.md:121-122`, `README.md:171-172`, `README.md:198-200`
+- `apps/web/README.md:19-20`, `apps/web/README.md:49-51`
 
 Why this is a problem:
 
-The committed config is deployment-specific: `Atik Gallery`, `https://gallery.atik.kr`, `Atik`, and an Atik footer/nav fallback. The docs instruct operators to copy/edit `site-config.example.json`, but the destination already exists in a fresh clone. The production guard rejects placeholders such as `example.com` and localhost, but `gallery.atik.kr` is a real non-placeholder URL, so a production build without `BASE_URL` can pass with someone else's canonical host and brand.
+The committed config is deployment-specific: `Atik Gallery`, `https://gallery.atik.kr`, `Atik`, and Atik footer/nav text. The docs warn operators to customize `site-config.json`, but the target file already exists in a fresh clone. The production guard rejects placeholder hosts such as `example.com` and localhost, but `gallery.atik.kr` is a real URL, so it passes validation as a production fallback.
 
-Concrete failure scenario:
+Concrete user/operator failure scenario:
 
-A self-hosting operator clones GalleryKit, creates `.env.local`, skips `cp apps/web/src/site-config.example.json apps/web/src/site-config.json` because the file already exists, and builds without `BASE_URL`. The app can publish sitemap entries, `metadataBase`, OpenGraph defaults, footer text, and fallback SEO settings pointing at Atik's deployment. This undercuts the self-hosted trust story and can confuse crawlers, link previews, and users.
+A self-hosting photographer or studio clones GalleryKit, creates environment variables, sees `apps/web/src/site-config.json` already present, and builds without `BASE_URL`. If DB SEO settings are not yet initialized or temporarily unavailable, the app can emit sitemap entries, canonical metadata, OpenGraph defaults, footer text, and fallback SEO settings for Atik's gallery. Crawlers and social previews can index the wrong host/brand, while the operator experiences the project as unsafe or overly specific to the original deployment.
 
 Suggested fix:
 
-Track only `site-config.example.json` and gitignore `site-config.json`, or replace the committed config with a generic placeholder that production validation rejects unless `BASE_URL` is explicitly set. If the Atik config must stay for the primary deployment, add a denylist or deployment-specific env requirement so `gallery.atik.kr` cannot pass as an accidental fresh-install fallback. Add a source test proving production build validation refuses the checked-in deployment-specific config when `BASE_URL` is unset.
+Track only `site-config.example.json` and gitignore the real deployment `site-config.json`; or replace the committed file with a generic placeholder that production validation rejects unless `BASE_URL` or DB SEO settings provide a real host. If this repository must keep the Atik config for its primary deployment, require an explicit deployment env such as `GALLERYKIT_ALLOW_ATIK_SITE_CONFIG=true` before `gallery.atik.kr` passes production validation. Add a source test proving a production build without `BASE_URL` refuses the checked-in deployment-specific config in distributable mode.
 
 ## Likely Issues
 
-None found in this pass.
+None found in active public docs, active UI copy, current config surfaces, or operator-facing admin copy.
+
+Historical notes: old plans, migrations, and review files still contain Stripe/payment/entitlement terminology because those features were removed over time. I did not count this as a likely active issue because current README/app README/About copy explicitly says GalleryKit is not a payment/proofing system (`README.md:33-35`, `README.md:54`, `apps/web/messages/en.json:831-839`, `apps/web/messages/ko.json:831-839`), and `CLAUDE.md:655` documents that Stripe/paid downloads were removed.
 
 ## Risks Needing Manual Validation
 
-- Live example deployment state: README correctly warns that `https://gallery.atik.kr` may have deployment-specific model/search state, but I did not validate the live production DB/settings, model weights, or embedding counts.
-- External channels: I reviewed repository docs and in-app copy, not GitHub release notes, screenshots, marketplace listings, social posts, or hosted docs outside this checkout.
-- Generated build artifacts: I inspected source/runtime paths, not `.next` output or a running browser session for this pass.
+- Live deployment state: I reviewed repository source, not the running `https://gallery.atik.kr` deployment. Production DB SEO settings, semantic-search mode, seeded model weights, embedding counts, analytics settings, and actual rendered metadata need live validation.
+- External marketing channels: I did not review GitHub release pages, package metadata, screenshots, blog posts, social posts, or hosted docs outside this checkout. Those channels could still overpromise removed payment/editing/AI/search features.
+- Browser-rendered UX: I inspected source and messages rather than running a browser pass. Manual/browser validation should confirm no locale interpolation, responsive truncation, or route-level metadata behavior changes the copy in production.
+- Historical docs exposure: `docs/`, `plan/`, `.context/plans/`, and `.context/reviews/` include deliberately historical content. If any of those are published as user docs, old payment/search/deployment language should be curated or labeled as archival.
 
 ## Claim Checks
 
-Semantic search: supportable. `README.md:50` and `apps/web/README.md:65-91` describe disabled-by-default, operator-runbook production activation, local/offline inference after model seeding, and bounded newest-first scans. Source supports this via `apps/web/src/lib/gallery-config-shared.ts:119-128` and `apps/web/src/lib/gallery-config-shared.ts:176-228`, Settings only writing Disabled/Stub in `settings-client.tsx:813-874`, and the public search UI warning in `search.tsx:536-570`.
+No-payment/no-editing photographer constraints: supportable. `README.md:33-35` defines GalleryKit as finished-photo publishing, not editing/culling/scoring/proofing/payment/SaaS. `README.md:54` repeats that admin batch operations are metadata-only. EN/KO About copy mirrors the constraint at `apps/web/messages/en.json:831-839` and `apps/web/messages/ko.json:831-839`.
 
-No editor/culling/scoring/payment/proofing/BurstPick positioning: supportable. `README.md:33-54` and `apps/web/messages/en.json:831-839` explicitly define GalleryKit as finished-photo publishing and say it is not an editor, culling station, scoring tool, proofing portal, payment system, hosted SaaS workflow, or bundled Lightroom Classic plugin. No `BurstPick` claims were found in the reviewed source/docs.
+Semantic search: supportable. `README.md:50` and `apps/web/README.md:66-92` describe disabled-by-default, operator-runbook activation, local/offline inference after model seeding, and bounded newest-first scans. Settings copy and behavior keep production activation out of the admin UI (`apps/web/messages/en.json:771-781`, `apps/web/messages/ko.json:771-781`, `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx:813-876`, `apps/web/src/app/actions/settings.ts:102-103`). Public search labels distinguish stub mode from production semantics (`apps/web/src/components/search.tsx:532-568`), and similar photos are hidden outside production mode (`apps/web/src/components/similar-photos.tsx:141`).
 
-Upload integration: supportable. `README.md:216-227`, `apps/web/README.md:97-106`, and `apps/web/messages/en.json:875-895` describe a PAT-authenticated upload API and token risk, not a bundled Lightroom plugin.
+SEO/discoverability: mostly supportable except PMR-C34-01. Metadata, sitemap, and DB SEO settings consistently use `BASE_URL || siteConfig.url` (`apps/web/src/app/sitemap.ts:14-18`, `apps/web/src/app/[locale]/layout.tsx:15-48`, `apps/web/src/lib/data.ts:1851-1872`). The risk is not inconsistent plumbing; it is that the checked-in fallback is a real deployment identity.
 
-Privacy/analytics: supportable. `apps/web/messages/en.json:841-849` discloses optional Google Analytics, first-party view events, rate-limit IP buckets, and OpenStreetMap tiles. Source aligns: public layout loads GA only when `siteConfig.google_analytics_id` validates (`layout.tsx:23-35`), analytics helpers persist country/referrer summaries rather than full IPs (`analytics.ts:1-11`, `schema.ts:255-296`), and rate-limit buckets can store IPs (`schema.ts:244-251`).
+Privacy/analytics: supportable. Privacy copy discloses optional Google Analytics, first-party view events, rate-limit IP buckets, and OpenStreetMap tiles (`apps/web/messages/en.json:841-851`, `apps/web/messages/ko.json:841-851`). GA only loads when the build-time config value validates (`apps/web/src/app/[locale]/(public)/layout.tsx:23-35`), and the privacy page derives its GA disclosure from the same config (`apps/web/src/app/[locale]/(public)/privacy/page.tsx:13-32`).
 
-Backups/restore: supportable. README/app README and admin UI copy state that backups are database rows only, plaintext at rest, and do not include originals/derivatives/resources (`README.md:180`, `apps/web/README.md:59-60`, `apps/web/messages/en.json:16-22`).
+HDR/color: supportable. Upload and settings copy say HDR source retention does not mean public HDR delivery (`apps/web/messages/en.json:176`, `apps/web/messages/ko.json:176`, `apps/web/messages/en.json:383-385`, `apps/web/messages/ko.json:383-385`, `apps/web/messages/en.json:784-789`, `apps/web/messages/ko.json:784-789`). CLAUDE reinforces that public derivatives remain SDR until HDR output ships.
 
-HDR/color: supportable. README and Settings copy state HDR ingest is gated and public derivatives are SDR until HDR delivery ships (`README.md:46`, `apps/web/messages/en.json:176`, `apps/web/messages/en.json:784-787`). CLAUDE and source reinforce that public HDR badges are hidden until bytes fulfill the claim.
+Auto alt text: supportable. Docs/settings frame it as EXIF-derived suggestions, not hosted AI captioning (`apps/web/README.md:94-97`, `apps/web/messages/en.json:767-770`, `apps/web/messages/ko.json:767-770`).
 
-Storage and scale: supportable. `CLAUDE.md:159` says the storage abstraction is not a live S3/MinIO feature, and README deployment copy calls out single web-instance/single-writer topology plus local filesystem persistence (`README.md:175`, `CLAUDE.md:245-249`, `CLAUDE.md:531`).
+Upload/API/LR positioning: supportable. `README.md:218-227`, `apps/web/README.md:98-107`, and token copy at `apps/web/messages/en.json:875-903` describe a PAT-authenticated upload API and explicitly say no Lightroom Classic plugin is bundled.
 
-Auto alt text: supportable. Settings and docs call this EXIF-derived hints, not model-generated captions (`apps/web/messages/en.json:767-770`, `CLAUDE.md:635-637`), with a source-contract test guarding active comments (`apps/web/src/__tests__/cycle-24-source-contracts.test.ts:50-63`).
+Storage and scale: supportable. `CLAUDE.md:159` says the storage abstraction is not integrated and only local filesystem is live. Source comments match this at `apps/web/src/lib/storage/index.ts:5-12`. I did not find active S3/MinIO support promises.
+
+Operator backups/admins: supportable. DB tools copy says backups cover database rows, are plaintext at rest, and exclude originals/derivatives/resources (`apps/web/messages/en.json:18-46`, `apps/web/messages/ko.json:18-46`). User-management copy says every admin has root access (`apps/web/messages/en.json:47-65`, `apps/web/messages/ko.json:47-65`).
 
 ## Final Sweep
 
-Examined categories:
+Missed-issue checks completed:
 
-- Root/app docs: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `.context/plans/README.md`
-- Config/deploy docs and source: `site-config.json`, `site-config.example.json`, `ensure-site-config.mjs`, sitemap, root metadata, footer, SEO fallback accessors
-- Public pages/copy: About, Privacy, footer/nav/search, EN/KO messages
-- Admin/user-facing copy: Settings, DB backup/restore, admin users, upload, token pages/messages
-- Claim-verification source: semantic config/UI, search UI, analytics/privacy helpers/schema, storage abstraction notes, rate-limit buckets, backup/restore docs, free-download/auto-alt source-contract tests
-
-Common missed issues checked:
-
-- No current BurstPick naming or positioning claims found.
-- No current Stripe/payment/entitlement product promise found.
-- No bundled Lightroom Classic plugin promise found.
-- No S3/MinIO/storage-backend support promise found.
-- No production semantic search one-click/admin-UI activation promise found.
-- No full offline gallery sync promise found.
-- No app-level encrypted backup promise found.
-- No admin role/capability separation promise found.
-
-No destructive commands were run. No source files were edited.
+- Searched for active `Stripe`, `checkout`, `paid`, `license`, `entitlement`, `proof`, `cull`, `score`, `edit`, `Lightroom`, `S3`, `MinIO`, `semantic`, `HDR`, `analytics`, `GPS`, `OpenStreetMap`, `alt text`, and `BurstPick` claims across docs/source/messages.
+- Confirmed active public copy does not promise payments, proofing, editing, culling, scoring, hosted SaaS, S3/MinIO storage, one-click production semantic search, full offline gallery sync, encrypted app-level backups, or admin role separation.
+- Confirmed EN/KO copy is aligned on the no-payment/no-editing, semantic-search, HDR, privacy, backup, token, and upload constraints inspected in this pass.
+- Did not run lint/typecheck/tests/build because this was review-only and changed only this markdown artifact.
+- Did not commit, push, deploy, or modify source files.
