@@ -58,7 +58,7 @@ describe('cycle 17 sidecar backfill contracts', () => {
         const mainSource = source.slice(mainIdx);
         const lockIdx = mainSource.indexOf('SELECT GET_LOCK(?, 10) AS acquired');
         const postLockGuardIdx = mainSource.indexOf('assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME)', lockIdx);
-        const configIdx = mainSource.indexOf('const config = await getGalleryConfig()');
+        const configIdx = mainSource.indexOf('const config = await getGalleryConfigDetachedStrict()');
 
         expect(mainIdx).toBeGreaterThan(-1);
         expect(lockIdx).toBeGreaterThan(-1);

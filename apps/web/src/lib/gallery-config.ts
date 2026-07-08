@@ -183,6 +183,10 @@ export async function getGalleryConfigStrict(): Promise<GalleryConfig> {
     return buildGalleryConfig(await getSettingsMap());
 }
 
+export const getGalleryConfigDetachedStrict: typeof getGalleryConfigStrict = async () => {
+    return getGalleryConfigStrict();
+};
+
 /**
  * Detached-context gallery config accessor (renamed from
  * `getGalleryConfigUncached`, C4-07/ARCH4-02 run-10 c4 — the old name lied
@@ -210,7 +214,8 @@ export async function getGalleryConfigStrict(): Promise<GalleryConfig> {
  * the new value immediately, not after the TTL. Note (TEST4-02): a failed DB
  * read resolves to the fallback DEFAULT config and that fallback IS cached
  * for the TTL — a DB blip can pin defaults for up to 2 s by design.
- * Callers needing fail-closed semantics use `getGalleryConfigStrict`.
+ * Detached callers needing fail-closed semantics use
+ * `getGalleryConfigDetachedStrict`.
  */
 export const DETACHED_CONFIG_TTL_MS = 2_000;
 let uncachedConfigCache: { value: GalleryConfig; expiresAt: number } | null = null;

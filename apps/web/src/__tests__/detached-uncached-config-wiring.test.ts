@@ -48,13 +48,18 @@ describe('detached modules use the uncached gallery-config accessor (C2-10 + C3-
         expect(matches.length).toBe(3);
     });
 
-    it('admin-backfill-runner.ts imports getGalleryConfigDetached instead of the request-cached getGalleryConfig', () => {
-        expect(backfillSource).toMatch(/import\s*\{\s*getGalleryConfigDetached\s*\}\s*from\s*'@\/lib\/gallery-config'/);
+    it('gallery-config.ts exports a fail-closed detached accessor for write paths', () => {
+        expect(configSource).toMatch(/export const getGalleryConfigDetachedStrict/);
+        expect(configSource).toMatch(/getGalleryConfigDetachedStrict[\s\S]*getGalleryConfigStrict\s*\(\s*\)/);
+    });
+
+    it('admin-backfill-runner.ts imports the strict detached accessor instead of the request-cached getGalleryConfig', () => {
+        expect(backfillSource).toMatch(/import\s*\{\s*getGalleryConfigDetachedStrict\s*\}\s*from\s*'@\/lib\/gallery-config'/);
         expect(backfillSource).not.toMatch(/\bgetGalleryConfig\s*\(/);
     });
 
-    it('admin-backfill-runner.ts reads config via the uncached accessor in the detached runBackfill', () => {
-        const matches = backfillSource.match(/await\s+getGalleryConfigDetached\s*\(\s*\)/g) ?? [];
+    it('admin-backfill-runner.ts reads config via the strict accessor in the detached runBackfill', () => {
+        const matches = backfillSource.match(/await\s+getGalleryConfigDetachedStrict\s*\(\s*\)/g) ?? [];
         expect(matches.length).toBe(1);
     });
 });

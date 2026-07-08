@@ -63,7 +63,7 @@ import { detectColorSignals } from '@/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '@/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, getImageProcessingLockName, isAdvisoryLockAcquired } from '@/lib/advisory-locks';
 import { destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from '@/lib/advisory-lock-release';
-import { getGalleryConfigDetached } from '@/lib/gallery-config';
+import { getGalleryConfigDetachedStrict } from '@/lib/gallery-config';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import type { JpegChromaSubsampling } from '@/lib/gallery-config-shared';
 
@@ -698,7 +698,7 @@ async function runBackfill(lockConn: PoolConnection): Promise<void> {
         // color/quality key. Same invariant as image-queue's three detached
         // call sites (02bea8d6); pinned by
         // detached-uncached-config-wiring.test.ts.
-        const config = await getGalleryConfigDetached();
+        const config = await getGalleryConfigDetachedStrict();
         const settings: RunnerSettings = {
             quality: {
                 webp: config.imageQualityWebp,

@@ -31,11 +31,18 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
     const { t, locale } = useTranslation();
     const [isPending, startTransition] = useTransition();
     const [settings, setSettings] = useState<SeoSettings>(initialSettings);
+    const [formError, setFormError] = useState<string | null>(null);
     const initialRef = useRef<SeoSettings>(initialSettings);
     const saveButtonRef = useRef<HTMLButtonElement>(null);
+    const formErrorRef = useRef<HTMLParagraphElement>(null);
     useRestoreFocusAfterPending(saveButtonRef, isPending);
 
+    const describedBy = (...ids: string[]) => (
+        [...ids, formError ? 'seo-form-error' : null].filter(Boolean).join(' ')
+    );
+
     const handleChange = (field: keyof SeoSettings, value: string) => {
+        setFormError(null);
         setSettings(prev => ({ ...prev, [field]: value }));
     };
 
@@ -47,6 +54,7 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                     Object.entries(settings).filter(([k, v]) => v !== initialRef.current[k as keyof SeoSettings])
                 );
                 if (Object.keys(changed).length === 0) {
+                    setFormError(null);
                     toast.info(t('seo.noChanges'));
                     return;
                 }
@@ -62,12 +70,19 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                     };
                     setSettings(nextSettings);
                     initialRef.current = { ...nextSettings };
+                    setFormError(null);
                     toast.success(t('seo.saveSuccess'));
                 } else {
-                    toast.error(result.error || t('seo.saveFailed'));
+                    const message = result.error || t('seo.saveFailed');
+                    setFormError(message);
+                    toast.error(message);
+                    requestAnimationFrame(() => formErrorRef.current?.focus());
                 }
             } catch {
-                toast.error(t('seo.saveFailed'));
+                const message = t('seo.saveFailed');
+                setFormError(message);
+                toast.error(message);
+                requestAnimationFrame(() => formErrorRef.current?.focus());
             }
         });
     };
@@ -89,6 +104,12 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                 </Button>
             </div>
 
+            {formError && (
+                <p id="seo-form-error" ref={formErrorRef} role="alert" tabIndex={-1} className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive-text">
+                    {formError}
+                </p>
+            )}
+
             <Card>
                 <CardHeader>
                     <CardTitle>{t('seo.generalTitle')}</CardTitle>
@@ -101,11 +122,12 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-title"
                             value={settings.seo_title}
                             onChange={(e) => handleChange('seo_title', e.target.value)}
-	                            placeholder={t('seo.siteTitlePlaceholder')}
-	                            maxLength={200}
-	                            aria-describedby="seo-title-help"
-	                        />
-	                        <p id="seo-title-help" className="text-xs text-muted-foreground">{t('seo.siteTitleHint')}</p>
+                            placeholder={t('seo.siteTitlePlaceholder')}
+                            maxLength={200}
+                            aria-invalid={!!formError}
+                            aria-describedby={describedBy('seo-title-help')}
+                        />
+                        <p id="seo-title-help" className="text-xs text-muted-foreground">{t('seo.siteTitleHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -114,11 +136,12 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-nav-title"
                             value={settings.seo_nav_title}
                             onChange={(e) => handleChange('seo_nav_title', e.target.value)}
-	                            placeholder={t('seo.navTitlePlaceholder')}
-	                            maxLength={100}
-	                            aria-describedby="seo-nav-title-help"
-	                        />
-	                        <p id="seo-nav-title-help" className="text-xs text-muted-foreground">{t('seo.navTitleHint')}</p>
+                            placeholder={t('seo.navTitlePlaceholder')}
+                            maxLength={100}
+                            aria-invalid={!!formError}
+                            aria-describedby={describedBy('seo-nav-title-help')}
+                        />
+                        <p id="seo-nav-title-help" className="text-xs text-muted-foreground">{t('seo.navTitleHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -128,11 +151,12 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             value={settings.seo_description}
                             onChange={(e) => handleChange('seo_description', e.target.value)}
                             placeholder={t('seo.siteDescriptionPlaceholder')}
-	                            maxLength={500}
-	                            rows={3}
-	                            aria-describedby="seo-description-help"
-	                        />
-	                        <p id="seo-description-help" className="text-xs text-muted-foreground">{t('seo.siteDescriptionHint')}</p>
+                            maxLength={500}
+                            rows={3}
+                            aria-invalid={!!formError}
+                            aria-describedby={describedBy('seo-description-help')}
+                        />
+                        <p id="seo-description-help" className="text-xs text-muted-foreground">{t('seo.siteDescriptionHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -141,11 +165,12 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-author"
                             value={settings.seo_author}
                             onChange={(e) => handleChange('seo_author', e.target.value)}
-	                            placeholder={t('seo.authorPlaceholder')}
-	                            maxLength={200}
-	                            aria-describedby="seo-author-help"
-	                        />
-	                        <p id="seo-author-help" className="text-xs text-muted-foreground">{t('seo.authorHint')}</p>
+                            placeholder={t('seo.authorPlaceholder')}
+                            maxLength={200}
+                            aria-invalid={!!formError}
+                            aria-describedby={describedBy('seo-author-help')}
+                        />
+                        <p id="seo-author-help" className="text-xs text-muted-foreground">{t('seo.authorHint')}</p>
                     </div>
 
                     <div className="space-y-2">
@@ -154,11 +179,12 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             id="seo-locale"
                             value={settings.seo_locale}
                             onChange={(e) => handleChange('seo_locale', e.target.value)}
-	                            placeholder="en_US"
-	                            maxLength={10}
-	                            aria-describedby="seo-locale-help"
-	                        />
-	                        <p id="seo-locale-help" className="text-xs text-muted-foreground">{t('seo.localeHint')}</p>
+                            placeholder="en_US"
+                            maxLength={10}
+                            aria-invalid={!!formError}
+                            aria-describedby={describedBy('seo-locale-help')}
+                        />
+                        <p id="seo-locale-help" className="text-xs text-muted-foreground">{t('seo.localeHint')}</p>
                     </div>
                 </CardContent>
             </Card>
@@ -179,7 +205,8 @@ export function SeoSettingsClient({ initialSettings }: SeoSettingsClientProps) {
                             maxLength={500}
                             type="text"
                             inputMode="url"
-                            aria-describedby="seo-og-image-help"
+                            aria-invalid={!!formError}
+                            aria-describedby={describedBy('seo-og-image-help')}
                         />
                         <p id="seo-og-image-help" className="text-xs text-muted-foreground">{t('seo.ogImageUrlHint')}</p>
                     </div>

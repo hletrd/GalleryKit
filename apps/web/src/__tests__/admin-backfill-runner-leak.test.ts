@@ -23,6 +23,7 @@ const queryMock = vi.fn();
 const releaseMock = vi.fn();
 const destroyMock = vi.fn();
 const lockConnection = { query: queryMock, release: releaseMock, destroy: destroyMock };
+const processImageFormatsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/db', () => ({
     connection: {
@@ -37,7 +38,7 @@ vi.mock('@/db', () => ({
 }));
 
 vi.mock('@/lib/gallery-config', () => ({
-    getGalleryConfigDetached: vi.fn(),
+    getGalleryConfigDetachedStrict: vi.fn(),
 }));
 
 vi.mock('@/lib/restore-maintenance', () => ({
@@ -48,7 +49,7 @@ vi.mock('@/lib/process-image', async (importOriginal) => {
     const actual = (await importOriginal()) as Record<string, unknown>;
     return {
         ...actual,
-        processImageFormats: vi.fn(),
+        processImageFormats: processImageFormatsMock,
         resolveColorPipelineDecision: vi.fn(() => null),
         IMAGE_PIPELINE_VERSION: 7,
     };
@@ -63,7 +64,7 @@ vi.mock('@/lib/upload-paths', () => ({
 }));
 
 import { triggerAdminBackfill, readAdminBackfillState } from '@/lib/admin-backfill-runner';
-import { getGalleryConfigDetached } from '@/lib/gallery-config';
+import { getGalleryConfigDetachedStrict } from '@/lib/gallery-config';
 import { db } from '@/db';
 
 describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () => {
@@ -81,6 +82,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
         queryMock.mockReset();
         releaseMock.mockReset();
         destroyMock.mockReset();
+        processImageFormatsMock.mockReset();
 
         // Advisory lock acquire returns success.
         // Order of queries the runner will issue on the lock connection:
@@ -119,7 +121,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
 
         // Make getGalleryConfig blow up so the runner takes the early-throw
         // path the previous code couldn't recover from.
-        (getGalleryConfigDetached as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        (getGalleryConfigDetachedStrict as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
             new Error('boom: admin_settings row missing'),
         );
 
@@ -141,6 +143,12 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
         // R29-CRIT-1 acceptance: lastError populated, not silently null.
         expect(state.lastError).toBeTruthy();
         expect(state.lastError).toContain('boom');
+        expect(processImageFormatsMock).not.toHaveBeenCalled();
+        expect((db.execute as ReturnType<typeof vi.fn>).mock.calls).not.toEqual(
+            expect.arrayContaining([
+                expect.arrayContaining([expect.stringContaining('UPDATE images SET')]),
+            ]),
+        );
 
         await vi.waitFor(() => {
             expect(releaseMock).toHaveBeenCalled();
@@ -173,7 +181,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
             ],
         ]);
 
-        (getGalleryConfigDetached as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+        (getGalleryConfigDetachedStrict as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
 
         const first = await triggerAdminBackfill();
         expect(first.status).toBe('queued');
@@ -188,7 +196,7 @@ describe('R29-CRIT-1: admin-backfill-runner does not leak on early throw', () =>
         // does NOT short-circuit on the in-process `running` flag. Mock a
         // working config the second time; we don't care about the runner's
         // actual work, just that the trigger isn't poisoned.
-        (getGalleryConfigDetached as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        (getGalleryConfigDetachedStrict as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
             imageQualityWebp: 80,
             imageQualityAvif: 60,
             imageQualityJpeg: 80,

@@ -51,6 +51,16 @@ describe('restore temp-file cleanup ownership', () => {
         expect(DB_ACTIONS_SRC).toContain('cleanupTransferredToRestoreProcess = true');
         expect(DB_ACTIONS_SRC).toMatch(/return\s+await\s+new\s+Promise<RestoreResult>/);
         expect(DB_ACTIONS_SRC).toMatch(/finally\s*\{[\s\S]*if\s*\(!cleanupTransferredToRestoreProcess\)\s*\{[\s\S]*await cleanupTempFile\(\)/);
+
+        const restoreIdx = DB_ACTIONS_SRC.indexOf('// Restore intentionally uses');
+        const restoreSource = DB_ACTIONS_SRC.slice(restoreIdx);
+        const spawnIdx = restoreSource.indexOf("const restore = spawn('mysql'");
+        const transferIdx = restoreSource.indexOf('cleanupTransferredToRestoreProcess = true');
+        const pipeIdx = restoreSource.indexOf('readStream.pipe(restore.stdin)');
+
+        expect(spawnIdx).toBeGreaterThan(-1);
+        expect(transferIdx).toBeGreaterThan(spawnIdx);
+        expect(transferIdx).toBeLessThan(pipeIdx);
     });
 
     it('keeps maintenance active and cleans temp state on mysql child failure paths', () => {

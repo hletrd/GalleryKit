@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -47,23 +47,32 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
     const [editingTag, setEditingTag] = useState<Tag | null>(null);
     const [deleteId, setDeleteId] = useState<number | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [editError, setEditError] = useState<string | null>(null);
+    const editErrorRef = useRef<HTMLParagraphElement>(null);
     const router = useRouter();
     const deleteTarget = initialTags.find((tag) => tag.id === deleteId) ?? null;
 
     async function handleUpdate(formData: FormData) {
         if (!editingTag) return;
+        setEditError(null);
         const name = formData.get('name') as string;
         try {
             const res = await updateTag(editingTag.id, name);
             if (res?.error) {
+                setEditError(res.error);
                 toast.error(res.error);
+                requestAnimationFrame(() => editErrorRef.current?.focus());
             } else {
                 toast.success(t('tags.updated'));
+                setEditError(null);
                 setEditingTag(null);
                 router.refresh();
             }
         } catch {
-            toast.error(t('serverActions.failedToUpdateTag'));
+            const message = t('serverActions.failedToUpdateTag');
+            setEditError(message);
+            toast.error(message);
+            requestAnimationFrame(() => editErrorRef.current?.focus());
         }
     }
 
@@ -109,7 +118,7 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                             <TableCell>{tag.name}</TableCell>
                             <TableCell>{tag.count}</TableCell>
                             <TableCell className="text-right space-x-2">
-                                <Button variant="ghost" size="icon" onClick={() => setEditingTag(tag)} aria-label={t('tags.editTagAria', { name: tag.name })}>
+                                <Button variant="ghost" size="icon" onClick={() => { setEditError(null); setEditingTag(tag); }} aria-label={t('tags.editTagAria', { name: tag.name })}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
                                 <Button variant="ghost" size="icon" className="text-destructive-text" onClick={() => setDeleteId(tag.id)} aria-label={t('tags.deleteTagAria', { name: tag.name })}>
@@ -166,7 +175,15 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                 </AlertDialogContent>
             </AlertDialog>
 
-            <Dialog open={!!editingTag} onOpenChange={(open) => !open && setEditingTag(null)}>
+            <Dialog
+                open={!!editingTag}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setEditError(null);
+                        setEditingTag(null);
+                    }
+                }}
+            >
                 <DialogContent closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('tags.edit')}</DialogTitle>
@@ -174,9 +191,14 @@ export function TagManager({ initialTags }: { initialTags: Tag[] }) {
                     </DialogHeader>
                     {editingTag && (
                         <form action={handleUpdate} className="space-y-4">
+                            {editError && (
+                                <p id="edit-tag-error" ref={editErrorRef} role="alert" tabIndex={-1} className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive-text">
+                                    {editError}
+                                </p>
+                            )}
                             <div className="grid w-full items-center gap-1.5">
                                 <label htmlFor="edit-tag-name" className="text-sm font-medium leading-none">{t('tags.name')}</label>
-                                <Input id="edit-tag-name" name="name" defaultValue={editingTag.name} placeholder={t('tags.name')} required maxLength={100} />
+                                <Input id="edit-tag-name" name="name" defaultValue={editingTag.name} placeholder={t('tags.name')} required maxLength={100} aria-invalid={!!editError} aria-describedby={editError ? 'edit-tag-error' : undefined} />
                             </div>
                             <Button type="submit">{t('categories.update')}</Button>
                         </form>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState, type RefObject } from 'react';
 import { useRouter } from 'next/navigation';
 import { isImeComposingReactEvent } from '@/lib/ime';
 import { Button } from "@/components/ui/button";
@@ -61,7 +61,17 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     const [isAddingAlias, setIsAddingAlias] = useState(false);
     const [togglingMapSlug, setTogglingMapSlug] = useState<string | null>(null);
     const [mapPublishCandidate, setMapPublishCandidate] = useState<Topic | null>(null);
+    const [createError, setCreateError] = useState<string | null>(null);
+    const [editError, setEditError] = useState<string | null>(null);
+    const [aliasError, setAliasError] = useState<string | null>(null);
+    const createErrorRef = useRef<HTMLParagraphElement>(null);
+    const editErrorRef = useRef<HTMLParagraphElement>(null);
+    const aliasErrorRef = useRef<HTMLParagraphElement>(null);
     const deleteTopicTarget = initialTopics.find((topic) => topic.slug === deleteSlug) ?? null;
+
+    const focusError = (target: RefObject<HTMLParagraphElement | null>) => {
+        requestAnimationFrame(() => target.current?.focus());
+    };
 
     async function applyMapVisible(slug: string, nextValue: boolean) {
         setTogglingMapSlug(slug);
@@ -89,39 +99,53 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
     }
 
     async function handleCreate(formData: FormData) {
+        setCreateError(null);
         try {
             const res = await createTopic(formData);
             if (res?.error) {
+                setCreateError(res.error);
                 toast.error(res.error);
+                focusError(createErrorRef);
             } else {
                 toast.success(t('categories.created'));
                 if (res && 'warning' in res && res.warning) {
                     toast.warning(res.warning);
                 }
+                setCreateError(null);
                 setIsCreateOpen(false);
                 router.refresh();
             }
         } catch {
-            toast.error(t('serverActions.failedToCreateTopic'));
+            const message = t('serverActions.failedToCreateTopic');
+            setCreateError(message);
+            toast.error(message);
+            focusError(createErrorRef);
         }
     }
 
     async function handleUpdate(formData: FormData) {
         if (!editingTopic) return;
+        setEditError(null);
         try {
             const res = await updateTopic(editingTopic.slug, formData);
             if (res?.error) {
+                setEditError(res.error);
                 toast.error(res.error);
+                focusError(editErrorRef);
             } else {
                 toast.success(t('categories.updated'));
                 if (res && 'warning' in res && res.warning) {
                     toast.warning(res.warning);
                 }
+                setEditError(null);
                 setEditingTopic(null);
                 router.refresh();
             }
         } catch {
-            toast.error(t('serverActions.failedToUpdateTopic'));
+            const message = t('serverActions.failedToUpdateTopic');
+            setEditError(message);
+            toast.error(message);
+            focusError(editErrorRef);
         }
     }
 
@@ -146,18 +170,25 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
         const aliasValue = newAlias.trim();
         if (!aliasValue || isAddingAlias) return;
         setIsAddingAlias(true);
+        setAliasError(null);
         try {
             const res = await createTopicAlias(topicSlug, aliasValue);
             if (res?.error) {
+                setAliasError(res.error);
                 toast.error(res.error);
+                focusError(aliasErrorRef);
             } else {
                 toast.success(t('categories.aliasAdded'));
+                setAliasError(null);
                 setNewAlias('');
                  setEditingTopic(prev => prev ? ({ ...prev, aliases: [...prev.aliases, aliasValue] }) : null);
                  router.refresh();
             }
         } catch {
-            toast.error(t('serverActions.invalidAliasFormat'));
+            const message = t('serverActions.invalidAliasFormat');
+            setAliasError(message);
+            toast.error(message);
+            focusError(aliasErrorRef);
         } finally {
             setIsAddingAlias(false);
         }
@@ -193,7 +224,13 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     <h1 className="text-3xl font-bold">{t('categories.title')}</h1>
                 </div>
 
-                <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                <Dialog
+                    open={isCreateOpen}
+                    onOpenChange={(open) => {
+                        setIsCreateOpen(open);
+                        if (!open) setCreateError(null);
+                    }}
+                >
                     <DialogTrigger asChild>
                         <Button><Plus className="mr-2 h-4 w-4" /> {t('categories.add')}</Button>
                     </DialogTrigger>
@@ -203,13 +240,18 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                             <DialogDescription>{t('categories.createDescription')}</DialogDescription>
                         </DialogHeader>
                         <form action={handleCreate} className="space-y-4">
+                            {createError && (
+                                <p id="create-topic-error" ref={createErrorRef} role="alert" tabIndex={-1} className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive-text">
+                                    {createError}
+                                </p>
+                            )}
                             <div className="grid w-full items-center gap-1.5">
                                 <label htmlFor="create-topic-label" className="text-sm font-medium leading-none">{t('categories.label')}</label>
-                                <Input id="create-topic-label" name="label" placeholder={t('categories.placeholderLabel')} required maxLength={100} />
+                                <Input id="create-topic-label" name="label" placeholder={t('categories.placeholderLabel')} required maxLength={100} aria-invalid={!!createError} aria-describedby={createError ? 'create-topic-error' : undefined} />
                             </div>
                             <div className="grid w-full items-center gap-1.5">
                                 <label htmlFor="create-topic-slug" className="text-sm font-medium leading-none">{t('categories.slug')}</label>
-                                <Input id="create-topic-slug" name="slug" placeholder={t('categories.placeholderSlug')} required maxLength={100} />
+                                <Input id="create-topic-slug" name="slug" placeholder={t('categories.placeholderSlug')} required maxLength={100} aria-invalid={!!createError} aria-describedby={createError ? 'create-topic-error' : undefined} />
                             </div>
                             <div className="grid w-full items-center gap-1.5">
                                 <label htmlFor="create-topic-order" className="text-sm font-medium leading-none">{t('categories.order')}</label>
@@ -275,7 +317,7 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                 />
                             </TableCell>
                             <TableCell className="text-right space-x-2">
-                                <Button variant="ghost" size="icon" onClick={() => setEditingTopic(topic)} aria-label={t('categories.editTopicAria', { label: topic.label })}>
+                                <Button variant="ghost" size="icon" onClick={() => { setEditError(null); setAliasError(null); setEditingTopic(topic); }} aria-label={t('categories.editTopicAria', { label: topic.label })}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
                                 <Button variant="ghost" size="icon" className="text-destructive-text" onClick={() => setDeleteSlug(topic.slug)} aria-label={t('categories.deleteTopicAria', { label: topic.label })}>
@@ -352,7 +394,16 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                 </AlertDialogContent>
             </AlertDialog>
 
-            <Dialog open={!!editingTopic} onOpenChange={(open) => !open && setEditingTopic(null)}>
+            <Dialog
+                open={!!editingTopic}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setEditError(null);
+                        setAliasError(null);
+                        setEditingTopic(null);
+                    }
+                }}
+            >
                 <DialogContent className="max-w-xl" closeLabel={t('aria.close')}>
                     <DialogHeader>
                         <DialogTitle>{t('categories.edit')}</DialogTitle>
@@ -361,13 +412,18 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                     {editingTopic && (
                         <div className="space-y-6">
                             <form action={handleUpdate} className="space-y-4">
+                                {editError && (
+                                    <p id="edit-topic-error" ref={editErrorRef} role="alert" tabIndex={-1} className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive-text">
+                                        {editError}
+                                    </p>
+                                )}
                                 <div className="grid w-full items-center gap-1.5">
                                     <label htmlFor="edit-topic-label" className="text-sm font-medium leading-none">{t('categories.label')}</label>
-                                    <Input id="edit-topic-label" name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required maxLength={100} />
+                                    <Input id="edit-topic-label" name="label" defaultValue={editingTopic.label} placeholder={t('categories.label')} required maxLength={100} aria-invalid={!!editError} aria-describedby={editError ? 'edit-topic-error' : undefined} />
                                 </div>
                                 <div className="grid w-full items-center gap-1.5">
                                     <label htmlFor="edit-topic-slug" className="text-sm font-medium leading-none">{t('categories.slug')}</label>
-                                    <Input id="edit-topic-slug" name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required maxLength={100} />
+                                    <Input id="edit-topic-slug" name="slug" defaultValue={editingTopic.slug} placeholder={t('categories.slug')} required maxLength={100} aria-invalid={!!editError} aria-describedby={editError ? 'edit-topic-error' : undefined} />
                                 </div>
                                 <div className="grid w-full items-center gap-1.5">
                                     <label htmlFor="edit-topic-order" className="text-sm font-medium leading-none">{t('categories.order')}</label>
@@ -407,7 +463,12 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                         id="new-topic-alias"
                                         placeholder={t('categories.aliasPlaceholder')}
                                         value={newAlias}
-                                        onChange={(e) => setNewAlias(e.target.value)}
+                                        onChange={(e) => {
+                                            setNewAlias(e.target.value);
+                                            setAliasError(null);
+                                        }}
+                                        aria-invalid={!!aliasError}
+                                        aria-describedby={aliasError ? 'new-topic-alias-error' : undefined}
                                         onKeyDown={(e) => {
                                             // R4C6 COR-R4C6-01: the IME
                                             // composition-commit Enter must not
@@ -422,6 +483,11 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                     />
                                     <Button type="button" variant="secondary" onClick={() => handleAddAlias(editingTopic.slug)} disabled={isAddingAlias}>{isAddingAlias ? t('imageManager.adding') : t('categories.add')}</Button>
                                 </div>
+                                {aliasError && (
+                                    <p id="new-topic-alias-error" ref={aliasErrorRef} role="alert" tabIndex={-1} className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive-text">
+                                        {aliasError}
+                                    </p>
+                                )}
                             </div>
                         </div>
                     )}

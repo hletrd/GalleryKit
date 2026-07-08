@@ -52,7 +52,7 @@ import { detectColorSignals } from '../src/lib/color-detection';
 import { resolveOriginalUploadPath, UPLOAD_DIR_WEBP, UPLOAD_DIR_AVIF, UPLOAD_DIR_JPEG } from '../src/lib/upload-paths';
 import { LOCK_COLOR_PIPELINE_BACKFILL, isAdvisoryLockAcquired } from '../src/lib/advisory-locks';
 import { parseBoundedPositiveInteger } from '../src/lib/env';
-import { getGalleryConfig } from '../src/lib/gallery-config';
+import { getGalleryConfigDetachedStrict } from '../src/lib/gallery-config';
 import type { JpegChromaSubsampling } from '../src/lib/gallery-config-shared';
 import { assertNoDurableRestoreMaintenanceForScript } from '../src/lib/restore-maintenance-durable';
 
@@ -352,7 +352,7 @@ async function main() {
     // R8-CRIT: resolve current admin settings while holding the shared
     // backfill lock so an admin settings save cannot commit between the
     // snapshot and the re-encode work. This mirrors the in-app runner.
-    const config = await getGalleryConfig();
+    const config = await getGalleryConfigDetachedStrict();
     const backfillSettings: BackfillSettings = {
         quality: {
             webp: config.imageQualityWebp,

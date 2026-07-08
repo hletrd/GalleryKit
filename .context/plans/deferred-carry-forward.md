@@ -16,7 +16,17 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c24):** direct test/provenance/comment findings
+**Age-budget check (run-10 c25):** direct contained findings `AGG-C25-01`,
+`AGG-C25-02`, `AGG-C25-21`, and `AGG-C25-23` are scheduled in
+`cycle-25-2026-07-08-plan.md`. Newly deferred High-severity Cycle 25 rows
+(`AGG-C25-03`, `AGG-C25-04`, `AGG-C25-05`, and conditional operator row
+`AGG-C25-27`) are broad architecture/performance/operator items with explicit
+exit criteria in `cycle-25-2026-07-08-deferred.md`, prior carry-forward lineage,
+and no contained one-cycle fix. `AGG-C25-06` has correctness implications but is
+deferred only under the documented warn-only single-writer guard rule in
+`CLAUDE.md`; changing that behavior requires operator/product approval.
+
+**Previous check (run-10 c24):** direct test/provenance/comment findings
 `AGG-C24-04`, `AGG-C24-05`, `AGG-C24-06`, and `AGG-C24-07` are scheduled in
 `cycle-24-2026-07-08-plan.md`. Newly deferred High-severity Cycle 24 rows
 (`AGG-C24-01`, `AGG-C24-02`, `AGG-C24-03`, `AGG-C24-10`) are broad
@@ -274,6 +284,14 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C24-19..23 | mixed, up to MED | cycle-24-2026-07-08 | r10c24 | 0 | Source-contract, browser matrix, CLIP preflight, coverage, and admin E2E evidence exit criteria in Cycle 24 deferred register |
 | C24-24..30 | mixed, up to MED | cycle-24-2026-07-08 | r10c24 | 0 | Admin responsive/IA/form-validation/zoom/mobile-masonry/site-config product-UX exit criteria in Cycle 24 deferred register |
 | C24-31..35 | mixed, up to MED | cycle-24-2026-07-08 | r10c24 | 0 | Operator nginx/proxy/secrets/backup/build-runtime/restore-recovery validation exit criteria in Cycle 24 deferred register |
+| C25-03 | HIGH/High | cycle-25-2026-07-08 | r10c25 | 0 | Production RSS/OOM incident during upload/restore, on-host RSS trace proving breach, or approved streaming-ingress project |
+| C25-04 | HIGH/High source shape, Medium-High impact | cycle-25-2026-07-08 | r10c25 | 0 | Measured pool starvation during queue/backfill/search, or shared background-budget project approved |
+| C25-05 | HIGH/High | cycle-25-2026-07-08 | r10c25 | 0 | Before adding upload-time privacy/metadata/processing fields, or next confirmed browser/PAT drift |
+| C25-06 | MED-HIGH/High | cycle-25-2026-07-08 | r10c25 | 0 | Scale-out attempted, singleton contention incident, or fail-closed/shared-state topology project approved |
+| C25-07..14 | mixed, up to MED | cycle-25-2026-07-08 | r10c25 | 0 | Storage-boundary, semantic/map/search/query/export/SW/action-boundary exit criteria in Cycle 25 deferred register |
+| C25-15..20 | mixed, up to MED | cycle-25-2026-07-08 | r10c25 | 0 | Migration parity, browser-flow, browser-matrix, visual-regression, CLIP preflight, and coverage-ratchet exit criteria in Cycle 25 deferred register |
+| C25-22 | MED/High | cycle-25-2026-07-08 | r10c25 | 0 | Before distributing GalleryKit as a template/package, or if copied installs publish wrong canonical URLs |
+| C25-24..30 | mixed, up to MED/HIGH-conditional | cycle-25-2026-07-08 | r10c25 | 0 | Restore scanner, secrets, backups, nginx/proxy, build-runtime config, restore recovery, and analytics-boundary exit criteria in Cycle 25 deferred register |
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 3 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 3 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 3 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |

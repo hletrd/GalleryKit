@@ -884,7 +884,6 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             return { success: false, error: t('restoreFailed'), keepMaintenance: false };
         }
 
-        cleanupTransferredToRestoreProcess = true;
         return await new Promise<RestoreResult>((resolve) => {
         // Use MYSQL_USER/MYSQL_HOST/MYSQL_TCP_PORT env vars instead of CLI flags
         // to avoid exposing credentials in /proc/<pid>/cmdline
@@ -971,7 +970,9 @@ async function runRestore(formData: FormData, t: Awaited<ReturnType<typeof getTr
             failRestore(t('restoreFailed'), 'mysql restore spawn error:', err);
         });
 
-        // Start piping after all handlers are registered
+            // Start piping after all handlers are registered; from this point the
+            // child-process handlers own temp-file cleanup.
+            cleanupTransferredToRestoreProcess = true;
             readStream.pipe(restore.stdin);
         });
     } finally {

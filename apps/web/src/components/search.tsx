@@ -389,15 +389,11 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 aria-haspopup="dialog"
                 aria-expanded={isOpen}
                 // 44x44 touch-target floor; matches the adjacent theme/locale
-                // buttons in the nav (F-3). C7-04 (cycle 7b): the label span
-                // is display:none below lg, so the labeled variant needs an
-                // explicit min-w-11 or the icon-only rendering collapses to
-                // ~40px wide — under the enforced 44px floor (the audit
-                // scanner cannot see a MISSING width class).
+                // buttons in the nav (F-3).
                 className={showSearchLabel ? "h-11 min-w-11 gap-2 px-3" : "h-11 w-11"}
             >
                 <SearchIcon className="h-4 w-4" />
-                {showSearchLabel && <span className="hidden lg:inline">{t('aria.searchPhotos')}</span>}
+                {showSearchLabel && <span className="inline text-sm">{t('aria.searchPhotos')}</span>}
             </Button>
         );
     }

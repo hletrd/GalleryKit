@@ -110,8 +110,10 @@ describe('US-P15 a11y contracts', () => {
             'seo-locale',
             'seo-og-image',
         ]) {
-            expect(src).toContain(`aria-describedby="${id}-help"`);
+            expect(src).toContain(`aria-describedby={describedBy('${id}-help')}`);
             expect(src).toContain(`id="${id}-help"`);
         }
+        expect(src).toContain("formError ? 'seo-form-error' : null");
+        expect(src).toContain('id="seo-form-error"');
     });
 });

@@ -68,12 +68,29 @@ describe('client component source contracts', () => {
     expect(code).not.toContain('order-last ml-1');
   });
 
-  it('shows visible desktop search copy when production semantic search is active', () => {
+  it('shows visible search copy on every viewport when production semantic search is active', () => {
     const code = source('components/search.tsx');
     expect(code).toContain("const showSearchLabel = semanticSearchMode === 'production'");
     expect(code).toContain("size={showSearchLabel ? 'default' : 'icon'}");
     expect(code).toContain('className={showSearchLabel ? "h-11 min-w-11 gap-2 px-3" : "h-11 w-11"}');
-    expect(code).toContain("{showSearchLabel && <span className=\"hidden lg:inline\">{t('aria.searchPhotos')}</span>}");
+    expect(code).toContain("{showSearchLabel && <span className=\"inline text-sm\">{t('aria.searchPhotos')}</span>}");
+  });
+
+  it('keeps admin taxonomy and SEO save failures visible after toast dismissal', () => {
+    const tags = source('app/[locale]/admin/(protected)/tags/tag-manager.tsx');
+    const categories = source('app/[locale]/admin/(protected)/categories/topic-manager.tsx');
+    const seo = source('app/[locale]/admin/(protected)/seo/seo-client.tsx');
+
+    for (const code of [tags, categories, seo]) {
+      expect(code).toContain('role="alert"');
+      expect(code).toContain('tabIndex={-1}');
+      expect(code).toContain('aria-invalid={!!');
+    }
+    expect(categories).toContain('id="create-topic-error"');
+    expect(categories).toContain('id="edit-topic-error"');
+    expect(categories).toContain('id="new-topic-alias-error"');
+    expect(tags).toContain('id="edit-tag-error"');
+    expect(seo).toContain('id="seo-form-error"');
   });
 
   it('names tag, category, and image delete targets in destructive confirmations', () => {
