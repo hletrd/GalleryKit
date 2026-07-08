@@ -35,6 +35,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 - Run-10 Cycle 29/100 Implementation Plan - active ledger from Cycle 29 aggregate: inline server-action scanner coverage, executable scanner fixture coverage, Cycle 28 terminal-ledger closure, carry-forward register refresh, full gates, signed push, and per-cycle deploy (`run10-cycle29/plan.md`)
 - Run-10 Cycle 29/100 Deferred Findings - no new Cycle 29 deferrals; earlier deferred rows remain in their authoritative registers and the consolidated carry-forward register (`run10-cycle29/deferred.md`)
+- Run-10 Cycle 10b (loop-B) Implementation Plan - active loop-B ledger from the cycle-10b aggregate (11 review lanes, exceptionally converged): boundary-test walker widening (@/components edges), CLAUDE.md doc-accuracy fixes (pending_file_deletions table + lint scope), archiveRange December off-by-one, full gates, signed push, per-cycle deploy (`cycle-10b-2026-07-08-plan.md`; "10b" per the 7b/8b/9b precedent)
+- Run-10 Cycle 10b (loop-B) Deferred Findings - grid-picture/WP11 behavioral-test peer-file conflicts, tracer self-healing races, cross-admin PAT feature gap, deleteImages N-insert perf (correctness-sensitive) — five D10b rows folded into the consolidated carry-forward register (`cycle-10b-2026-07-08-deferred.md`)
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
