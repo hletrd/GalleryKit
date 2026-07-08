@@ -178,12 +178,17 @@ export function getClientIp(headerStore: HeaderLike): string {
     // only an explicit probe triggers it.
     if (headerStore.get('x-clientip-diag') === '1') {
         const xff = headerStore.get('x-forwarded-for') || '';
-        console.error('[CLIENTIP-DIAG]', JSON.stringify({
+        const parts = xff.split(',').map(p => p.trim()).filter(Boolean);
+        const hop = getTrustedProxyHopCount();
+        const idx = parts.length - hop;
+        console.error('[CLIENTIP-DIAG2]', JSON.stringify({
             trust: process.env.TRUST_PROXY ?? '(unset)',
-            hops: process.env.TRUSTED_PROXY_HOPS ?? '(unset)',
-            hasXff: !!xff,
-            xffParts: xff ? xff.split(',').filter(Boolean).length : 0,
-            hasXReal: !!headerStore.get('x-real-ip'),
+            hopCount: hop,
+            partsLen: parts.length,
+            clientIndex: idx,
+            pickedRaw: idx >= 0 ? parts[idx] : null,
+            pickedNorm: idx >= 0 ? normalizeIp(parts[idx]) : null,
+            xrealNorm: normalizeIp(headerStore.get('x-real-ip')),
         }));
     }
     // Only trust proxy headers when TRUST_PROXY is explicitly set.
