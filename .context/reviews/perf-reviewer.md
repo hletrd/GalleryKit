@@ -1,160 +1,266 @@
-# Cycle 36 Performance Review
+# Cycle 38 Performance Review
 
-Role: `cycle-36 perf-reviewer`
-Scope: whole repository static review from performance, concurrency, CPU, memory, and UI responsiveness angles.
-Constraint: review-only. No production code was changed.
-Date: 2026-07-08 KST
+Role: `cycle-38 perf-reviewer`  
+Repository: `/Users/hletrd/flash-shared/gallery`  
+Date: 2026-07-08 KST  
+Revision reviewed: `54083a2c`  
+Output file: `.context/reviews/perf-reviewer.md`
 
-## Inventory First
+## Provenance
 
-Guidance read:
+- Read first: `AGENTS.md`, then `CLAUDE.md`.
+- Loaded review workflow instructions: `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
+- Built an inventory before reviewing with `git ls-files` and targeted `rg` searches over app source, scripts, migrations, tests, config, and review history.
+- Consulted prior review/provenance artifacts for regression context, then re-verified current findings against source:
+  - `.context/reviews/run10-cycle28/perf-reviewer.md`
+  - `.context/reviews/cycle-10b-2026-07-08/perf-reviewer.md`
+  - `.context/plans/cycle-10b-2026-07-08-deferred.md`
+  - previous `.context/reviews/perf-reviewer.md`
+- Validation type: static deep review only. No build, test, lint, or production profiling was run because this task requested a review artifact and source edits were limited to this file.
 
-- `AGENTS.md`
-- `CLAUDE.md`
+## Review Inventory
 
-Repo and dependency inventory:
+Tracked inventory at review start:
 
-- Root scripts and package surface: `package.json`, `apps/web/package.json`
-- Current app stack: Next.js 16.2.10, React 19.2.5, TypeScript 6, Sharp 0.34.5, mysql2 3.22.0, p-queue 9.1.2, Transformers.js 3.8.1
-- Source inventory: 582 TypeScript/TSX files under `apps/web/src`; 41 script/e2e files under `apps/web/scripts` and `apps/web/e2e`
-- Prior review history and project notes under `.context/`
+- Total tracked files: 3641
+- App source files under `apps/web/src`: 625
+- Scripts and e2e files under `apps/web/scripts` and `apps/web/e2e`: 41
+- SQL migrations under `apps/web/drizzle`: 34
+- Key config/public runtime files inspected: 8
 
-Performance-relevant files inspected:
+Review-relevant implementation and config areas inspected:
 
-- Runtime/process: `apps/web/src/instrumentation.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/lib/single-writer-guard.ts`
-- DB/query/cache/rate-limit: `apps/web/src/db/index.ts`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/rate-limit.ts`, `apps/web/src/lib/background-db-writes.ts`, `apps/web/src/lib/view-retention.ts`, `apps/web/src/lib/audit.ts`
-- Image CPU/memory pipeline: `apps/web/src/lib/process-image.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/admin-backfill-runner.ts`, `apps/web/scripts/backfill-color-pipeline.ts`
-- Semantic/ML paths: `apps/web/src/lib/clip-model.ts`, `apps/web/src/lib/clip-embeddings.ts`, `apps/web/src/app/api/search/semantic/route.ts`, `apps/web/src/app/api/search/similar/[id]/route.ts`, `apps/web/src/app/actions/embeddings.ts`, `apps/web/scripts/backfill-clip-embeddings.ts`
-- Public UI hot paths: `apps/web/src/app/[locale]/(public)/page.tsx`, `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`, `apps/web/src/app/[locale]/(public)/map/page.tsx`, `apps/web/src/components/home-client.tsx`, `apps/web/src/components/masonry-card.tsx`, `apps/web/src/components/load-more.tsx`, `apps/web/src/components/photo-viewer.tsx`, `apps/web/src/components/similar-photos.tsx`, `apps/web/src/components/map/map-client.tsx`
-- Admin/upload paths: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/api/admin/lr/upload/route.ts`, `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`, `apps/web/src/components/image-manager.tsx`
+- Server actions and routes:
+  - `apps/web/src/app/actions/images.ts`
+  - `apps/web/src/app/actions/embeddings.ts`
+  - `apps/web/src/app/api/search/semantic/route.ts`
+  - `apps/web/src/app/api/search/similar/[id]/route.ts`
+  - public page routes under `apps/web/src/app/[locale]/(public)/`
+- Data and DB paths:
+  - `apps/web/src/db/index.ts`
+  - `apps/web/src/db/schema.ts`
+  - `apps/web/src/lib/data.ts`
+  - `apps/web/src/lib/data-timeline.ts`
+  - `apps/web/src/lib/background-db-writes.ts`
+  - `apps/web/src/lib/view-retention.ts`
+  - `apps/web/src/lib/maintenance-scheduler.ts`
+- Background work, queues, and image processing:
+  - `apps/web/src/lib/image-queue.ts`
+  - `apps/web/src/lib/admin-backfill-runner.ts`
+  - `apps/web/src/lib/process-image.ts`
+  - `apps/web/src/lib/clip-model.ts`
+  - `apps/web/src/lib/clip-embeddings.ts`
+  - `apps/web/scripts/backfill-clip-embeddings.ts`
+- UI responsiveness and media:
+  - `apps/web/src/components/*`
+  - `apps/web/src/components/map/*`
+  - `apps/web/src/components/gallery/*`
+  - `apps/web/public/sw.template.js`
+  - `apps/web/public/histogram-worker.js`
+- Runtime/config/deployment:
+  - `apps/web/next.config.ts`
+  - `apps/web/Dockerfile`
+  - `apps/web/docker-compose.yml`
+  - `apps/web/nginx/default.conf`
+  - `apps/web/drizzle/*.sql`
+  - `apps/web/drizzle/meta/_journal.json`
+- Relevant tests and docs were inspected by targeted search around the reviewed surfaces, including performance-sensitive privacy/touch/route guard tests and `.context` review/plan history.
 
-Cross-file interactions inspected:
+Cross-file interactions traced:
 
-- Upload/action enqueue -> `image-queue.ts` -> `process-image.ts` -> DB update/embedding side effects.
-- In-app color backfill -> advisory locks -> `processImageFormats()` -> DB updates.
-- Public gallery/photo routes -> `data.ts` query fan-out -> client hydration and image preloading.
-- Map page -> `getMapImages()` payload cap -> server-rendered list -> Leaflet marker hydration.
-- Semantic routes -> CLIP inference queue -> DB blob scan -> JS vector scoring -> metadata enrichment.
-- Background maintenance/audit/analytics queues -> shared MySQL pool.
+- MySQL pool sizing in `db/index.ts` against independent queues in `image-queue.ts`, `admin-backfill-runner.ts`, `background-db-writes.ts`, maintenance jobs, and semantic embedding paths.
+- Image delete actions against pending file deletion recovery and local file cleanup.
+- Sharp/libheif concurrency in `process-image.ts` against queue and admin backfill admission controls.
+- Semantic search/similar APIs against CLIP inference slots, embedding scan limits, and background embedding backfill.
+- Public map route data loading against DB indexes, server-rendered fallback markup, and Leaflet marker hydration.
+- Service worker caching, histogram worker, responsive image fallback paths, and gallery load-more behavior against UI responsiveness requirements.
 
 ## Findings
 
-### PERF-C36-01 - Independent image/backfill budgets can saturate the shared DB pool and CPU
+### PERF-C38-01: Batch image deletion still performs per-image DB mutations inside one transaction
 
-Severity: High
-Confidence: High
-Classification: confirmed
+Severity: Medium  
+Confidence: High  
+Classification: Confirmed issue
 
-Exact file:line/region:
+Code regions:
 
-- `apps/web/src/db/index.ts:31-41` fixes the web-process pool at 10 connections with `queueLimit: 20`.
-- `apps/web/src/db/index.ts:127-143` wraps `query` and `execute` by acquiring real pooled connections, so transient DB work competes with advisory-lock holders.
-- `apps/web/src/lib/image-queue.ts:121-141` computes image queue concurrency against the full pool and reserves live connections locally.
-- `apps/web/src/lib/image-queue.ts:456` creates the queue with that local concurrency.
-- `apps/web/src/lib/image-queue.ts:683-700` acquires one pooled advisory-lock connection per image.
-- `apps/web/src/lib/image-queue.ts:761-918` holds the image claim while checking the row, running Sharp, verifying files, and updating DB state.
-- `apps/web/src/lib/admin-backfill-runner.ts:97-143` computes a separate local backfill concurrency against the same full pool.
-- `apps/web/src/lib/admin-backfill-runner.ts:330-358` pins a whole-run backfill advisory-lock connection.
-- `apps/web/src/lib/admin-backfill-runner.ts:369-397` acquires one pooled advisory-lock connection per backfilled image.
-- `apps/web/src/lib/admin-backfill-runner.ts:526-677` holds the per-image claim across re-encode, color detection, and persistence.
-- `apps/web/src/lib/process-image.ts:36-57` sets per-process Sharp concurrency, and `apps/web/src/lib/process-image.ts:1411-1418` runs WebP, AVIF, and JPEG generation in parallel per image.
+- `apps/web/src/app/actions/images.ts:731-756` defines `deleteImages` and allows up to 100 image IDs per batch.
+- `apps/web/src/app/actions/images.ts:765-774` preloads all matching image rows in one query.
+- `apps/web/src/app/actions/images.ts:809-845` opens one transaction and loops over every image. Each iteration performs:
+  - one `pendingFileDeletions` insert at `apps/web/src/app/actions/images.ts:816-823`
+  - one `imageTags` delete at `apps/web/src/app/actions/images.ts:832`
+  - one `images` delete at `apps/web/src/app/actions/images.ts:833`
+  - optional stale pending-row cleanup at `apps/web/src/app/actions/images.ts:843`
+- `apps/web/src/app/actions/images.ts:861-893` performs bounded post-transaction file cleanup; that section is not the problem.
 
 Failure scenario:
 
-On the default 10-connection pool, an operator raises both `QUEUE_CONCURRENCY` and `ADMIN_BACKFILL_CONCURRENCY` to their effective cap of 2. The live queue can hold two long-lived per-image lock connections while also doing transient DB work. The admin backfill can hold one global lock plus two per-image lock connections while also doing transient DB work. Both modules believe they reserved roughly half the pool for live traffic, but the reservations are independent, so together they can pin most of the pool. At the same time both paths run CPU-heavy Sharp pipelines with three format encoders per image. Foreground routes that fan out DB reads, such as photo detail and gallery rows/count queries, can queue behind background work and hit the pool queue limit.
+An admin deleting the maximum batch of 100 images holds a transaction open while issuing roughly 300 sequential mutation statements, plus optional cleanup statements. Under concurrent admin work, background image processing, semantic tasks, or view-write flushing, this extends lock hold time and monopolizes one of the 10 pooled DB connections. The code already does the expensive file cleanup after commit, but the transaction itself still scales linearly with the batch size.
 
-Suggested fix:
+Concrete fix:
 
-Replace per-subsystem arithmetic with a shared background resource coordinator for the web process. Image queue, in-app backfill, semantic embedding bootstrap/action, analytics drains, and maintenance sweeps should lease from one DB-bearing background budget before starting work that can hold advisory locks or perform transient queries. Model long-lived lock connections separately from short DB operations, and pause or downshift live queue work while an in-app backfill is running. Add a small-pool regression test proving aggregate background leases cannot exceed the foreground reserve.
+Batch the transaction work:
 
-### PERF-C36-02 - `/map` can hydrate thousands of Leaflet markers and list items in one uncached page
+1. Build all pending-file-deletion rows in memory and use one multi-row `insert(...).values(rows)`.
+2. Delete tags with one `delete(imageTags).where(inArray(imageTags.imageId, foundIds))`.
+3. Delete images with one `delete(images).where(inArray(images.id, foundIds))`.
+4. Recover inserted pending IDs from the multi-row insert result in a deterministic way, or extend the pending-deletion rows with a unique deletion batch token so cleanup can target only rows created by this transaction.
+5. If the affected deleted-image count is lower than expected, remove only the pending rows created by the transaction and return the stale-ID failure.
 
-Severity: Medium
-Confidence: High
-Classification: likely
+Do not read pending rows back by `image_id` alone unless the schema first guarantees uniqueness for active pending deletions; historical deferred notes already call out that pending deletion rows can be ambiguous by image ID.
 
-Exact file:line/region:
+### PERF-C38-02: Independent background budgets can over-admit DB and CPU work beyond the shared process capacity
 
-- `apps/web/src/lib/data.ts:1766-1775` documents that the map has a hard cap but sets `MAP_MAX_MARKERS = 10000`.
-- `apps/web/src/lib/data.ts:1784-1802` queries all map-visible GPS rows up to `MAP_MAX_MARKERS + 1`.
-- `apps/web/src/lib/data.ts:1813-1816` returns up to 10,000 image rows to the route.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:13-14` disables revalidation for the map page.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:42-67` maps every returned row into the client marker payload.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:90-97` passes the full marker array into `MapLoader`.
-- `apps/web/src/app/[locale]/(public)/map/page.tsx:99-111` server-renders a full `<ul>` entry for every marker.
+Severity: High  
+Confidence: High  
+Classification: Confirmed issue
+
+Code regions:
+
+- `apps/web/src/db/index.ts:31-41` configures a MySQL pool with `connectionLimit: 10` and `queueLimit: 20`.
+- `apps/web/src/db/index.ts:127-143` shows query/execute calls acquire real pooled connections, so all queues share the same finite pool.
+- `apps/web/src/lib/image-queue.ts:121-141` derives image queue concurrency from the DB pool and caps local queue work.
+- `apps/web/src/lib/image-queue.ts:456` creates the image-processing `PQueue`.
+- `apps/web/src/lib/image-queue.ts:683-700` takes a pooled advisory-lock connection per image-processing claim.
+- `apps/web/src/lib/image-queue.ts:761-818` claims and reads each pending image row.
+- `apps/web/src/lib/image-queue.ts:883-918` keeps claim state through image format generation and DB status updates.
+- `apps/web/src/lib/image-queue.ts:981-1008` can trigger embedding storage after image processing.
+- `apps/web/src/lib/admin-backfill-runner.ts:1-52` documents that the in-app admin backfill runner is invisible to the main `PQueue` and shares Sharp/libheif capacity.
+- `apps/web/src/lib/admin-backfill-runner.ts:97-143` defines a separate local DB/CPU budget and cap.
+- `apps/web/src/lib/admin-backfill-runner.ts:330-358` takes a global backfill advisory lock.
+- `apps/web/src/lib/admin-backfill-runner.ts:369-397` takes per-image advisory locks.
+- `apps/web/src/lib/admin-backfill-runner.ts:526-677` performs re-encode, detect, and DB update work while the image is claimed.
+- `apps/web/src/lib/admin-backfill-runner.ts:720-733` creates another `PQueue`.
+- `apps/web/src/lib/admin-backfill-runner.ts:922-940` starts the backfill as fire-and-forget work from the admin request.
+- `apps/web/src/lib/process-image.ts:36-57` globally configures Sharp concurrency/cache behavior.
+- `apps/web/src/lib/process-image.ts:1411-1418` generates WebP, AVIF, and JPEG derivatives concurrently for each image.
+- `apps/web/src/lib/background-db-writes.ts:3-9` and `apps/web/src/lib/background-db-writes.ts:42-75` add an independent analytics-write queue with concurrency 2 and up to 1000 pending writes.
+- `apps/web/src/lib/maintenance-scheduler.ts:35-50` schedules hourly background retention/cleanup work.
+- `apps/web/src/lib/view-retention.ts:76-87` can issue repeated 5000-row delete batches during retention cleanup.
+
+Failure scenario:
+
+The main image queue, the in-app admin backfill runner, CLIP embedding side effects, analytics write flushing, and scheduled retention work each have local limits, but there is no single process-wide admission controller. On the single-container/single-writer deployment described in `CLAUDE.md`, a production burst can combine:
+
+- image queue workers holding advisory locks and doing Sharp work,
+- admin backfill workers doing their own Sharp/libheif work,
+- semantic embedding work after processed images,
+- analytics write flushes,
+- retention cleanup deletes,
+- normal user/admin requests.
+
+Those lanes compete for the same 10 MySQL connections and the same Node/Sharp/libheif CPU and memory envelope. Local caps make each component individually bounded, but the aggregate can still fill the pool queue, elongate request latency, and increase memory pressure during derivative generation.
+
+Concrete fix:
+
+Introduce one shared background resource coordinator for the process. It should expose leases for at least:
+
+- long DB/advisory-lock slots,
+- short DB mutation slots,
+- Sharp/libheif CPU slots,
+- CLIP inference/scoring slots.
+
+Then make `image-queue.ts`, `admin-backfill-runner.ts`, embedding backfill, maintenance cleanup, and analytics flushing acquire from that shared budget. Admin backfill should either pause/downshift the main image queue or consume from the same global Sharp/DB lease pool. Add a small-pool regression test that starts mock queue, backfill, analytics, and retention tasks together and asserts the aggregate active DB/CPU leases never exceed the configured process budget.
+
+### PERF-C38-03: The public map route can hydrate up to 10,000 Leaflet markers and render a 10,000-item fallback list on an uncached page
+
+Severity: Medium  
+Confidence: High  
+Classification: Likely issue; manual profiling recommended
+
+Code regions:
+
+- `apps/web/src/lib/data.ts:1766-1775` sets `MAP_MAX_MARKERS = 10000`.
+- `apps/web/src/lib/data.ts:1784-1802` queries all map-visible processed images with GPS coordinates, joins `topics`, orders them, and limits to `MAP_MAX_MARKERS + 1`.
+- `apps/web/src/lib/data.ts:1813-1816` returns up to 10,000 images plus a `truncated` flag.
+- `apps/web/src/db/schema.ts:124-131` defines several image indexes, but no GPS/map-specific composite index is present in the visible image index set.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:13-14` sets `dynamic = "force-dynamic"` and `revalidate = 0`.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:42-47` loads `getMapImages()` for every request.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:51-67` maps every returned image into a marker object.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:90-97` passes the full marker array to the client map.
+- `apps/web/src/app/[locale]/(public)/map/page.tsx:99-111` server-renders one fallback `<li>` per marker.
 - `apps/web/src/components/map/map-client.tsx:78-95` computes bounds by allocating latitude and longitude arrays over every marker.
-- `apps/web/src/components/map/map-client.tsx:121-142` renders one Leaflet `<Marker>` and `<Popup>` per marker.
+- `apps/web/src/components/map/map-client.tsx:121-142` renders one `Marker` and `Popup` per marker.
 
 Failure scenario:
 
-A gallery grows to 5,000-10,000 map-visible photos. Every `/map` request queries and serializes thousands of rows because the route is uncached. The server builds a large RSC/HTML payload and a full accessible list; the browser then hydrates thousands of links and Leaflet marker objects, computes bounds over all markers, and keeps the marker set resident in memory. Map pan/zoom and initial input responsiveness degrade, especially on mobile devices, even though the code technically respects the 10k cap.
+A large gallery with thousands of mapped images makes every `/map` request perform a dynamic DB query and ship a large marker payload to the browser. On the server, the route renders a large fallback list. On the client, hydration creates thousands of React/Leaflet marker and popup objects, and `FitBounds` performs full-array passes before fitting the map. The failure mode is first-load jank, high JS parse/hydration cost, and slow map interaction on midrange mobile devices. DB behavior may also degrade because the query filters by `map_visible`, `processed`, and non-null GPS fields but does not appear to have a dedicated map index.
 
-Suggested fix:
+Concrete fix:
 
-Change the map architecture from "load all markers" to a viewport-bounded or clustered model. A practical path is a public bbox endpoint that returns clusters or markers for the current map bounds, plus a virtualized or paginated accessible list. If the all-marker model must stay for now, lower the initial cap substantially and defer the list or marker layer until after the first map paint. Add a source or e2e performance contract around the maximum markers rendered on initial load.
+Move the map to viewport-driven loading:
 
-### PERF-C36-03 - Semantic search does request-path brute-force vector scans in the Node process
+1. Add a map data endpoint keyed by bounding box and zoom.
+2. Return clusters or capped points per tile/viewport instead of all points.
+3. Use marker clustering or canvas/WebGL markers for dense regions.
+4. Replace the 10,000-item fallback list with a capped accessible summary plus paginated/location-filtered details.
+5. Add a composite map index aligned with the query shape, for example covering `processed`, `map_visible`, GPS presence/order fields, and `capture_date`/`id` as needed after checking `EXPLAIN`.
+6. Add an e2e or browser-performance guard for a synthetic large marker payload, focused on hydration time and interaction latency.
 
-Severity: Medium
-Confidence: High
-Classification: risk
+### PERF-C38-04: Semantic and similar-image APIs do request-path brute-force embedding scans and JS scoring
 
-Exact file:line/region:
+Severity: Medium  
+Confidence: High  
+Classification: Manual-validation risk; likely scale issue
 
-- `apps/web/src/app/api/search/semantic/route.ts:1-10` documents that each semantic search embeds the query and scans up to `SEMANTIC_SCAN_LIMIT` embeddings.
-- `apps/web/src/app/api/search/semantic/route.ts:250-260` performs real CLIP text embedding on the request path in production mode.
-- `apps/web/src/app/api/search/semantic/route.ts:263-280` reads up to `SEMANTIC_SCAN_LIMIT` embedding blobs from MySQL.
-- `apps/web/src/app/api/search/semantic/route.ts:292-311` decodes/scores every scanned embedding in JS before selecting top K.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:177-190` repeats the same capped embedding scan for similar photos.
-- `apps/web/src/app/api/search/similar/[id]/route.ts:204-214` scores the scanned rows in JS.
-- `apps/web/src/lib/clip-model.ts:53-64` bounds CLIP inference with an in-process queue, not a durable or cross-process budget.
-- `apps/web/src/lib/clip-model.ts:156-173` admits inference work through that process-local queue.
+Code regions:
+
+- `apps/web/src/app/api/search/semantic/route.ts:1-10` documents the request flow as text embedding plus a cosine-similarity scan.
+- `apps/web/src/app/api/search/semantic/route.ts:247-254` creates the CLIP text embedding in the request path.
+- `apps/web/src/app/api/search/semantic/route.ts:263-280` reads up to `SEMANTIC_SCAN_LIMIT` embedding blobs joined to image rows.
+- `apps/web/src/app/api/search/semantic/route.ts:292-311` decodes every scanned blob and scores it in JavaScript before sorting.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:1-21` documents that similar-image lookup scans candidate embeddings.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:177-190` reads candidate embeddings up to `SEMANTIC_SCAN_LIMIT`.
+- `apps/web/src/app/api/search/similar/[id]/route.ts:204-214` decodes and dot-products candidates in request-path JavaScript.
+- `apps/web/src/lib/clip-embeddings.ts:36-48` defines the default and hard scan limits.
+- `apps/web/src/lib/clip-model.ts:53-64` defines process-local CLIP inference concurrency and queue caps.
+- `apps/web/src/lib/clip-model.ts:156-173` serializes inference slots inside the process.
+- `apps/web/src/app/actions/embeddings.ts:30-31` and `apps/web/src/app/actions/embeddings.ts:141-213` run admin embedding backfill with its own batch/concurrency behavior.
+- `apps/web/scripts/backfill-clip-embeddings.ts:83-85` and `apps/web/scripts/backfill-clip-embeddings.ts:156-228` define the sidecar backfill batch and concurrency loop.
 
 Failure scenario:
 
-Production semantic search is enabled on a larger gallery and several visitors use semantic search or open similar-photo panels. Each accepted request performs CLIP inference or target embedding reads, scans a recent slice of embedding blobs, decodes vectors, and runs dot products in the web process. The cap prevents unbounded scans, but the work still consumes Node CPU and DB connections on latency-sensitive request paths. Because the route orders by `updatedAt` and scans only the recent cap, relevance also degrades for older images once the embedding table is larger than the scan limit.
+At the documented default scan limit, each semantic or similar request pulls and decodes thousands of embedding blobs and performs CPU scoring in the web process. The hard cap allows much larger scans. A few concurrent users can combine CLIP text inference, DB blob reads, JS decode/scoring, and normal page requests in the same Node process. For collections above the scan limit, results are also approximate by recency-filtered candidate set rather than true nearest neighbors, which can encourage operators to raise the scan limit and worsen CPU/memory pressure.
 
-Suggested fix:
+Concrete fix:
 
-Treat the current implementation as a small-gallery fallback and add an explicit scale boundary. Move similarity lookup to a vector index, ANN service, or DB-side vector feature when the gallery exceeds the scan limit. If staying in-process, put scoring in a worker thread or background service, expose scan/latency telemetry, and use a shared semantic budget so public searches cannot compete unchecked with embedding backfill and image processing. Consider precomputed nearest-neighbor rows for the similar-photo panel.
+Move similarity lookup out of request-path brute force:
 
-## Positive Controls / Non-Findings
+1. Use an ANN/vector index if available in the chosen DB stack, or maintain a sidecar vector index.
+2. For similar-image pages, precompute nearest neighbors during embedding backfill and refresh them when embeddings change.
+3. Keep text-query embedding inference behind the existing inference slot, but send vector lookup to the index instead of scanning blobs in JS.
+4. Add telemetry for scanned candidates, decode/scoring time, embedding bytes read, queue wait time, and timeout/error rates.
+5. Until an index exists, lower and document the scan cap, add request-level timeouts, and acquire a shared CPU/semantic lease from the coordinator proposed in PERF-C38-02.
 
-- Public gallery listing and photo detail queries are bounded and generally batch tag lookups instead of doing visible N+1 work.
-- Masonry cards preserve aspect ratio and memoize the card component, reducing CLS and unnecessary rerenders.
-- The home grid uses a capped initial page size and an intersection-observer load-more path rather than rendering the entire gallery.
-- The photo viewer preloads adjacent photos only after the current image is settled, and similar-photo fetches are gated on panel visibility/semantic mode.
-- Sharp cache is disabled for steady RSS, source pixel limits exist, and format generation uses atomic final-path writes.
-- Maintenance, audit retention, analytics writes, and view-count flushers all have local batching/backpressure controls; the remaining issue is the absence of a shared budget across those local controls.
+## Manual-Validation Risks And Reviewed Non-Findings
 
-## Final Missed-Issue Sweep
+- `apps/web/src/lib/data-timeline.ts:106-134` uses `MONTH(capture_date)` and `DAY(capture_date)` for the on-this-day widget, and `apps/web/src/lib/data-timeline.ts:147-160` computes distinct years with `YEAR(capture_date)`. These are known non-sargable patterns, but the on-this-day widget is capped to 6 images and was already documented in project history. I am not re-filing it as a confirmed issue without production `EXPLAIN`/row-count evidence, but it remains worth checking on very large libraries.
+- JPEG fallback handling appears addressed in the current source. Reviewed regions include `apps/web/src/components/gallery/grid-picture.tsx:33-43`, `apps/web/src/components/gallery/masonry-card.tsx:106-113`, `apps/web/src/app/[locale]/(public)/timeline/page.tsx:269-276`, `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:228-235`, and `apps/web/src/app/[locale]/g/[key]/page.tsx:232-239`.
+- Client-side gallery responsiveness has reasonable guards: `apps/web/src/components/gallery/home-client.tsx:20-79` buckets width calculations and uses animation-frame scheduling; `apps/web/src/components/gallery/load-more.tsx:43-111` guards concurrent pagination; `apps/web/src/components/gallery/load-more.tsx:137-147` uses an intersection observer root margin.
+- Histogram work is off-main-thread through `apps/web/public/histogram-worker.js:4-36`, with the component guarded around worker/image loading in `apps/web/src/components/histogram.tsx:559-618`.
+- Service-worker image caching is bounded and uses stale-while-revalidate behavior in `apps/web/public/sw.template.js:33-41`, `apps/web/public/sw.template.js:314-445`, and `apps/web/public/sw.template.js:535-565`. I did not find a new unbounded cache growth issue in the template.
+- Nginx limits and cache headers in `apps/web/nginx/default.conf` and `apps/web/next.config.ts` are repository-configured, but live behavior still depends on the deployed config being current. That is an operator validation item rather than a source finding.
 
-Sweep methods:
+## Final Sweep
 
-- Re-read `CLAUDE.md` sections on runtime topology, DB pool policy, image processing, semantic search, deploy, and known concurrency caveats.
-- Ran a repo-wide search for `TODO`, `FIXME`, `PERF`, `performance`, `concurrency`, `queue`, `cache`, `SEMANTIC_SCAN_LIMIT`, `MAP_MAX_MARKERS`, `publicSelectFields`, and `timelineSelectFields` across `apps/web/src` and `apps/web/scripts`.
-- Re-checked the highest-risk cross-file paths: upload queue/backfill/process-image, semantic request/backfill/CLIP model, map server/client payload, public data selectors, background DB writers, and maintenance scheduler.
+Commonly missed issue classes checked:
 
-Missed-issue conclusion:
+- Unbounded server-side pagination/query limits in public routes.
+- Per-item DB mutations inside batch actions and transactions.
+- Independent queue concurrency budgets that bypass a shared DB/CPU limiter.
+- Sharp/libheif memory and CPU fan-out.
+- Request-path vector/blob scans and CPU-heavy scoring.
+- Service-worker cache growth and stale-while-revalidate behavior.
+- Main-thread image analysis and layout-measurement loops.
+- Fallback image paths that could trigger excessive 404s or full-size downloads.
+- Migration/config interactions affecting query plans and deployment runtime limits.
 
-- No additional confirmed unbounded public list query was found beyond the known `/map` high-cap path.
-- No new image file write race was confirmed in the reviewed live queue and in-app backfill paths; advisory locks cover per-image encode/persist windows.
-- No new route-level missing rate-limit finding was confirmed from static inspection; public semantic/similar paths have explicit pre-increment rate limiting and syntactic guards.
-- The strongest unresolved performance risk remains aggregate admission control across background DB/CPU consumers rather than a single missing local cap.
+No additional confirmed findings were found in the final sweep.
 
-## Skipped-File Accounting
+Skipped files:
 
-Reviewed by inventory, not line-by-line:
+- No review-relevant implementation/config/doc category was intentionally skipped.
+- I did not line-read every historical `.context` artifact or every unit/e2e test file; those were searched and opened where they intersected the reviewed performance surfaces.
+- Generated, binary, and live-data artifacts were intentionally skipped, including `.next`, `.omc`, uploaded media/resources, and production database contents.
 
-- Most unit/e2e tests under `apps/web/src/__tests__` and `apps/web/e2e`; I sampled tests relevant to queue, backfill, semantic scan caps, map thumbnails, service worker cache, and privacy guards by search result.
-- Historical `.context/reviews/` and `.context/plans/`; I used them as provenance inventory, not as active implementation source.
-- Migrations and generated Drizzle metadata; inspected only for architecture context because no schema change was requested.
-
-Skipped intentionally:
-
-- `node_modules/`, `.next/` build output, uploaded media, screenshots, Playwright artifacts, binary assets, and live production data.
-- Live MySQL, host Nginx, Docker runtime, browser profiler traces, and real production traffic metrics. Those require environment inspection outside this static review lane.
-
-Validation:
-
-- Review artifact only. No tests/build were run because production code was not changed.
