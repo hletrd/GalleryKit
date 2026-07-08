@@ -674,6 +674,68 @@ describe('checkActionSource — function declarations', () => {
         expect(report.failed[0]).toContain('updateSettings');
     });
 
+    it('fails admin-mutation barrier slots hidden in nested branches before an outer mutation', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                if (input.skip) {
+                    using mutationSlot = acquireAdminMutationSlot();
+                    if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                }
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+        expect(report.failed[0]).toContain('updateSettings');
+    });
+
+    it('fails admin-mutation barrier slots hidden in loops before an outer mutation', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                for (const item of input.items) {
+                    using mutationSlot = acquireAdminMutationSlot();
+                    if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                    console.info(item);
+                }
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+    });
+
+    it('fails admin-mutation barrier slots hidden in try blocks before an outer mutation', () => {
+        const src = withApprovedActionGuardAndMutationBarrier(`
+            export async function updateSettings(input) {
+                const originError = await requireSameOriginAdmin();
+                if (originError) return { error: originError };
+                try {
+                    using mutationSlot = acquireAdminMutationSlot();
+                    if (!mutationSlot.acquired) return { error: 'restore in progress' };
+                    console.info('slot acquired');
+                } finally {
+                    console.info('cleanup');
+                }
+                await db.update(settings).set(input);
+                return { success: true };
+            }
+        `);
+        const report = checkActionSource(src, 'src/app/actions/settings.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('MISSING acquireAdminMutationSlot');
+    });
+
     it('fails spoofed local admin-mutation barrier functions', () => {
         const src = withApprovedActionGuard(`
             function acquireAdminMutationSlot() {

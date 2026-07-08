@@ -725,18 +725,7 @@ function bodyAcquiresAdminMutationSlot(
         return false;
     };
 
-    let found = false;
-    const visit = (node: ts.Node) => {
-        if (found) return;
-        if (node !== body && ts.isFunctionLike(node)) return;
-        if (ts.isBlock(node) && blockHasApprovedSlot(node)) {
-            found = true;
-            return;
-        }
-        ts.forEachChild(node, visit);
-    };
-    visit(body);
-    return found;
+    return blockHasApprovedSlot(body);
 }
 
 function statementContainsPreOriginAuthRead(statement: ts.Statement, preOriginAuthReadNames: Set<string>): boolean {

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { deleteImageVariants } from '@/lib/process-image';
+import { deleteImageVariants, deleteImageVariantsStrict } from '@/lib/process-image';
 
 /**
  * C3-TG01: Test for deleteImageVariants with sizes=[] (directory scan fallback).
@@ -80,6 +80,36 @@ describe('deleteImageVariants with sizes=[] (directory scan)', () => {
             await expect(deleteImageVariants(emptyDir, 'nonexistent.jpg', [])).resolves.toBeUndefined();
         } finally {
             await fs.rm(emptyDir, { recursive: true, force: true });
+        }
+    });
+
+    it('treats already-missing strict variants as cleaned', async () => {
+        const emptyDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gallerykit-empty-strict-scan-'));
+        try {
+            await expect(deleteImageVariantsStrict(emptyDir, 'already-gone.jpg', [])).resolves.toBeUndefined();
+            await expect(fs.readdir(emptyDir)).resolves.toEqual([]);
+        } finally {
+            await fs.rm(emptyDir, { recursive: true, force: true });
+        }
+    });
+
+    it('does not log a debug error when strict full-scan cleanup succeeds', async () => {
+        const scanDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gallerykit-strict-scan-'));
+        const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+        try {
+            await fs.writeFile(path.join(scanDir, 'strict.jpg'), 'base');
+            await fs.writeFile(path.join(scanDir, 'strict_640.jpg'), 'variant');
+
+            await expect(deleteImageVariantsStrict(scanDir, 'strict.jpg', [])).resolves.toBeUndefined();
+
+            expect(debugSpy).not.toHaveBeenCalledWith(
+                '[safeCloseDirHandle] Failed to close directory handle:',
+                expect.anything(),
+            );
+            await expect(fs.readdir(scanDir)).resolves.toEqual([]);
+        } finally {
+            debugSpy.mockRestore();
+            await fs.rm(scanDir, { recursive: true, force: true });
         }
     });
 });

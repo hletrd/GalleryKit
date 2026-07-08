@@ -21,6 +21,7 @@ vi.mock('@/db', () => ({
 import {
     enqueuePendingSessionRevocation,
     flushPendingSessionRevocations,
+    flushPendingSessionRevocationsOrThrow,
     pendingSessionRevocationCount,
     _clearPendingSessionRevocationsForTest,
 } from '@/lib/pending-session-revocations';
@@ -66,6 +67,19 @@ describe('pending session revocations queue', () => {
         expect(pendingSessionRevocationCount()).toBe(0);
     });
 
+    it('throws from the restore finalizer variant when queued revocations cannot be flushed', async () => {
+        enqueuePendingSessionRevocation('hash-a');
+        const failure = new Error('db still down');
+        whereMock.mockRejectedValueOnce(failure);
+
+        await expect(flushPendingSessionRevocationsOrThrow()).rejects.toThrow('db still down');
+        expect(pendingSessionRevocationCount()).toBe(1);
+        expect(errorSpy).toHaveBeenCalledWith(
+            expect.stringContaining('pending session revocations'),
+            failure,
+        );
+    });
+
     it('is a no-op when the queue is empty (no DB round-trip)', async () => {
         expect(await flushPendingSessionRevocations()).toBe(0);
         expect(deleteMock).not.toHaveBeenCalled();
@@ -98,15 +112,20 @@ describe('C7-01 wiring source contracts', () => {
         expect(source).toContain('if (!revoked) {');
     });
 
-    it('the restore path flushes after clearing the maintenance marker', () => {
+    it('the restore path flushes queued revocations before clearing the maintenance marker', () => {
         const source = read('src/app/[locale]/admin/db-actions.ts');
         const endMarker = source.indexOf('endDurableRestoreMaintenance();');
-        const flush = source.indexOf('await flushPendingSessionRevocations();');
+        const strictFlush = source.indexOf('await flushPendingSessionRevocationsOrThrow();');
+        const bestEffortFlush = source.indexOf('await flushPendingSessionRevocations();');
         const drainPendingFiles = source.indexOf('await drainPendingFileDeletions()');
         expect(endMarker).toBeGreaterThan(-1);
-        expect(flush).toBeGreaterThan(endMarker);
+        expect(strictFlush).toBeGreaterThan(-1);
+        expect(strictFlush).toBeLessThan(endMarker);
+        expect(bestEffortFlush).toBeGreaterThan(endMarker);
         expect(drainPendingFiles).toBeGreaterThan(endMarker);
-        expect(drainPendingFiles).toBeGreaterThan(flush);
+        expect(drainPendingFiles).toBeGreaterThan(bestEffortFlush);
+        expect(source).toContain('keeping restore maintenance active');
+        expect(source).toContain('restoreFinalizerResult = { success: false');
     });
 
     it('the hourly maintenance sweep includes the flush as a backstop', () => {

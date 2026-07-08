@@ -1,85 +1,82 @@
-# Cycle 22 Architect Review
+# Cycle 23 Architect Review
 
 Role: architect
-Reviewed HEAD: `8b795862079b0e5318242a09390b4cdff1dc2058`
-Status: review-only; no fixes implemented.
+Date: 2026-07-08 KST
+Reviewed HEAD: `7054f94f2f2c7b3c339e8fd08fe4990f876e4833`
+Status: review-only; no implementation changes.
 
 ## Inventory
 
-Relevant files/categories inspected:
+Relevant architecture/design files and regions inspected:
 
-- Runtime topology and deploy boundary: `CLAUDE.md`, `AGENTS.md`, `README.md`, `apps/web/README.md`, `package.json`, `scripts/deploy-remote.sh`, `apps/web/deploy.sh`, `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`.
-- Data model and migrations: `apps/web/src/db/schema.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/lib/sql-restore-scan.ts`.
-- Mutation and restore boundaries: `apps/web/src/app/actions/images.ts`, `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/maintenance-scheduler.ts`.
-- New Cycle 21 deletion-ledger path: `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/components/image-manager.tsx`, `apps/web/messages/{en,ko}.json`, `apps/web/src/__tests__/pending-file-deletions-source.test.ts`.
-- Current planning/register docs: `.context/plans/README.md`, `.context/plans/cycle-21-2026-07-08-plan.md`, `.context/plans/cycle-21-2026-07-08-deferred.md`, `.context/plans/deferred-carry-forward.md`.
+- Operating and planning context: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, `.context/plans/cycle-22-2026-07-08-plan.md`, `.context/plans/cycle-22-2026-07-08-deferred.md`, `.context/plans/deferred-carry-forward.md`, `.context/reviews/_aggregate.md`.
+- Restore, recovery, and runtime state ownership: `apps/web/src/app/[locale]/admin/db-actions.ts`, `apps/web/src/lib/restore-maintenance.ts`, `apps/web/src/lib/restore-maintenance-durable.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, `apps/web/src/lib/maintenance-scheduler.ts`, `apps/web/src/lib/pending-session-revocations.ts`, `apps/web/src/lib/pending-file-deletions.ts`, `apps/web/src/lib/image-queue.ts`, `apps/web/src/lib/background-db-writes.ts`.
+- Admin route layering and boundary checks: `apps/web/src/proxy.ts`, `apps/web/src/app/[locale]/admin/layout.tsx`, `apps/web/src/app/[locale]/admin/(protected)/layout.tsx`, protected admin dashboard/settings/analytics/users/tokens/categories/tags/seo/password/db pages, `apps/web/src/lib/api-auth.ts`.
+- Public restore-maintenance behavior: public home/topic/photo/group/share/map/timeline pages, `apps/web/src/app/actions/public.ts`, `apps/web/src/lib/data.ts`.
+- Migration/schema contract: `apps/web/src/db/schema.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/lib/sql-restore-scan.ts`.
+- Deployment/runtime topology: `apps/web/docker-compose.yml`, `apps/web/nginx/default.conf`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, repository docs describing the single web-instance/single-writer boundary.
+- Tests/scanners relevant to the reviewed surfaces: pending deletion/revocation tests, migration reconcile/journal tests, action-origin/API-auth/public-route lint scanners.
+
+Validation run during review:
+
+- `npm run lint:action-origin --workspace=apps/web` passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
+- `npm run lint:api-auth --workspace=apps/web` passed.
+- `npm test --workspace=apps/web -- pending-file-deletions pending-session-revocations check-action-origin migration-journal migrate-reconcile-coverage` passed: 7 files, 225 tests.
+- `npm run typecheck --workspace=apps/web` passed.
 
 ## Findings
 
-### ARCH-C22-01 - Durable deleted-file ledger has no durable drain path
+### ARCH-C23-01 - Restore clears maintenance before queued logout revocations are proven flushed
 
 Severity: High
 Confidence: High
-Status: confirmed
+Status: confirmed source-ordering defect; manual race validation not run
 
 Evidence:
 
-- `apps/web/src/app/actions/images.ts:677-727` inserts a `pending_file_deletions` row before deleting a single image row, then calls `cleanupPendingFileDeletion()` only once in the same request.
-- `apps/web/src/app/actions/images.ts:808-907` repeats the same pattern for batch deletes: insert ledger rows, delete image rows, run cleanup for the current batch only, and return success with `cleanupFailureCount`.
-- `apps/web/src/lib/pending-file-deletions.ts:70-90` deletes the ledger row only on full cleanup success; on failure it increments `attempts` and stores `last_error`.
-- `apps/web/src/lib/maintenance-scheduler.ts:34-45` runs session, revocation, rate-limit, audit, and view-retention maintenance only. It never selects or retries `pending_file_deletions`.
-- Repo search found no other consumer of `cleanupPendingFileDeletion()` beyond the initiating delete actions and source-contract tests.
+- `apps/web/src/app/[locale]/admin/db-actions.ts:650-679` releases the admin mutation exclusive flag and calls `endDurableRestoreMaintenance()` at `:654-657`, then resumes the image queue and only afterward calls `flushPendingSessionRevocations()` at `:671`.
+- `apps/web/src/lib/pending-session-revocations.ts:62-86` keeps pending hashes only after a successful DB delete, but failures are logged and collapsed to return `0`; callers cannot distinguish "nothing queued" from "flush failed."
+- `apps/web/src/app/actions/auth.ts:286-315` queues a pending revocation when logout cannot delete the session row during restore, then clears the local cookie.
+- `apps/web/src/lib/session.ts:136-150` treats any restored, unexpired session row as valid after HMAC and age verification.
+- `apps/web/src/__tests__/pending-session-revocations.test.ts:101-110` currently pins the risky ordering by asserting the flush happens after the maintenance marker is cleared.
 
 Failure scenario:
 
-An admin deletes a photo while the upload filesystem has a transient NFS, permission, ENOSPC, or stale-handle failure. The DB row is gone and the admin receives success plus a warning, but the public derivative files can remain under `/uploads/{webp,avif,jpeg}`. The retained DB ledger row is not drained on the next hourly maintenance sweep, boot, deploy restart, or restore recovery, so known public files can stay reachable by direct URL indefinitely unless an operator manually reverse-engineers the table and helper.
+An admin logs out during a restore window. The cookie is cleared locally, but the server-side session delete is queued because DB mutation is blocked. The restore then imports a backup containing that session row. In the `finally` path, the app clears durable/process maintenance before flushing the queued revocation. During that gap, or indefinitely if the flush fails, a copied/stale token whose row was restored can authenticate as an admin because the marker no longer blocks normal admin auth and the restored session row still exists.
 
-Concrete fix:
+Suggested fix:
 
-Add a real drain for `pending_file_deletions`: a bounded maintenance task and/or explicit operator script that pages rows by `updated_at`, calls `cleanupPendingFileDeletion()`, applies backoff/max-attempt policy, and logs remaining failures. Add behavior tests with mocked filesystem + DB rows proving a failed delete is retried and removed after later success. Wire restore/deploy docs to the same command so the row is actionable, not just durable.
+Move `flushPendingSessionRevocations()` to the post-import but pre-marker-clear phase for successful restores. Make the flush result distinguish empty from failed, or throw on failure in the restore path, so restore can fail closed by keeping maintenance active when admin session revocation cannot be proven. Update the source-contract test to assert "after import, before `endDurableRestoreMaintenance()`." Keep `drainPendingFileDeletions()` after marker clear if that filesystem cleanup should remain non-blocking.
 
-### ARCH-C22-02 - Pending deletion state is now part of restore/backup state but not part of restore recovery
+### ARCH-C23-02 - Protected admin SSR reads are not restore-maintenance gated
 
 Severity: Medium
-Confidence: High
-Status: confirmed risk
+Confidence: High for source gap; likely runtime failure; manual browser validation not run
+Status: confirmed architecture boundary gap
 
 Evidence:
 
-- `apps/web/src/lib/sql-restore-scan.ts:12-32` includes `pending_file_deletions` in `APP_BACKUP_TABLES`, so the app's own SQL backups/restores preserve the table.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:593-635` drains shared-group view buffers, image queue, background DB writes, maintenance sweeps, and foreground mutations before restore. It has no post-restore stage for stale pending deletion rows.
-- `apps/web/src/app/[locale]/admin/db-actions.ts:654-670` clears restore maintenance and flushes pending session revocations after successful restore; no analogous flush exists for pending file deletions.
-- `apps/web/src/lib/maintenance-scheduler.ts:34-45` also has no later retry path after restore resumes normal operation.
+- `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:12-17` authenticates with `isAdmin()` and redirects unauthenticated users, but it does not check `isRestoreMaintenanceActive()`.
+- Protected pages immediately execute DB-heavy reads: dashboard loads images/topics/tags/settings/SEO/failed images at `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx:19-27`; settings loads admin settings and image count at `apps/web/src/app/[locale]/admin/(protected)/settings/page.tsx:13-17`; analytics loads view breakdowns at `apps/web/src/app/[locale]/admin/(protected)/analytics/page.tsx:24-35`; users loads admin users at `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx:11-13`.
+- Public routes explicitly render restore maintenance before DB reads, for example `apps/web/src/app/[locale]/(public)/page.tsx:155-160`, and shared data side effects check the same marker in `apps/web/src/lib/data.ts:49-52`.
+- Maintenance/background tasks also skip during restore through `apps/web/src/lib/maintenance-scheduler.ts:26-46`; protected admin SSR reads do not share that boundary.
 
 Failure scenario:
 
-A backup taken while `pending_file_deletions` contains rows is later restored. Because database restore is explicitly row-only and does not roll back the filesystem, restored rows may describe files that still need deletion in the current host storage. The app preserves the rows but never consumes them, so restore can reintroduce "known dirty" cleanup state without any recovery action.
+While a restore import is dropping/recreating tables or reconciling schema, an authenticated admin opens `/admin/dashboard`, `/admin/settings`, or `/admin/analytics`. The protected layout verifies auth and then lets child server components query tables whose contents are not authoritative. The result can be a 500, mixed pre/post-restore admin state, or extra DB pressure during the restore window. This also widens ARCH-C23-01 because restored admin sessions can reach protected reads as soon as the marker clears but before post-restore cleanup is complete.
 
-Concrete fix:
+Suggested fix:
 
-Once ARCH-C22-01 adds a drain, call or schedule it after successful restore maintenance clears, with the same restore-active guard used by session revocations. Document whether restored pending deletions are expected to be drained automatically or operator-triggered.
+Add a restore-maintenance gate to the protected admin layout or to a shared admin route wrapper before child server components run. Render a non-querying maintenance shell for protected admin pages while active, and explicitly exempt only the mounted DB restore UI path if it needs to keep showing local progress. Add tests that protected admin pages do not call data accessors while the restore marker is active.
 
-## Confirmed Healthy Invariants
+## Healthy Invariants Not Re-Raised
 
-- Migration mirror for the new table exists in all required places: schema (`apps/web/src/db/schema.ts:134-153`), SQL migration (`apps/web/drizzle/0030_pending_file_deletions.sql:1-19`), and reconcile (`apps/web/scripts/migrate.js:486-502`).
-- The backfill-candidate index is represented in schema (`apps/web/src/db/schema.ts:127`), migration (`apps/web/drizzle/0030_pending_file_deletions.sql:19`), and reconcile (`apps/web/scripts/migrate.js:724`).
-- The public nginx/app topology remains explicitly single-instance and edge-rate-limited by documented operator boundary (`CLAUDE.md:245-247`, `apps/web/nginx/default.conf:1-29`, `apps/web/docker-compose.yml:15-23`).
-- Restore's mutation barrier and drain checklist are still centralized in `restoreDatabase()` (`apps/web/src/app/[locale]/admin/db-actions.ts:580-635`) rather than spread across actions.
+- The Cycle 22 pending-file-deletion drain now exists in `apps/web/src/lib/pending-file-deletions.ts:105-139`, is included in hourly maintenance at `apps/web/src/lib/maintenance-scheduler.ts:42-46`, and is called after restore at `apps/web/src/app/[locale]/admin/db-actions.ts:672-678`.
+- The pending-file-deletion schema is mirrored across `apps/web/src/db/schema.ts`, `apps/web/drizzle/0030_pending_file_deletions.sql`, `apps/web/drizzle/meta/_journal.json`, and `apps/web/scripts/migrate.js`.
+- Protected admin routes do have a real server-side auth gate in `apps/web/src/app/[locale]/admin/(protected)/layout.tsx:12-17`; the final sweep did not carry forward a false middleware-only admin-auth finding.
+- Cycle 22 deferred performance/design items remain tracked in `.context/plans/cycle-22-2026-07-08-deferred.md` and `.context/plans/deferred-carry-forward.md`; they were not refiled as new Cycle 23 findings.
 
-## Missed-Issue Sweep
+## Missed-Issues Sweep
 
-Checked for:
-
-- Unmirrored Cycle 21 schema additions.
-- New advisory-lock or restore-drain surfaces.
-- New public route/deploy topology changes.
-- New docs that present scale-out, S3/MinIO, Lightroom plugin, edit/cull/scoring, or semantic-search production mode as default-supported.
-- New source-contract-only tests around Cycle 21 changes.
-
-No additional confirmed architecture findings from that sweep.
-
-## Uninspected Categories
-
-- Live production host state: nginx applied config, `npm run deploy` transcript, Docker health logs, live smoke, MySQL row counts, pending deletion rows.
-- Full runtime gates were not re-run for this review lane.
-- Browser/visual behavior was not rechecked; this lane focused on architecture and docs/source consistency.
+Rechecked restore teardown ordering, admin/public maintenance gates, schema/migration mirrors, action-origin scanner behavior, API auth wrappers, public route rate-limit coverage, deployment topology assumptions, and current deferred registers after drafting the findings. No additional confirmed architecture findings were found in this pass.

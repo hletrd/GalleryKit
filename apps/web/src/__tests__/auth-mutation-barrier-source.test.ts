@@ -45,17 +45,17 @@ describe('auth mutation barrier source contracts', () => {
     it('holds the admin mutation barrier before logout verifies or deletes the session', () => {
         const functionIndex = indexAfter(authSource, 'export async function logout');
         const sameOriginIndex = indexAfter(authSource, 'if (!hasTrustedSameOrigin(requestHeaders))', functionIndex);
-        const maintenanceIndex = indexAfter(authSource, 'const maintenanceError = getRestoreMaintenanceMessage', sameOriginIndex);
-        const slotIndex = indexAfter(authSource, 'using mutationSlot = acquireAdminMutationSlot();', maintenanceIndex);
-        const acquiredCheckIndex = indexAfter(authSource, 'if (mutationSlot.acquired)', slotIndex);
-        const verifyIndex = indexAfter(authSource, 'verifySessionToken(token)', acquiredCheckIndex);
+        const slotIndex = indexAfter(authSource, 'using mutationSlot = acquireAdminMutationSlot();', sameOriginIndex);
+        const acquiredCheckIndex = indexAfter(authSource, 'if (!mutationSlot.acquired)', slotIndex);
+        const maintenanceIndex = indexAfter(authSource, 'const maintenanceError = getRestoreMaintenanceMessage', acquiredCheckIndex);
+        const verifyIndex = indexAfter(authSource, 'verifySessionToken(token)', maintenanceIndex);
         const deleteIndex = indexAfter(authSource, 'db.delete(sessions)', verifyIndex);
         const cookieDeleteIndex = indexAfter(authSource, 'cookieStore.delete', deleteIndex);
 
-        expect(maintenanceIndex).toBeGreaterThan(sameOriginIndex);
-        expect(slotIndex).toBeGreaterThan(maintenanceIndex);
+        expect(slotIndex).toBeGreaterThan(sameOriginIndex);
         expect(acquiredCheckIndex).toBeGreaterThan(slotIndex);
-        expect(verifyIndex).toBeGreaterThan(acquiredCheckIndex);
+        expect(maintenanceIndex).toBeGreaterThan(acquiredCheckIndex);
+        expect(verifyIndex).toBeGreaterThan(maintenanceIndex);
         expect(deleteIndex).toBeGreaterThan(verifyIndex);
         expect(cookieDeleteIndex).toBeGreaterThan(deleteIndex);
     });

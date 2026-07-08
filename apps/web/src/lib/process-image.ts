@@ -115,7 +115,7 @@ async function strictUnlink(filePath: string): Promise<void> {
     }
 }
 
-/** Safely close a directory handle, ignoring only ENOENT (already closed). */
+/** Safely close a directory handle, ignoring already-gone or already-closed handles. */
 async function safeCloseDirHandle(handle: Awaited<ReturnType<typeof fs.opendir>>): Promise<void> {
     try {
         await handle.close();
@@ -123,7 +123,7 @@ async function safeCloseDirHandle(handle: Awaited<ReturnType<typeof fs.opendir>>
         const code = err && typeof err === 'object' && 'code' in err
             ? (err as { code?: string }).code
             : null;
-        if (code === 'ENOENT') return;
+        if (code === 'ENOENT' || code === 'ERR_DIR_CLOSED') return;
         console.debug('[safeCloseDirHandle] Failed to close directory handle:', err);
     }
 }

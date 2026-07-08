@@ -123,6 +123,19 @@ describe('pending file deletion drain', () => {
         expect(mocks.update).not.toHaveBeenCalled();
     });
 
+    it('removes pending rows when a transient cleanup failure succeeds on retry', async () => {
+        mocks.rows.push(pendingDeletion({ id: 9 }));
+        mocks.deleteOriginalUploadFileStrict.mockRejectedValueOnce(new Error('stale handle'));
+
+        const result = await drainPendingFileDeletions();
+
+        expect(result).toEqual({ attempted: 1, cleaned: 1, failed: 0 });
+        expect(mocks.deleteOriginalUploadFileStrict).toHaveBeenCalledTimes(2);
+        expect(mocks.deleteWhere).toHaveBeenCalledTimes(1);
+        expect(mocks.update).not.toHaveBeenCalled();
+        expect(errorSpy).not.toHaveBeenCalled();
+    });
+
     it('keeps failed rows and records the cleanup failure for a future retry', async () => {
         mocks.rows.push(pendingDeletion({ id: 8, image_id: null }));
         mocks.deleteOriginalUploadFileStrict.mockRejectedValue(new Error('permission denied'));

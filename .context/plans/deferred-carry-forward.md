@@ -16,7 +16,17 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c22):** direct correctness/privacy/data-retention findings
+**Age-budget check (run-10 c23):** direct auth/session, restore, scanner, evidence, and
+small accessibility findings `AGG-C23-01`, `AGG-C23-02`, `AGG-C23-03`, `AGG-C23-07`,
+`AGG-C23-08`, `AGG-C23-09`, `AGG-C23-10`, `AGG-C23-23`, and `AGG-C23-24` are scheduled
+in `cycle-23-2026-07-08-plan.md`. Newly deferred High-severity Cycle 23 rows
+(`AGG-C23-04`, `AGG-C23-05`, `AGG-C23-06`) are broad architecture/performance/availability
+items with explicit exit criteria in `cycle-23-2026-07-08-deferred.md`, prior committed
+carry-forward lineage, and no contained one-cycle fix. Security/operator rows rely on the
+documented host-nginx, proxy, single-instance, DB-only backup, and permanently deferred
+2FA/WebAuthn boundaries in `CLAUDE.md`.
+
+**Previous check (run-10 c22):** direct correctness/privacy/data-retention findings
 `AGG-C22-01`, `AGG-C22-02`, `AGG-C22-03`, and provenance finding `AGG-C22-04`
 are scheduled in `cycle-22-2026-07-08-plan.md`; `AGG-C22-10` and targeted
 `AGG-C22-09` behavior coverage are also scheduled. Newly deferred High-severity
@@ -236,6 +246,14 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C22-16..20 | mixed, up to MED | cycle-22-2026-07-08 | r10c22 | 0 | Operator/topology/backup/security-model exit criteria in Cycle 22 deferred register |
 | C22-21 | LOW/Medium | cycle-22-2026-07-08 | r10c22 | 0 | Next background writer/queue is added, or restore-drain omission escapes review |
 | C22-22..25 | mixed, up to MED | cycle-22-2026-07-08 | r10c22 | 0 | Admin UX, mobile presentation, and template-distribution exit criteria in Cycle 22 deferred register |
+| C23-04 | HIGH/High source shape, Medium live RSS impact | cycle-23-2026-07-08 | r10c23 | 0 | Production RSS/OOM incident during upload/restore, on-host RSS trace proving breach, or approved streaming-ingress project |
+| C23-05 | HIGH/High | cycle-23-2026-07-08 | r10c23 | 0 | Before upload-time privacy/metadata/processing fields are added, or next confirmed browser/PAT drift |
+| C23-06 | HIGH/High | cycle-23-2026-07-08 | r10c23 | 0 | Measured pool starvation during queue/backfill/search, or shared background-budget project approved |
+| C23-11..15 | mixed, up to MED | cycle-23-2026-07-08 | r10c23 | 0 | Operator/topology/backup/security-model exit criteria in Cycle 23 deferred register |
+| C23-16..17 | MED/High | cycle-23-2026-07-08 | r10c23 | 0 | Public keyword/semantic search scale exit criteria in Cycle 23 deferred register |
+| C23-18..19 | MED/High | cycle-23-2026-07-08 | r10c23 | 0 | Test-infra/browser-matrix hardening exit criteria in Cycle 23 deferred register |
+| C23-20..22 | mixed, up to MED | cycle-23-2026-07-08 | r10c23 | 0 | Public map/on-this-day/SW performance exit criteria in Cycle 23 deferred register |
+| C23-25..26 | mixed, up to MED | cycle-23-2026-07-08 | r10c23 | 0 | Admin responsive/IA and mobile presentation exit criteria in Cycle 23 deferred register |
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 0 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |

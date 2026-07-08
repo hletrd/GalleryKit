@@ -59,14 +59,7 @@ export function pendingSessionRevocationCount(): number {
     return getPending().size;
 }
 
-/**
- * Delete every queued session row. Entries are only removed from the queue
- * after the DELETE commits, so a failed flush retries on the next call (the
- * hourly maintenance sweep is the backstop). Never throws.
- *
- * @returns the number of queued revocations flushed (0 on failure or empty).
- */
-export async function flushPendingSessionRevocations(): Promise<number> {
+async function flushPendingSessionRevocationsInternal(options: { throwOnFailure: boolean }): Promise<number> {
     const pending = getPending();
     if (pending.size === 0) return 0;
     const hashes = Array.from(pending);
@@ -77,12 +70,34 @@ export async function flushPendingSessionRevocations(): Promise<number> {
             'Failed to flush pending session revocations; they remain queued for the next sweep:',
             err,
         );
+        if (options.throwOnFailure) {
+            throw err;
+        }
         return 0;
     }
     for (const hash of hashes) {
         pending.delete(hash);
     }
     return hashes.length;
+}
+
+/**
+ * Delete every queued session row. Entries are only removed from the queue
+ * after the DELETE commits, so a failed flush retries on the next call (the
+ * hourly maintenance sweep is the backstop). Never throws.
+ *
+ * @returns the number of queued revocations flushed (0 on failure or empty).
+ */
+export async function flushPendingSessionRevocations(): Promise<number> {
+    return flushPendingSessionRevocationsInternal({ throwOnFailure: false });
+}
+
+/**
+ * Restore-finalizer variant: throws if queued revocations cannot be flushed so
+ * restore maintenance can remain active instead of reopening a restored session.
+ */
+export async function flushPendingSessionRevocationsOrThrow(): Promise<number> {
+    return flushPendingSessionRevocationsInternal({ throwOnFailure: true });
 }
 
 /** Test-only reset. */

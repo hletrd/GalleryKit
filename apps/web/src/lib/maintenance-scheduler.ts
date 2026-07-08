@@ -32,7 +32,7 @@ async function runMaintenanceTask(label: string, task: () => Promise<unknown>): 
     }
 }
 
-async function runMaintenanceSweepOnce(): Promise<void> {
+export async function runMaintenanceSweepOnce(): Promise<void> {
     if (isRestoreMaintenanceActive()) return;
     await runMaintenanceTask('purgeExpiredSessions', purgeExpiredSessions);
     // C7-01 (run-10 cycle 7b): hourly backstop for logout revocations that a

@@ -27,7 +27,7 @@ import { getRestoreMaintenanceMessage } from "@/lib/restore-maintenance";
 import { drainAdminMutationsForRestore, releaseAdminMutationExclusive } from "@/lib/admin-mutation-barrier";
 import { runRestoreDrainChecklist } from "@/lib/restore-drain-checklist";
 import { drainPendingFileDeletions } from "@/lib/pending-file-deletions";
-import { flushPendingSessionRevocations } from "@/lib/pending-session-revocations";
+import { flushPendingSessionRevocations, flushPendingSessionRevocationsOrThrow } from "@/lib/pending-session-revocations";
 import { beginDurableRestoreMaintenance, endDurableRestoreMaintenance } from "@/lib/restore-maintenance-durable";
 import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SIZE_BYTES, isMysqldumpArtifactHeader, hasMysqldumpCompletionTrailer, MYSQLDUMP_TRAILER_SCAN_BYTES } from "@/lib/db-restore";
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
@@ -453,6 +453,7 @@ export async function restoreDatabase(formData: FormData) {
     let keepRestoreMaintenance = false;
     let imageQueueQuiesced = false;
     let restoreLockConnectionDestroyed = false;
+    let restoreFinalizerResult: { success: false; error: string; keepMaintenance: true } | null = null;
     const destroyRestoreLockConnectionOnAcquireError = (label: string, err: unknown) => {
         destroyPooledAdvisoryLockConnectionOnAcquireError(conn, label, err);
         restoreLockConnectionDestroyed = true;
@@ -652,6 +653,24 @@ export async function restoreDatabase(formData: FormData) {
             // marker still blocks mutations; a stale exclusive flag must never
             // outlive the restore attempt).
             releaseAdminMutationExclusive();
+            if (restoreLifecycleVerified) {
+                // C23 AGG-C23-02: a restore can re-import a session row whose
+                // logout was queued during the maintenance window. Flush those
+                // revocations BEFORE reopening normal admin auth; if the flush
+                // cannot be proven, keep maintenance active for operator
+                // recovery instead of exposing the restored session.
+                try {
+                    await flushPendingSessionRevocationsOrThrow();
+                } catch (err) {
+                    console.error(
+                        'Restore completed but pending session revocations could not be flushed; keeping restore maintenance active',
+                        err,
+                    );
+                    keepRestoreMaintenance = true;
+                    restoreLifecycleVerified = false;
+                    restoreFinalizerResult = { success: false, error: t('restoreFailed'), keepMaintenance: true };
+                }
+            }
             if (restoreLifecycleVerified || !keepRestoreMaintenance) {
                 try {
                     endDurableRestoreMaintenance();
@@ -663,11 +682,9 @@ export async function restoreDatabase(formData: FormData) {
                         console.error('Failed to resume image-processing queue after restore', err);
                     });
                 }
-                // C7-01 (run-10 cycle 7b): flush logout revocations that the
-                // restore window skipped. This runs AFTER the import replaced
-                // the sessions table, so it also kills a session row the
-                // restore just re-imported (a pre-import delete would have
-                // been undone by the import). Never throws.
+                // C7-01/C23 AGG-C23-02: best-effort backstop for non-restore
+                // cleanup paths; successful restores already used the strict
+                // pre-marker flush above.
                 await flushPendingSessionRevocations();
                 // C22 AGG-C22-03: a DB restore can reintroduce pending
                 // file-deletion rows after their files were already removed.
@@ -692,6 +709,9 @@ export async function restoreDatabase(formData: FormData) {
             }
             await uploadContractLock?.release();
             uploadContractLock = null;
+            if (restoreFinalizerResult) {
+                return restoreFinalizerResult;
+            }
         }
     } catch (err) {
         console.error('Database restore failed before structured restore result:', err);

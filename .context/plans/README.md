@@ -33,17 +33,20 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 22/100 Implementation Plan - active ledger from Cycle 22 aggregate: positive mutation-barrier scanner bypass, pending file-deletion drain/recovery, Cycle 21 terminal ledger repair, parser-backed grouping tests, current deferred/carry-forward refresh, gates, push, and per-cycle deploy (`cycle-22-2026-07-08-plan.md`)
-- Run-10 Cycle 22/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for broad upload-ingest extraction, streaming multipart ingress, background DB/CPU budgeting, public discovery/search/map/vector scale, topology/operator validation, test-infra gaps, browser/admin/PWA matrix expansion, and UI/product follow-ups (`cycle-22-2026-07-08-deferred.md`)
+- Run-10 Cycle 23/100 Implementation Plan - active ledger from Cycle 23 aggregate: fail-closed restore logout revocations, protected-admin restore gate, nested mutation-barrier scanner dominance, pending-deletion behavior coverage, strict cleanup debug noise, search combobox ARIA state, provenance/carry-forward refresh, gates, push, and per-cycle deploy (`cycle-23-2026-07-08-plan.md`)
+- Run-10 Cycle 23/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for broad upload-ingest extraction, streaming multipart ingress, background DB/CPU budgeting, public discovery/search/map/vector scale, topology/operator validation, test-infra gaps, browser/admin/PWA matrix expansion, and UI/product follow-ups (`cycle-23-2026-07-08-deferred.md`)
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
 - THREE distinct "Cycle 9" lineages exist: run-10's own `cycle-9-2026-07-07-{plan,deferred}.md` (2026-07-07), loop-B's `cycle-9b-2026-07-08-*` (this pair), and the pre-run-10 `cycle-9-plan.md` (2026-06-25, historical).
 - The undated `cycle-19-plan.md` / `cycle-19-deferred.md` are a COMPLETED plan pair from an older run (planning HEAD `5c559a0f`, content dated 2026-06-27) — they are NOT run-10 Cycle 19; the current Cycle 19 pair is the dated `cycle-19-2026-07-08-*` listed above (AGG9B-18/DOC-C19-04).
 - The bare `cycle-20-plan.md` / `cycle-20-deferred.md`, `cycle-21-plan.md` / `cycle-21-deferred.md`, and `cycle-22-plan.md` / `cycle-22-deferred.md` are historical ledgers from an older naming run (not the active run-10 dated sequence). The active run-10 Cycle 20 pair is `cycle-20-2026-07-08-plan.md` and `cycle-20-2026-07-08-deferred.md`; future cycles should prefer dated/run-qualified filenames.
+- The dated `cycle-23-2026-06-30-plan.md` / `cycle-23-2026-06-30-deferred.md` pair is a historical pre-run-10 Cycle 23 ledger. It is NOT the active run-10 Cycle 23 pair; the current pair is `cycle-23-2026-07-08-plan.md` and `cycle-23-2026-07-08-deferred.md`.
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 22/100 Implementation Plan - completed and pushed as `57c1ae33`; local gates and Playwright evidence are recorded in the plan. Its deploy evidence was not committed before Cycle 23 review and is superseded by the Cycle 23 per-cycle deploy once this cycle finishes (`cycle-22-2026-07-08-plan.md`)
+- Run-10 Cycle 22/100 Deferred Findings - superseded by the Cycle 23 deferred register where findings remain open (`cycle-22-2026-07-08-deferred.md`)
 - Run-10 Cycle 21/100 Implementation Plan - completed and pushed as `8b795862`; Cycle 21 report plus orchestrator live smoke verified per-cycle deploy success. The commit-body `Not-tested: Production deploy pending...` wording is stale and superseded by the Cycle 21 terminal evidence note in this plan (`cycle-21-2026-07-08-plan.md`)
 - Run-10 Cycle 21/100 Deferred Findings - superseded by the Cycle 22 deferred register where findings remain open (`cycle-21-2026-07-08-deferred.md`)
 - Run-10 Cycle 20/100 Implementation Plan - completed through source deploy; terminal docs-ledger deploy evidence is superseded by the Cycle 21 per-cycle deploy once this cycle finishes (`cycle-20-2026-07-08-plan.md`)

@@ -283,22 +283,34 @@ export async function logout(formData?: FormData) {
         redirect(localizePath(locale, '/admin'));
     }
 
+    using mutationSlot = acquireAdminMutationSlot();
+    if (!mutationSlot.acquired) {
+        if (token) {
+            // C7-01 (run-10 cycle 7b): a restore window blocked the DB-side
+            // revocation. Queue it so the post-restore flush (which runs
+            // AFTER the import replaces the sessions table — a pre-import
+            // delete would be undone anyway) or the hourly maintenance sweep
+            // actually kills the server-side session instead of silently
+            // leaving the token verifiable for its remaining lifetime.
+            enqueuePendingSessionRevocation(hashSessionToken(token));
+        }
+        cookieStore.delete({ name: COOKIE_NAME, path: '/' });
+        return redirect(localizePath(locale, '/admin'));
+    }
+
     if (token) {
         const maintenanceError = getRestoreMaintenanceMessage('restore in progress');
         let revoked = false;
         if (!maintenanceError) {
-            using mutationSlot = acquireAdminMutationSlot();
-            if (mutationSlot.acquired) {
-                const session = await verifySessionToken(token);
-                if (session) {
-                    logAuditEvent(session.userId, 'logout', 'user', String(session.userId)).catch(console.debug);
-                }
-                try {
-                    await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token)));
-                    revoked = true;
-                } catch (err) {
-                    console.debug('Failed to delete session during logout; queuing revocation:', err);
-                }
+            const session = await verifySessionToken(token);
+            if (session) {
+                logAuditEvent(session.userId, 'logout', 'user', String(session.userId)).catch(console.debug);
+            }
+            try {
+                await db.delete(sessions).where(eq(sessions.id, hashSessionToken(token)));
+                revoked = true;
+            } catch (err) {
+                console.debug('Failed to delete session during logout; queuing revocation:', err);
             }
         }
         if (!revoked) {
