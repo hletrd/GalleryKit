@@ -1,6 +1,6 @@
 # Run-10 Cycle 35/100 Implementation Plan
 
-Status: IMPLEMENTED - gates/deploy pending
+Status: IMPLEMENTED - signed push complete; deploy evidence absent/superseded by Cycle 36 per-cycle deploy
 Aggregate: `.context/reviews/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `7993fa467f8a71814f878aa59bcd80174daab1ed`
@@ -158,8 +158,8 @@ No confirmed security, correctness, or data-loss finding is deferred in this pla
 - [x] WP4 semantic scan-cap behavioral tests added.
 - [x] WP5 current-cycle provenance and nginx wording repaired.
 - [x] Full configured gates run green.
-- [ ] Signed commit pushed.
-- [ ] Per-cycle deploy run and production smoke evidence recorded.
+- [x] Signed commit pushed (`c62c8c1e`).
+- [ ] Per-cycle deploy run and production smoke evidence recorded. No committed Cycle 35 deploy transcript was found during Cycle 36 planning; Cycle 36's per-cycle deploy will supersede production evidence for the pushed Cycle 35 history.
 
 ## Verification Evidence
 

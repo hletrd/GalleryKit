@@ -1,88 +1,117 @@
-# Run-10 Cycle 35 Code Reviewer Report
+# Run-10 Cycle 36 Code Reviewer Report
 
 Date: 2026-07-08 KST
-Review HEAD: `7993fa467f8a71814f878aa59bcd80174daab1ed`
-Role: cycle-35 code-reviewer subagent
-Scope: whole-repository code-quality, logic, SOLID/maintainability, cross-file contract, state consistency, error-handling, and correctness review. Product code was not edited.
+Role: cycle-36 code-reviewer review worker
+Workspace: `/Users/hletrd/flash-shared/gallery`
+Review HEAD: `c62c8c1e` on `master` / `origin/master`
+Mode: whole-repository review only; no production-code edits.
 
-## Inventory / Scope Reviewed
+## Inventory And Scope
 
-Required authority and context read first: `AGENTS.md`, `CLAUDE.md`, and the code-review skill instructions. I also read the current rolling `.context/reviews/code-reviewer.md`, the latest aggregate review `.context/reviews/run10-cycle34/_aggregate.md`, rolling `.context/reviews/_aggregate.md`, and `.context/plans/run10-cycle34/deferred.md` so prior findings were not re-filed as new.
+Required context read first: `AGENTS.md`, `CLAUDE.md`, and the code-review skill instructions.
 
-Review-relevant inventory built before retaining claims:
+Inventory built before retaining findings:
 
-- 725 tracked implementation, operations, schema, config, test, and docs-contract files in the active review set: `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, app config files, nginx/Docker/deploy config, root scripts, and live planning/review context.
-- 627 TypeScript/TSX/JS implementation and test files under `apps/web/src`.
-- 29 app scripts and 34 migration/meta files under `apps/web/scripts` and `apps/web/drizzle`.
-- High-risk paths examined in detail: admin API auth wrappers, mutating server-action guards, public route rate limits, upload/LR upload flows, restore-maintenance and admin mutation barriers, background queue/backfill runners, sidecar color backfill, pending cleanup queues, advisory locks, DB pool budgeting, public data privacy projections, search/timeline/map query paths, migrations, deployment/proxy config, and current source-contract tests.
+- 939 tracked source/docs/config files from `rg --files` excluding ignored runtime/build output.
+- 741 files under `apps/web`, including 633 under `apps/web/src`, 29 scripts, 34 migration/meta files, 12 e2e files, Docker/nginx/Next/Vitest/Playwright config, and package manifests.
+- App Router surface: localized public pages, admin pages, 13 server-action files, 12 route-handler files, upload fallbacks, OG/search APIs, health/live routes.
+- Core cross-file clusters inspected: auth/session/PAT wrappers, same-origin and restore-mutation barriers, public route rate limits, topic route mutations, upload/processing/delete cleanup, image queue, admin and sidecar backfills, semantic search/CLIP, migrations/reconcile, privacy projections, service worker cache behavior, deploy/nginx/Docker, CI and test infrastructure.
+- Prior-cycle context read to avoid duplicate filing: `.context/reviews/code-reviewer.md`, `.context/reviews/critic.md`, `.context/reviews/_aggregate.md`, `.context/plans/run10-cycle35/{plan,deferred}.md`, and `.context/plans/README.md`.
 
-Intentionally not treated as source: `node_modules`, `.next`/build output, runtime uploads/backups/test-results, `.claude/worktrees`, and historical `.context` artifacts except where they document current invariants or known deferred findings. No relevant tracked implementation/config path in the active inventory was intentionally skipped.
+Concurrent review artifacts outside this assignment were observed in the worktree and left untouched. Final status should be read from `git status` because other review workers may still be updating their files.
 
-## Fresh Findings
+## Confirmed Issues
 
-No new confirmed or likely code-quality/correctness findings were retained in this cycle.
+### CR36-01 - Root Playwright run state is tracked instead of ignored
 
-Evidence supporting that conclusion:
+- Severity: Low
+- Confidence: High
+- Classification: confirmed repository hygiene / maintainability issue
+- Region: `test-results/.last-run.json:1-4`; `.gitignore:126-127`; `apps/web/playwright.config.ts:63-67`; `apps/web/e2e/nav-visual-check.spec.ts:58-85`
+- Failure scenario: `test-results/.last-run.json` is a tracked Playwright runner state file whose current committed content says `"status": "failed"` with no failed tests. `.gitignore` ignores only `apps/web/test-results/` and `apps/web/playwright-report/`, not root `test-results/`. A root-level Playwright invocation or tooling that writes the default root `test-results` directory can dirty the worktree with machine-local run state, and reviewers can misread the committed JSON as authoritative e2e evidence.
+- Suggested fix: remove the file from version control and ignore root `test-results/` / `playwright-report/` as runtime artifacts. Keep intentional visual artifacts under `.context/reviews/...` or another committed provenance path, not Playwright's mutable default output directory.
 
-- The latest Cycle 34 scheduled fixes were rechecked in source:
-  - LR/PAT upload now holds the admin mutation barrier before parsing/saving/inserting (`apps/web/src/app/api/admin/lr/upload/route.ts:95-105`).
-  - In-app admin backfill now exposes a shutdown drain and is included in graceful shutdown (`apps/web/src/lib/admin-backfill-runner.ts:877-884`, `apps/web/src/instrumentation.ts:54-63`).
-  - Browser upload topic verification now returns a structured error after settling the quota claim (`apps/web/src/app/actions/images.ts:265-275`).
-  - E2E seed cleanup now allowlists expected seed filenames before unlinking DB-sourced paths (`apps/web/scripts/seed-e2e.ts:191-204`).
-  - Sidecar color backfill now claims the per-image processing lock around reprocess/persistence (`apps/web/scripts/backfill-color-pipeline.ts:319-347`, `apps/web/scripts/backfill-color-pipeline.ts:560-603`).
-- The previously scheduled December archive bug is fixed and behavior-tested (`apps/web/src/lib/data-timeline.ts:93-103`, `apps/web/src/__tests__/data-timeline-behavior.test.ts:59-90`).
-- Custom architecture gates, lint, typecheck, production audit, focused regressions, and the full Vitest suite passed; command evidence is listed below.
+## Likely Issues / Design Risks
 
-## Known / Deferred Items Not Re-filed
+### CR36-02 - Background workers independently budget the same DB pool
 
-These are real or plausible issues already documented in the current deferred register, so they are not fresh Cycle 35 findings.
+- Severity: High
+- Confidence: High
+- Classification: likely operational correctness/performance issue
+- Region: `apps/web/src/db/index.ts:31-42`; `apps/web/src/lib/image-queue.ts:121-153`; `apps/web/src/lib/admin-backfill-runner.ts:97-143`; `apps/web/src/lib/background-db-writes.ts:8-75`
+- Failure scenario: the shipped pool is 10 connections. The image queue caps itself by reserving half the pool for live traffic, and admin color backfill uses a separate formula that also reserves half the same pool. If uploads are processing while an admin color backfill runs, the queue can use about four claim/update connections and the backfill can use one run lock plus four worker/update connections, leaving little or no room for foreground photo-page fan-out. Analytics writes can still consume two more async DB slots. Each formula is locally reasonable, but they do not subtract the other active background owners.
+- Suggested fix: introduce one shared background resource coordinator or semaphore for image processing, admin backfill, semantic embedding work, maintenance, and analytics. Gate all long-running DB/CPU background lanes through it, expose current reservations, and add a regression that overlaps queue + backfill + analytics while proving a foreground DB acquisition stays within the reserved budget.
 
-### C34-07: Fragmented background DB connection budgets
+### CR36-03 - Semantic embedding work has multiple active owners without one admission gate
 
-Severity: Medium
-Confidence: High
-Classification: Confirmed architectural/resource risk, deferred
-Regions: `apps/web/src/db/index.ts:31-42`, `apps/web/src/lib/image-queue.ts:121-153`, `apps/web/src/lib/admin-backfill-runner.ts:106-143`
+- Severity: Medium
+- Confidence: High
+- Classification: likely resource-ownership risk
+- Region: `apps/web/src/lib/image-queue.ts:501-539`; `apps/web/src/lib/image-queue.ts:542-637`; `apps/web/scripts/backfill-clip-embeddings.ts:114-130`; `apps/web/src/app/actions/embeddings.ts:113-134`; `apps/web/src/lib/clip-model.ts:53-173`
+- Failure scenario: the sidecar CLIP backfill holds `LOCK_SEMANTIC_EMBEDDING_BACKFILL`, but live upload embedding and `bootstrapMissingActiveEmbeddings()` do not observe that lock before embedding and upserting rows. The upsert/model-version contract prevents duplicate-row corruption, so this is not a data-loss bug. The likely failure is capacity contention: a large sidecar run and live bootstrap can duplicate ONNX inference and compete for the same CLIP queue, DB pool, and CPU, causing public semantic requests to hit queue-full/timeout or slowing production activation.
+- Suggested fix: either make live embedding paths skip/defer while the semantic backfill advisory lock is held, or centralize all embedding writes behind a queue/lease table with shared admission limits. Add tests proving a sidecar backfill and live bootstrap do not run unbounded inference concurrently.
 
-Failure scenario: upload image processing and admin color backfill can overlap, each reserving live DB headroom independently. On the default 10-connection pool, combined background work can leave less live-request headroom than either formula claims.
+### CR36-04 - Sidecar color backfill uses global batches that can persist another worker's claimed image
 
-Suggested fix: introduce a shared background DB resource budget/semaphore across image queue, admin backfill, sidecars, and maintenance, or make heavy backfills explicitly quiesce competing background processors.
+- Severity: Low-Medium
+- Confidence: Medium
+- Classification: likely ownership-invariant risk
+- Region: `apps/web/scripts/backfill-color-pipeline.ts:471-527`; `apps/web/scripts/backfill-color-pipeline.ts:557-603`
+- Failure scenario: each sidecar worker claims one image, re-encodes it, pushes row data into global `updateBatch` / `derivativeBatch`, then calls `flushBatch()`. Because the batches are global, worker A can splice and persist worker B's queued image while B still owns the per-image claim. B can then release its claim after finding no pending row in its own flush, even though A's transaction is the one that actually committed B's update. Current global color-backfill locking keeps this low-risk, but the code no longer strictly ties a claim holder to that image's DB persistence.
+- Suggested fix: make batches caller-owned or track per-item completion promises so an image claim is released only after the transaction containing that image has committed. Add a two-worker regression where one worker flushes another worker's queued item and assert claim release waits for commit.
 
-### C34-09 / C34-10 / C34-11 / C34-12 / C34-13 / C34-14 / C34-15
+## Manually Validated / Operator Risks
 
-Severity: Mixed High/Medium
-Confidence: Mostly High
-Classification: Deferred design, performance, UX, test-infra, product-distribution, and manual-validation risks
-Regions: documented in `.context/plans/run10-cycle34/deferred.md`
+### RISK36-01 - Host nginx limiter and real-IP behavior remain manual production proofs
 
-These remain open by explicit deferral: semantic embedding ownership, large Server Action body admission after framework parsing, scan-heavy public query paths, test strategy gaps, UX field/responsive issues, checked-in deployment-specific site config, and live proxy/CLIP/ops validation. I did not re-file them as code-review findings because the current plan already preserves severity, citations, scenarios, and exit criteria.
+- Severity: Medium
+- Confidence: High
+- Classification: manually validated risk still requiring live evidence
+- Region: `apps/web/nginx/default.conf:1-29`; `apps/web/nginx/default.conf:254-306`; `scripts/check-proxy-topology.mjs:7-16`; `CLAUDE.md:248`; `CLAUDE.md:514-526`
+- Failure scenario: committed nginx changes are inert until copied into the operator-owned host config and reloaded. In an LB-fronted topology, `$binary_remote_addr` can also be the LB IP unless `realip`/PROXY protocol is configured, collapsing every visitor into one edge limiter bucket.
+- Suggested fix: keep source changes separate from production-apply status. For each nginx/topology change, record `nginx -t`, reload, burst 429 proof, normal-page non-429 proof, and an effective-client-IP validation from edge logs or a diagnostic.
 
-## Final Sweep
+### RISK36-02 - Large browser upload memory envelope is documented but not host-measured
 
-Commonly missed issue classes checked:
+- Severity: Medium
+- Confidence: Medium
+- Classification: manual capacity risk
+- Region: `CLAUDE.md:657-663`; `apps/web/nginx/default.conf:132-147`; `apps/web/src/lib/upload-limits.ts:1-21`; `apps/web/src/app/actions/images.ts:87-160`
+- Failure scenario: the app enforces 200 MiB per file and a batch window, while framework multipart parsing can still transiently hold large bodies in memory before disk save and Sharp processing. Concurrent uploads on the constrained host can exceed RSS expectations even though every app-level size check passes.
+- Suggested fix: run an on-host RSS measurement for the largest supported concurrent browser upload batch, then tune container memory, upload concurrency, or upload limits from that evidence.
 
-- Guard coverage: admin API `withAdminAuth`, server-action same-origin/mutation barriers, and public-route rate-limit posture all passed their custom scanners.
-- Privacy/data projection: reviewed `data.ts`/`data-timeline.ts`, semantic/similar search output shaping, and privacy guard tests through the full suite; no new public PII leak path was confirmed.
-- Restore/queue races: rechecked LR upload, browser upload, admin backfill shutdown, sidecar per-image lock, image queue retry/claim paths, and pending cleanup behavior around current HEAD changes.
-- Filesystem boundaries: rechecked upload original path handling, sidecar/e2e cleanup allowlists, derivative cleanup, and serve-upload containment patterns.
-- Schema/migration contracts: migration journal and reconcile behavior remain covered by tests in the full suite; no new migration/journal drift was found.
+### RISK36-03 - Real CLIP production readiness depends on external weights and a separate preflight
 
-Skipped validation: `npm run build --workspace=apps/web` and Playwright e2e were not run. Build was avoided because this is a read-only review and the `prebuild` hook can rewrite generated tracked assets (`public/sw.js`, icons). E2E was not necessary for any retained source-level finding.
+- Severity: Medium
+- Confidence: High
+- Classification: manual validation risk
+- Region: `apps/web/package.json:21-23`; `.github/workflows/clip-preflight.yml:3-46`; `apps/web/src/__tests__/clip-offline-load.test.ts:32-41`; `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`; `CLAUDE.md:558-636`
+- Failure scenario: normal unit gates skip real model-weight tests. If production semantic mode is enabled without seeded weights or without running the preflight against the deployed volume, semantic routes can 503 or fail real inference despite green standard CI.
+- Suggested fix: require `CLIP_MODELS_ROOT=<seeded-host-path> npm run test:clip:preflight --workspace=apps/web` before flipping `admin_settings.semantic_search_mode='production'`, and consider path-filtered CI/manual checks whenever CLIP/model files change.
 
-## Verification
+## Positive Checks
+
+- Cycle 35 topic-map fix is present: `updateTopic` carries `map_visible` through slug rename at `apps/web/src/app/actions/topics.ts:299-323`, and `setTopicMapVisible` now runs under the topic route lock at `apps/web/src/app/actions/topics.ts:709-723`.
+- Public semantic/similar routes hard-cap scans with `SEMANTIC_SCAN_LIMIT` at `apps/web/src/app/api/search/semantic/route.ts:263-279` and `apps/web/src/app/api/search/similar/[id]/route.ts:177-190`.
+- Public search result enrichment uses one privacy-guarded select at `apps/web/src/lib/search-enrichment-fields.ts:29-46`.
+- Admin API wrappers, server-action same-origin/mutation barriers, and public route rate-limit scanners all passed in this review.
+
+## Validation Evidence
 
 Commands run:
 
-- `npm run lint:api-auth --workspace=apps/web` — passed.
-- `npm run lint:action-origin --workspace=apps/web` — passed.
-- `npm run lint:public-route-rate-limit --workspace=apps/web` — passed.
-- `npm run lint --workspace=apps/web` — passed.
-- `npm run typecheck --workspace=apps/web` — passed.
-- Focused regression run for latest upload/backfill changes — 7 files / 101 tests passed.
-- `npm test --workspace=apps/web` — 361 files passed, 2 skipped; 3394 tests passed, 4 skipped.
-- `npm run audit:prod` — 0 production vulnerabilities.
-- `npm run check:proxy-topology -- --help` — confirmed the helper is read-only and that effective client-IP bucket validation remains a live/operator check, not source-proven.
+- `npm run lint:api-auth --workspace=apps/web` - passed.
+- `npm run lint:action-origin --workspace=apps/web` - passed.
+- `npm run lint:public-route-rate-limit --workspace=apps/web` - passed.
+- `npm test --workspace=apps/web -- --run src/__tests__/topics-actions.test.ts src/__tests__/semantic-search-route.test.ts src/__tests__/similar-route.test.ts src/__tests__/tracked-secrets.test.ts` - 4 files passed, 69 tests passed.
+- `npm run lint --workspace=apps/web` - passed.
+- `npm run typecheck --workspace=apps/web` - passed.
+- `git diff --check` - passed.
 
-## Conclusion
+Not run: full `npm test`, `npm run build`, Playwright e2e, production deploy, live nginx reload/probes, production CLIP preflight, or upload RSS measurement.
 
-No fresh Cycle 35 code-review defects were found beyond the already-documented deferred risks. The current HEAD passes the reviewed local gates, and the Cycle 34 correctness fixes I spot-checked are present with regression coverage.
+## Final Sweep
+
+Swept issue classes: auth bypass, admin API wrapper drift, server-action origin/barrier drift, public route limiter gaps, privacy projection leaks, topic slug/alias route locking, upload/restore races, filesystem cleanup/orphan risks, migration journal drift, raw SQL/shell/file deletion hazards, tracked secrets/runtime artifacts, skipped/focused tests, CI gate coverage, Docker/nginx/deploy contracts, service-worker freshness, semantic search capacity, and prior deferred registers.
+
+Skipped or sampled only: historical `.context` archives, `.omx`/`.omc` runtime state, ignored `.claude` worktrees, binary screenshots/media fixtures, `node_modules`, `.next`, and live production state.

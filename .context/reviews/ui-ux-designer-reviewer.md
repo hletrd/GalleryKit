@@ -1,130 +1,137 @@
-# UI/UX Designer Reviewer - Cycle 22
+# UI/UX Designer Reviewer - Cycle 36
 
-Repository: `/Users/hletrd/flash-shared/gallery`  
-Review HEAD: `dabf8e8a`  
-Lane: `ui-ux-designer-reviewer`, adapted from the local reviewer prompt to GalleryKit's Next.js web UI.
+Repository: `/Users/hletrd/flash-shared/gallery`
+Review HEAD: `bc73c02293f2568d23602ab498f12346a37fadf1`
+Lane: `ui-ux-designer-reviewer`
+Date: 2026-07-08 KST
 
-## Executive Summary
-
-No Critical or High UI/UX regression was confirmed at current HEAD. GalleryKit's public surfaces have strong accessibility fundamentals for a self-hosted finished-photo gallery: named landmarks, skip links, 44px touch targets, meaningful map markers, modal isolation, EN/KO parity, and honest no-editor/no-culling product boundaries. The main remaining UX debt is admin ergonomics: protected workflows are still arranged as flat navigation plus spreadsheet-style image management, while the public mobile masonry grid still trades photo fidelity for always-on overlay labels.
+Review-only lane. I wrote this report only; no production code, commits, pushes, or deploys.
 
 ## Evidence Base
 
-Local runtime: `next start` served `http://127.0.0.1:3100` from the existing build. Browser evidence used `agent-browser` snapshots and DOM/style metrics rather than screenshots alone.
-
-Sampled routes:
-
-- `/en`: home, desktop/mobile nav, tag filter, masonry cards, search dialog.
-- `/en/map`: map marker names, list fallback, region text.
-- `/en/privacy`: dark-mode colors and document structure.
-- `/en/admin`: unauthenticated login form.
-
-Targeted validation passed: 9 Vitest files, 63 tests, covering touch-target audit, theme tokens, i18n key parity, focus-visible links/rings, info-sheet IA, search disclaimer/status, Cycle 22 source contracts, and free-download contracts.
+- Read `AGENTS.md` instructions and `CLAUDE.md`.
+- Used `agent-browser` CLI for runtime snapshots, screenshots, viewport/media changes, and page JS evaluation.
+- Local runtime: `npm run start --workspace=apps/web -- -p 3002` from the existing build. `next start` served pages but warned about standalone output.
+- `next dev` was blocked by a stale dev-server marker, and I avoided deleting lock files or killing processes.
+- Runtime snapshots:
+  - `/en` desktop `1440x1000`: named landmarks, visible tag filter, photo links, footer.
+  - `/ko` mobile dark `390x844`: localized labels, mobile disclosure, dark theme.
+  - `/en/admin`: unauthenticated login form.
+  - `/en/map` mobile: map region, skip-to-list link, accessible fallback list.
+  - `/en` search dialog open: dialog + focused combobox.
+- Browser limitation: protected admin pages were source-reviewed only because no credentials were available.
+- Validation: `npm run typecheck --workspace=apps/web` passed.
 
 ## Findings
 
-### UIUX-C22-01 - Admin image management is optimized for table density, not visual photo administration
+### UIUX-C36-01 - Footer fails 320px reflow
 
-Severity: Medium  
-Confidence: High  
-Status: Confirmed
-
-Exact file/region:
-
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx:135-144`
-- `apps/web/src/components/image-manager.tsx:427-620`
+Severity: Medium
+Confidence: High
+WCAG: 1.4.10 Reflow
 
 Evidence:
 
-- Dashboard recent uploads are placed in `max-h-[calc(100vh-16rem)] overflow-auto` (`dashboard-client.tsx:142`).
-- `ImageManager` renders a horizontally scrollable table with columns for preview, title, filename, topic, tags, gamut, date, and actions (`image-manager.tsx:427-450`).
-- The thumbnail is a fixed `h-32 w-32` tile (`image-manager.tsx:473-481`), tags occupy a separate `min-w-[200px]` area (`image-manager.tsx:500-552`), and edit/delete buttons are detached at the far right (`image-manager.tsx:571-607`).
+- Source: `apps/web/src/components/footer.tsx:41` uses `className="flex items-center gap-4 text-sm text-muted-foreground"` with no wrapping.
+- Source: footer links at `footer.tsx:42-65` each enforce a 44px minimum target, and the GitHub link includes visible text.
+- Runtime selector evidence: on `http://localhost:3002/ko` at `320x568`, `footer div div` measured `width=380.15625`, `left=-30.078125`, `right=350.078125`; document scroll width was `350` with a `320` viewport.
 
 Failure scenario:
 
-An admin reviewing a fresh upload set on a small laptop must pan horizontally to associate a photo with tags, gamut state, date, and actions. The interface asks the admin to maintain row identity while operating on photo-specific content, which is risky when adjacent frames look similar.
+A narrow mobile visitor reaches the footer and the page becomes horizontally scrollable. The first link is partially off-screen and the Admin link extends past the viewport, making footer navigation harder to perceive and operate.
 
-Concrete fix:
+Fix:
 
-Introduce a responsive workbench view for non-wide desktops: image preview and primary metadata together, chips/status near the preview, and edit/delete/share/tag actions in the same row/card. Keep the dense table as a desktop mode, not the only shape.
+Use `flex-wrap justify-center` for the footer link row, reduce narrow-width gaps, or group links into two rows. Add a 320px EN/KO regression check because Korean labels and the GitHub "opens in new window" copy affect width.
 
-### UIUX-C22-02 - Admin IA gives routine and high-risk pages the same visual weight
+### UIUX-C36-02 - SEO settings report every field invalid for one server-side error
 
-Severity: Low-Medium  
-Confidence: High  
-Status: Confirmed
-
-Exact file/region:
-
-- `apps/web/src/components/admin-nav.tsx:15-49`
-- `apps/web/src/components/admin-header.tsx:13-26`
+Severity: Medium
+Confidence: High for source; protected route not live-authenticated
+WCAG: 3.3.1 Error Identification, 3.3.3 Error Suggestion
 
 Evidence:
 
-- Ten admin destinations are a single peer array: Dashboard, Categories, Tags, SEO, Settings, Tokens, Password, Users, Database, Analytics (`admin-nav.tsx:15-26`).
-- The nav renders as one wrapping flex strip (`admin-nav.tsx:29-49`), inside a wrapping header row with logout (`admin-header.tsx:13-26`).
+- Source: `apps/web/src/app/[locale]/admin/(protected)/seo/seo-client.tsx:34-42` stores one `formError` and appends the same summary ID to all fields.
+- Source: failed save focuses only the form summary: `seo-client.tsx:75-85`.
+- Source: every SEO input/textarea sets `aria-invalid={!!formError}`: title `seo-client.tsx:121-128`, nav title `135-142`, description `149-157`, author `164-171`, locale `178-185`, OG image `200-209`.
+- Source: server action returns field-specific messages but not field IDs, e.g. title invalid `apps/web/src/app/actions/seo.ts:85-87`, locale invalid `126-128`, OG image invalid `137-140`.
 
 Failure scenario:
 
-A trusted operator scanning for daily publishing tasks sees DB restore, access tokens, user management, and password pages as equally prominent peers. On a narrow screen, wrapping can separate related tasks while high-risk operations remain visually ordinary.
+An admin enters one invalid Open Graph image URL and saves. The UI marks title, nav title, description, author, locale, and OG image as invalid, then focuses a summary. Screen-reader and keyboard users must inspect every field even though one field caused the failure.
 
-Concrete fix:
+Fix:
 
-Group the admin nav by job: Publish, Organize, Site, Access, Operations, Insights. Use a sectioned drawer/menu at smaller breakpoints. Preserve existing `aria-current`, focus-visible rings, and touch-target sizing.
+Return structured field errors from `updateSeoSettings`, such as `{ field: 'seo_og_image_url', error }`. In `SeoSettingsClient`, keep a field-error map, set `aria-invalid` only on affected fields, render inline errors with specific `aria-describedby`, and focus the first invalid control.
 
-### UIUX-C22-03 - Mobile grid overlays reduce clean-photo inspection
+### UIUX-C36-03 - Admin image manager relies on horizontal table scrolling for core actions
 
-Severity: Low  
-Confidence: High  
-Status: Confirmed
-
-Exact file/region:
-
-- `apps/web/src/components/masonry-card.tsx:149-155`
+Severity: Medium
+Confidence: High for source; protected route not live-authenticated
+Area: responsive admin workflow, affordances
 
 Evidence:
 
-- Source renders an always-visible mobile top gradient with title/topic: `absolute inset-x-0 top-0 sm:hidden` (`masonry-card.tsx:149-154`).
-- Agent-browser 390px viewport on `/en` measured each mobile overlay as visible `display:block`, `358px` wide and `60px` tall over the image. The desktop overlay is hidden until hover/focus (`masonry-card.tsx:155-160`).
+- Source: `apps/web/src/components/image-manager.tsx:427-620` renders the management UI as a table inside `overflow-x-auto`.
+- Source: the table has nine conceptual columns at `image-manager.tsx:431-450`.
+- Source: preview is fixed at `h-32 w-32`: `image-manager.tsx:473-488`.
+- Source: per-row tags reserve `min-w-[200px]`: `image-manager.tsx:500-552`.
+- Source: edit/delete actions are at the far right: `image-manager.tsx:571-607`.
 
 Failure scenario:
 
-Visitors browsing on phones see title/topic chrome over every finished photo. If the subject, skyline, or face sits near the top crop, the gallery presentation obscures the photographer's intended composition before the visitor opens the detail page.
+On mobile or a small laptop, an admin must scroll sideways to tag, inspect metadata, and reach edit/delete controls. When several images are visually similar, row identity can be lost during horizontal scroll, increasing the chance of wrong-photo edits.
 
-Concrete fix:
+Fix:
 
-Move mobile metadata to a reserved caption area, or provide a clean-grid presentation with metadata exposed on focus/open. Keep the accessible link label and do not make metadata color-only.
+Add a responsive card layout below `lg` with preview, title, tags, status, date, and actions in one block. Preserve the dense table only for wide screens.
 
-## UI/UX Coverage Map
+### UIUX-C36-04 - Primary nav omits non-topic browse routes
 
-Information architecture: public nav/footer, about/privacy/map/timeline/home, admin shell/login, source-only protected admin pages.  
-Affordances: search trigger, theme cycle, locale switch, mobile menu, tag filter, map/list fallback, photo links, login, admin source dialogs.  
-Focus/keyboard: skip link, 44px controls, search focus trap/inert behavior, source/tests for lightbox/info sheet and focus-visible rings.  
-WCAG/ARIA: map marker name fixed; search dialog named; login controls labeled; no missing i18n keys in targeted parity test.  
-Responsive: 390px and 1440px sampled; admin table/nav debt remains source-confirmed.  
-Loading/empty/error: public not-found/error shells, map no-photo state source, search status source, token/settings source, failed-image source reviewed.  
-Dark/light: dark privacy route sampled and theme-token tests passed.  
-i18n/RTL: EN/KO catalogs pass parity; only LTR locales ship, so RTL remains future-risk only.  
-Perceived performance: memoized masonry cards, sized thumbnails, search debounce/abort, and map chunking are present; no trace was run.
+Severity: Low-Medium
+Confidence: High
+Area: IA, wayfinding
 
-## Checked Non-Issues
+Evidence:
 
-- Prior map-marker issue is closed: DOM marker has `alt="Open photo: E2E Landscape"`, `title="E2E Landscape"`, `role="button"`, `tabindex="0"`, and a 44px box.
-- Prior missing `common.cancel` / `common.tryAgain` issue is closed: both keys exist in EN and KO messages.
-- Search modal had active focus in the combobox and 26 outside body children inert/`aria-hidden` during the sampled open state.
-- Login page initial state has no alert noise and exposes a straightforward form with 44px controls.
-- Tag filter mobile disclosure is compact and accessible enough for the sampled E2E data.
+- Source: sticky nav topics are generated only from `topics.map(...)`: `apps/web/src/components/nav-client.tsx:106-143`.
+- Source: controls beside topics are search, theme, and locale only: `nav-client.tsx:145-168`.
+- Source: Timeline, Map, About/GalleryKit, Privacy, GitHub, and Admin live in footer only: `apps/web/src/components/footer.tsx:41-67`.
+- Runtime `/en` snapshot confirmed Timeline/Map/Privacy appeared only under `contentinfo`, while sticky nav exposed brand, topic, search, theme, and language.
 
-## Prioritized Recommendations
+Failure scenario:
 
-Tier 0: none confirmed.
+A visitor who scrolls through photos may not discover the date archive or GPS map until the footer. The mobile expander also shows topics only, so the first-screen navigation does not reveal alternate browsing modes.
 
-Tier 1: redesign admin image management below wide desktop so photo identity, tags, metadata, and actions remain together.
+Fix:
 
-Tier 2: section admin IA into workflows and de-emphasize high-risk operations until the user enters an Operations area.
+Add "Timeline" and "Map" to the sticky nav or a compact "Browse" menu. On mobile, include those routes in the expanded menu after topics. Keep footer links for secondary/legal routes.
 
-Tier 3: revise mobile card metadata to protect clean photo inspection; add a future RTL browser matrix when an RTL locale ships; add protected-admin browser proof where credentials are available.
+### UIUX-C36-05 - RTL support is source-declared but not component-ready
+
+Severity: Low
+Confidence: Medium
+Area: i18n/RTL
+
+Evidence:
+
+- Source: layout sets document direction from locale: `apps/web/src/app/[locale]/layout.tsx:101-107`.
+- Source: nav uses physical layout utilities, including `mr-3 md:mr-6` at `apps/web/src/components/nav-client.tsx:100`, `ml-auto` at `nav-client.tsx:112` and `148`, and `ml-1/ml-auto` at `180`.
+- Current shipped locales are EN/KO, so runtime RTL testing was not applicable.
+
+Failure scenario:
+
+Adding Arabic, Hebrew, or another RTL locale would set `dir="rtl"`, but controls could retain LTR physical spacing and edge alignment. Visual order, focus order, and expected start/end placement may diverge.
+
+Fix:
+
+Before shipping an RTL locale, audit physical `left/right/ml/mr` classes across public/admin shells and convert to logical start/end utilities or direction-aware class composition. Add an RTL visual/browser pass to the locale acceptance checklist.
+
+## Positive Coverage Notes
+
+Runtime public pages had named landmarks, skip links, localized labels, and no missing button names in sampled snapshots. Search modal exposes a dialog, focused combobox, close button, and keyboard instructions. Login form has persistent labels, password visibility toggle, inline required-field errors, and focus restoration source. Map page has skip-to-list, region instructions, marker/popup button, and fallback list. CSS includes reduced-motion and forced-colors handling.
 
 ## Final Missed-Issue Sweep
 
-Searched source, docs, messages, and tests for IA, affordance, ARIA, focus, touch, validation, loading/empty/error, dark mode, RTL, semantic search, product claims, analytics, and deploy-copy surfaces. Uninspected categories: authenticated admin pages at runtime, destructive workflows, production CDN/SW/offline behavior, physical HDR/P3 output, generated build output, binary media/font/icon assets, and large-gallery performance traces. No implementation, commits, pushes, or deploys were performed.
+Checked IA, affordances, keyboard/focus, WCAG 2.2, responsive breakpoints, loading/empty/error states, form validation UX, dark/light mode, EN/KO i18n, future RTL, perceived performance, and product/marketing clarity. Revalidated prior-cycle issues: wide-gamut copy is now corrected, search combobox empty-state control relationship is corrected, and current typecheck passes. Unverified live areas: authenticated protected admin pages, production CDN/SW/offline behavior, share links with non-seeded keys, large-gallery stress behavior, physical color/HDR accuracy, and destructive admin flows.

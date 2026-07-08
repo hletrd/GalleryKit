@@ -1,166 +1,116 @@
-# Product Marketer Reviewer - Cycle 35
+# Product Marketer Reviewer - Cycle 36
 
-Review target: current workspace `HEAD` `7993fa46`.
+Review target: `/Users/hletrd/flash-shared/gallery` at `bc73c02293f2568d23602ab498f12346a37fadf1`
+Role: `cycle-36 product-marketer-reviewer`
+Date: 2026-07-08 KST
 
-Role surface: GalleryKit product-marketer-reviewer. I read `AGENTS.md` and `CLAUDE.md` first, ignored reviewer guidance for unrelated products, and kept the pass review-only. This markdown report is the only intended file change.
+Review-only lane. I changed only this provenance report and did not commit, push, deploy, or edit production code.
 
-## Inventory / Scope Reviewed
+## Evidence Base
 
-Primary product/operator docs:
-
-- `AGENTS.md`
-- `CLAUDE.md`
-- `README.md`
-- `apps/web/README.md`
-- `apps/web/src/site-config.json`
-- `apps/web/src/site-config.example.json`
-- `apps/web/scripts/ensure-site-config.mjs`
-
-Public messaging, metadata, SEO, feeds, and discovery:
-
-- `apps/web/messages/en.json`
-- `apps/web/messages/ko.json`
-- `apps/web/src/app/[locale]/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/layout.tsx`
-- `apps/web/src/app/[locale]/(public)/page.tsx`
-- `apps/web/src/app/[locale]/(public)/[topic]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/p/[id]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/c/[slug]/page.tsx`
-- `apps/web/src/app/[locale]/(public)/privacy/page.tsx`
-- `apps/web/src/app/[locale]/(public)/about-gallerykit/page.tsx`
-- `apps/web/src/app/[locale]/(public)/map/page.tsx`
-- `apps/web/src/app/[locale]/(public)/timeline/page.tsx`
-- `apps/web/src/app/sitemap.ts`
-- `apps/web/src/app/robots.ts`
-- `apps/web/src/app/feed.xml/route.ts`
-- `apps/web/src/app/[locale]/(public)/[topic]/feed.xml/route.ts`
-- `apps/web/src/app/api/og/route.tsx`
-- `apps/web/src/app/api/og/photo/[id]/route.tsx`
-- `apps/web/src/app/manifest.ts`
-- `apps/web/src/components/footer.tsx`
-- `apps/web/src/components/nav-client.tsx`
-
-Public/admin UX copy and claim-validation source:
-
-- `apps/web/src/components/search.tsx`
-- `apps/web/src/components/similar-photos.tsx`
-- `apps/web/src/components/wide-gamut-hint.tsx`
-- `apps/web/src/components/photo-viewer.tsx`
-- `apps/web/src/components/info-bottom-sheet.tsx`
-- `apps/web/src/components/grid-picture.tsx`
-- `apps/web/src/lib/data.ts`
-- `apps/web/src/lib/gallery-config-shared.ts`
-- `apps/web/src/lib/gallery-config.ts`
-- `apps/web/src/lib/download-labels.ts`
-- `apps/web/src/lib/color-primaries.ts`
-- `apps/web/src/lib/image-url.ts`
-- `apps/web/src/lib/storage/index.ts`
-- `apps/web/src/lib/storage/types.ts`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/settings-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/settings/seo/seo-settings-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/tokens/tokens-client.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/categories/topic-manager.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/dashboard/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/db/page.tsx`
-- `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`
-- `apps/web/src/app/actions/settings.ts`
-- `apps/web/src/app/actions/collections.ts`
-- `apps/web/src/app/actions/lr-tokens.ts`
-- `apps/web/src/app/actions/seo.ts`
-
-## Executive Summary
-
-I found two confirmed product-facing messaging risks.
-
-1. The wide-gamut visitor hint says an sRGB display is showing an "sRGB version" or converted sRGB color, but the rendering path does not choose an sRGB-specific asset by display capability.
-2. The checked-in `site-config.json` is still deployment-specific to Atik and can become a fresh self-hosted install's brand, canonical URL, sitemap origin, OpenGraph fallback, and footer if the operator builds without overriding it.
-
-I did not find active copy that promises payment/proofing, editing/culling/scoring, a bundled Lightroom Classic plugin, S3/MinIO storage, public HDR delivery, one-click production semantic search, app-level encrypted backups, or admin role separation.
+- Read `AGENTS.md` instructions supplied in-thread and `CLAUDE.md`.
+- Reviewed public product copy, SEO metadata plumbing, config defaults, footer/nav IA, privacy/about pages, search/photo/map/timeline copy, and admin settings/token/backup copy.
+- Browser evidence came from `next start` on `http://localhost:3002` using agent-browser snapshots for `/en`, `/ko`, `/en/admin`, `/en/map`, and search.
+- Authenticated admin pages were source-reviewed only because credentials were unavailable.
+- `npm run typecheck --workspace=apps/web` passed.
 
 ## Findings
 
-### PMR-C35-01 - Wide-gamut hint overstates sRGB delivery on sRGB displays
+### PMR-C36-01 - Checked-in Atik site config can ship as another operator's brand/canonical origin
 
 Severity: Medium
 Confidence: High
-Classification: Confirmed
+Area: product positioning, onboarding, SEO
 
-Exact file/region:
+Evidence:
 
-- `apps/web/messages/en.json:398-399`
-- `apps/web/messages/ko.json:398-399`
-- `apps/web/src/components/wide-gamut-hint.tsx:146-172`
-- `apps/web/src/components/photo-viewer.tsx:521-561`, `apps/web/src/components/photo-viewer.tsx:807-810`
-- `apps/web/src/components/info-bottom-sheet.tsx:384-387`
+- Source: `apps/web/src/site-config.json:2-10` is deployment-specific: `Atik Gallery`, `https://gallery.atik.kr`, `Atik`, and `Atik Gallery` footer/nav values.
+- Source: root metadata falls back to `getSeoSettings()` and uses the configured URL/site name for metadata and OpenGraph: `apps/web/src/app/[locale]/layout.tsx:15-48`.
+- Source: footer renders `siteConfig.footer_text`: `apps/web/src/components/footer.tsx:33-37`.
+- Source: sitemap uses SEO/site URL plumbing: `apps/web/src/app/sitemap.ts` was in scope from the route inventory; current public runtime also emitted Atik title/copy on localhost.
+- Runtime evidence: `/en` page title was `Atik Gallery`; footer text was `Atik Gallery`.
 
-Why this is a problem:
+Failure scenario:
 
-The English public hint says, "Your display shows the sRGB version of this photo." The Korean hint similarly says the display shows color converted to sRGB. The component only checks whether the source is wide-gamut and whether the display reports `color-gamut: srgb`; it does not know which encoded asset the browser selected. The viewer still renders AVIF, WebP, then JPEG `<source>` rows in normal codec order. The component comments state the delivery ceiling for wide-gamut sources is Display P3, with wider sources encoded down to P3, not an sRGB-only display-specific rendition.
+A self-hosting photographer clones the repository and builds before overriding DB SEO settings or replacing `site-config.json`. Because `gallery.atik.kr` is a real URL, placeholder validation will not catch it like `example.com`. The new gallery can emit Atik's brand, canonical URL, footer, author, social metadata, feed/sitemap origin, and browser title.
 
-Concrete user/operator failure scenario:
+Fix:
 
-A photographer reviews a public photo on an sRGB laptop and sees a notice saying the sRGB version is being shown. They may assume GalleryKit generated and served a separate color-managed sRGB public rendition, then misdiagnose color complaints or leave the `force_srgb_derivatives` setting unchanged. In an AVIF-capable browser, the visitor can still receive the wide-gamut AVIF source while the display/browser gamut-maps or clips it for an sRGB panel, so the product copy describes the wrong delivery behavior.
+Track only `site-config.example.json` and keep real deployment config out of the repository, or make the committed `site-config.json` contain production-rejected placeholders. If the Atik deployment must remain checked in, require an explicit env opt-in before `gallery.atik.kr` is accepted in production.
 
-Suggested fix:
+### PMR-C36-02 - "GalleryKit" footer link switches from portfolio browsing to product marketing without context
 
-Replace both locale strings with display-capability wording that does not claim a separate sRGB asset. For example: "This display cannot show the full wide-gamut preview. Display P3 delivery is available on {gamut} screens." For wider-than-P3 sources, keep the source context but say the public delivery target is Display P3. If the product wants exact "sRGB JPEG/WebP" copy, pass the active derivative policy and selected format into the hint instead of deriving it from display gamut alone.
-
-### PMR-C35-02 - Checked-in Atik config can become a fresh deploy's public brand and canonical URL
-
-Severity: Medium
+Severity: Low-Medium
 Confidence: High
-Classification: Confirmed
+Area: product/marketing clarity, visitor expectation
 
-Exact file/region:
+Evidence:
 
-- `apps/web/src/site-config.json:2-10`
-- `apps/web/src/site-config.example.json:2-11`
-- `apps/web/scripts/ensure-site-config.mjs:4-12`, `apps/web/scripts/ensure-site-config.mjs:14-42`
-- `apps/web/src/lib/data.ts:1851-1872`, `apps/web/src/lib/data.ts:1887-1896`
-- `apps/web/src/app/sitemap.ts:14-18`, `apps/web/src/app/sitemap.ts:70-113`
-- `apps/web/src/app/[locale]/layout.tsx:15-48`
-- `apps/web/src/components/footer.tsx:33-37`
-- `README.md:60-77`, `README.md:121-122`, `README.md:171-172`, `README.md:200`
-- `apps/web/README.md:19-20`, `apps/web/README.md:50-58`
+- Source: public brand defaults to the gallery/operator: `apps/web/src/site-config.json:2-9` uses `Atik Gallery`.
+- Source: footer link label is `GalleryKit`: `apps/web/messages/en.json:824-826`, `apps/web/messages/ko.json:824-826`.
+- Source: footer links `GalleryKit` to `/about-gallerykit`: `apps/web/src/components/footer.tsx:42-44`.
+- Source: the About page H1 and body market the software product, not this specific gallery or photographer: `apps/web/src/app/[locale]/(public)/about-gallerykit/page.tsx:21-45`; strings at `apps/web/messages/en.json:832-840` and `apps/web/messages/ko.json:832-840`.
+- Runtime evidence: `/en` footer exposed link `GalleryKit` while the page brand was `Atik Gallery`.
 
-Why this is a problem:
+Failure scenario:
 
-The committed config is deployment-specific: `Atik Gallery`, `https://gallery.atik.kr`, `Atik`, and Atik nav/footer values. The docs correctly warn operators to customize `site-config.json`, but the destination file already exists in a fresh checkout. The production guard rejects placeholders such as `example.com` and localhost, but `gallery.atik.kr` is a real host and therefore passes when `BASE_URL` is unset. SEO and fallback brand plumbing then uses `BASE_URL || siteConfig.url`.
+A public visitor clicks "GalleryKit" expecting an about-this-gallery page and lands on product copy about a self-hosted gallery engine, operator workflows, semantic search, backups, and what the software is not. That is useful for open-source positioning but abrupt in a photographer portfolio context.
 
-Concrete user/operator failure scenario:
+Fix:
 
-A self-hosting photographer clones GalleryKit, sees `apps/web/src/site-config.json` already present, and builds a production image before DB SEO settings are initialized. The app can emit Atik's title, author, footer text, canonical metadata, OpenGraph fallback, feed/sitemap URLs, and social preview origin. Crawlers may index the wrong host and the operator experiences the project as tied to another gallery.
+Rename the footer link to "About GalleryKit" / "Powered by GalleryKit", or add a separate "About this gallery" page for the operator/photographer and keep product copy under a clearly product-labeled route. This preserves open-source attribution without confusing portfolio visitors.
 
-Suggested fix:
+### PMR-C36-03 - Search is marketed as an icon-only utility unless semantic production is enabled
 
-Track only `site-config.example.json` and ignore the real deployment `site-config.json`, or replace the committed `site-config.json` with placeholder values that production validation rejects unless `BASE_URL` or database SEO settings provide a real operator-owned origin. If this repository must carry the Atik config for its primary deployment, require an explicit deployment env such as `GALLERYKIT_ALLOW_ATIK_SITE_CONFIG=true` before `gallery.atik.kr` passes the production guard.
+Severity: Low
+Confidence: High
+Area: product discovery, affordance
 
-## Claim Checks With No Findings
+Evidence:
 
-Finished-photo positioning: Supportable. `README.md:33-35` and `README.md:54` say GalleryKit is for publishing finished photos and is not an editing, culling, scoring, proofing, payment, or SaaS system. EN/KO About copy mirrors that boundary in `apps/web/messages/en.json:831-839` and `apps/web/messages/ko.json:831-839`.
+- Source: search trigger shows visible text only when `semanticSearchMode === 'production'`: `apps/web/src/components/search.tsx:380-397`.
+- Source: nav renders the search trigger as one of the primary sticky controls: `apps/web/src/components/nav-client.tsx:145-151`.
+- Runtime `/en` snapshot: the sticky nav exposed an accessible `Search photos` button, but the visible trigger was icon-only because the seeded local app was not semantic-production mode.
+- Product claim context: About copy says search is operator-controlled, `apps/web/messages/en.json:837-838`, but ordinary keyword search exists even when semantic search is disabled.
 
-Semantic search: Supportable. `README.md:50` and `apps/web/README.md:66-92` describe disabled-by-default, operator-gated production activation. Admin copy distinguishes disabled, stub, and production modes in `apps/web/messages/en.json:773-782` and `apps/web/messages/ko.json:773-782`; public search copy labels stub search as filename/tag/EXIF-only in `apps/web/src/components/search.tsx:532-568`; similar photos are hidden outside production mode at `apps/web/src/components/similar-photos.tsx:138-141`.
+Failure scenario:
 
-HDR/color delivery: Mostly supportable except PMR-C35-01. Upload/settings copy says HDR source retention does not mean public HDR delivery (`apps/web/messages/en.json:176`, `apps/web/messages/en.json:383-385`, `apps/web/messages/en.json:783-790`, with matching KO strings). Gain-map copy states SDR-only delivery at `apps/web/messages/en.json:402-404` and `apps/web/messages/ko.json:402-404`.
+Visitors who do not recognize the magnifier icon may miss keyword search entirely. The product has title/tag/camera/description search, but its visible marketing affordance becomes a generic icon unless the operator enables the more advanced semantic-search mode.
 
-Privacy and analytics: Supportable. Privacy copy discloses optional Google Analytics, first-party view events, rate-limit IP buckets, and OpenStreetMap tiles (`apps/web/messages/en.json:842-852`, `apps/web/messages/ko.json:842-852`). Public layout loads GA only when `siteConfig.google_analytics_id` is present and validates in `apps/web/src/app/[locale]/(public)/layout.tsx:23-35`, and the privacy page derives disclosure from the same config.
+Fix:
 
-Upload/API/Lightroom positioning: Supportable. `README.md:218-227`, `apps/web/README.md:98-107`, and token copy at `apps/web/messages/en.json:876-903` describe PAT-authenticated upload access and explicitly say no Lightroom Classic plugin is bundled.
+Show a compact visible "Search" label at desktop/tablet widths for all modes, not only semantic production. Keep the icon-only version for very narrow mobile if space is constrained, and use the search dialog copy to distinguish keyword vs semantic behavior.
 
-Storage and backups: Supportable. `CLAUDE.md` states only local filesystem storage is live; `apps/web/src/lib/storage/index.ts` keeps the abstraction inactive for remote backends. DB tools copy says backups cover database rows, are plaintext at rest, and exclude originals/derivatives/resources (`apps/web/messages/en.json:18-46`, `apps/web/messages/ko.json:18-46`).
+### PMR-C36-04 - Footer-only Timeline/Map placement under-sells two differentiated browsing modes
 
-Admin roles: Supportable. User-management copy says every admin has root access and avoids role-separation claims (`apps/web/messages/en.json:47-65`, `apps/web/messages/ko.json:47-65`).
+Severity: Low-Medium
+Confidence: High
+Area: product discovery, information architecture
 
-## Final Sweep / Skipped Scope
+Evidence:
 
-Final sweep checks:
+- Source: Timeline and Map labels exist in footer strings: `apps/web/messages/en.json:827-829`, `apps/web/messages/ko.json:827-829`.
+- Source: footer renders Timeline and Map links at `apps/web/src/components/footer.tsx:45-50`.
+- Source: sticky nav only exposes topics plus utilities, `apps/web/src/components/nav-client.tsx:106-168`.
+- Runtime `/en` snapshot: Timeline and Map appeared only in `contentinfo`; nav exposed the category `E2E Smoke`, Search, Theme, and language.
+- Source: the Map route has a full product surface with marker/list fallback and metadata: `apps/web/src/app/[locale]/(public)/map/page.tsx:69-115`; Timeline route has year/month browsing: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:151-299`.
 
-- Searched active docs, source, and translations for `Stripe`, `checkout`, `paid`, `license`, `entitlement`, `proof`, `cull`, `score`, `Lightroom`, `S3`, `MinIO`, `storage backend`, `semantic search`, `HDR`, `sRGB version`, `OpenStreetMap`, `Google Analytics`, `offline`, `sync`, `role`, and `root admin`.
-- Checked public/admin EN and KO strings for feature claims, onboarding/error states, SEO/OpenGraph/feed messaging, privacy, analytics, upload token, backup, color/HDR, semantic search, and GalleryKit positioning.
-- Confirmed unrelated modified review files already existed in the worktree and did not touch them.
+Failure scenario:
 
-Skipped:
+Timeline and Map are strong differentiators for a finished-photo archive, but a visitor must reach the footer to discover them. On long galleries, that means the product's richer browsing story is effectively hidden behind the photo grid.
 
-- Generated build output, uploaded media, binary assets, fonts/icons, `node_modules`, and historical review/plan archives except where they informed current product constraints.
-- Live deployment validation for `https://gallery.atik.kr`, external GitHub release/package/social pages, and browser-rendered screenshots.
-- Lint/typecheck/tests/build, because this was a review-only pass and changed only this markdown artifact.
+Fix:
+
+Promote Timeline and Map into the primary navigation or a "Browse" menu. Keep Privacy/About in the footer, but treat Timeline/Map as core browsing modes.
+
+## Claim Checks With No Finding
+
+- Finished-photo boundary still holds: About copy says GalleryKit is not an editor, culling station, scoring tool, proofing portal, payment system, hosted SaaS workflow, or bundled Lightroom plugin (`apps/web/messages/en.json:839-840`, `apps/web/messages/ko.json:839-840`).
+- Wide-gamut visitor copy no longer claims a separate sRGB version; current EN/KO strings describe display capability and Display P3 availability (`apps/web/messages/en.json:398-399`, `apps/web/messages/ko.json:398-399`), matching `WideGamutHint` source (`apps/web/src/components/wide-gamut-hint.tsx:152-172`).
+- HDR honesty remains clear: public/admin copy says HDR source metadata does not imply public HDR output (`apps/web/messages/en.json:383-385`, `apps/web/messages/en.json:402-404`, with KO equivalents).
+- Privacy copy discloses Google Analytics, first-party analytics, rate-limit IP buckets, metadata/GPS boundaries, and OpenStreetMap tiles (`apps/web/messages/en.json:842-852`, `apps/web/messages/ko.json:842-852`).
+- Token copy says GalleryKit exposes an API endpoint and does not bundle a Lightroom Classic plugin (`apps/web/messages/en.json:876-903`, KO equivalent follows).
+
+## Final Missed-Issue Sweep
+
+Searched active source/messages/docs for claims around editing/culling/scoring, proofing, payment, SaaS, Lightroom, semantic search, HDR, sRGB, storage, backups, privacy, roles, analytics, map, timeline, and self-hosting defaults. Skipped generated build output, binary assets/media, live production at `gallery.atik.kr`, external social previews, and authenticated runtime admin pages. No implementation changes were made.
