@@ -3,7 +3,7 @@
 Date: 2026-07-08 KST
 Review aggregate: `.context/reviews/_aggregate.md`
 Cycle review directory: `.context/reviews/cycle37/`
-Status: IN_PROGRESS
+Status: COMPLETE
 
 ## Repo Rules Read Before Planning
 
@@ -129,10 +129,10 @@ Run, from repo root:
 - [x] Implement WP3.
 - [x] Implement WP4.
 - [x] Run required gates.
-- [ ] Commit signed changes.
-- [ ] Pull --rebase and push.
-- [ ] Run per-cycle deploy.
-- [ ] Record production `/api/live` and missing-upload 404 smoke evidence.
+- [x] Commit signed changes.
+- [x] Pull --rebase and push.
+- [x] Run per-cycle deploy.
+- [x] Record production `/api/live` and missing-upload 404 smoke evidence.
 
 ## Gate Evidence
 
@@ -150,4 +150,7 @@ Run, from repo root:
 
 ## Deploy Evidence
 
-Pending.
+- Signed implementation commit pushed: `da67dac0 fix(cycle37): 🐛 align navigation discovery and upload restore slot`.
+- `npm run deploy` passed from the repo root. The helper fast-forwarded the remote checkout to `da67dac0`, rebuilt `web-web`, recreated and started `gallerykit-web`, waited for health, and ran the documented post-up Docker cleanup.
+- Production live smoke passed: `curl -fsS -D - https://gallery.atik.kr/api/live` returned `HTTP/2 200` with body `{"status":"ok"}` at Wed, 08 Jul 2026 08:10:12 GMT.
+- Direct missing-upload smoke passed: `curl https://gallery.atik.kr/uploads/jpeg/__cycle37_missing_upload_smoke__.jpg` returned `HTTP_STATUS:404` with body `File not found`.
