@@ -1,97 +1,55 @@
-# Run-10 Cycle 35 Document-Specialist Review
+# Run-10 Cycle 36 Document-Specialist Review
 
-Role: cycle-35 document-specialist subagent
-Repo: `/Users/hletrd/flash-shared/gallery`
 Date: 2026-07-08 KST
-Review HEAD: `7993fa46` on `master`
-Scope: documentation-code contract review only. I edited no product code; this file is the only report artifact written.
+Role: cycle-36 document-specialist review worker
+Workspace: `/Users/hletrd/flash-shared/gallery`
+Review HEAD: `c62c8c1e` on `master` / `origin/master`
+Mode: documentation/provenance review only; no production-code edits
 
-## Inventory / Scope Reviewed
+## Inventory
 
-Required authority read first:
+Required authority read first: `AGENTS.md`, `CLAUDE.md`, and the code-review skill instructions.
 
-- `AGENTS.md`
-- `CLAUDE.md`
-- Code-review skill instructions at `/Users/hletrd/.agents/skills/code-review/SKILL.md`
+Documentation/source contract surfaces reviewed:
 
-Primary docs and contracts inventoried:
-
-- Live docs: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`
-- Runtime/config docs: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/docker-compose.yml`, `apps/web/Dockerfile`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`
-- Package and CI contracts: root `package.json`, `apps/web/package.json`, `package-lock.json`, `.nvmrc`, `.github/workflows/quality.yml`, `.github/workflows/clip-preflight.yml`
-- Schema/migration docs and implementation: `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`
-- Product-boundary surfaces: semantic search, smart collections, PAT upload API, storage abstraction quarantine, payment/Stripe removal notes, no edit/culling/scoring claims
-- Current review/provenance docs: root `.context/reviews/*.md`, `.context/reviews/_aggregate.md`, `.context/plans/README.md`
-
-Validation evidence:
-
-- `npm test --workspace=apps/web -- privacy-fields.test.ts` passed: 1 file, 12 tests.
-- Route inventory confirmed map/timeline/year, smart collections, admin analytics/tokens/settings, upload fallbacks, OG/search APIs, `/api/live`, and `/api/health` exist.
-- Package docs align with current versions: Node 24, Next `^16.2.10`, React `^19.2.5`, TypeScript `^6`.
-- Semantic-search gates align with docs: default `semantic_search_mode` is `disabled`, Settings rejects saving `production`, and runtime resolves stored `production` to `disabled` unless `SEMANTIC_SEARCH_ALLOW_PRODUCTION=true`.
-
-Existing unrelated dirty files observed before writing this report:
-
-- `.context/reviews/code-reviewer.md`
-- `.context/reviews/critic.md`
-- `.context/reviews/perf-reviewer.md`
-- `.context/reviews/security-reviewer.md`
-- `.context/reviews/test-engineer.md`
-- `.context/reviews/tracer.md`
-- `.context/reviews/verifier.md`
+- Current docs: `README.md`, `apps/web/README.md`, `CLAUDE.md`, `AGENTS.md`.
+- Provenance docs: `.context/reviews/_aggregate.md`, root `.context/reviews/*.md`, `.context/plans/README.md`, `.context/plans/run10-cycle35/{plan,deferred}.md`.
+- Config/deploy docs against source: `.env.deploy.example`, `apps/web/.env.local.example`, `apps/web/Dockerfile`, `apps/web/docker-compose.yml`, `apps/web/deploy.sh`, `scripts/deploy-remote.sh`, `apps/web/nginx/default.conf`, `.github/workflows/*`.
+- Schema/privacy docs against source/tests: `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/db/schema.ts`, `apps/web/src/lib/data.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, `apps/web/src/__tests__/privacy-fields.test.ts`.
+- Product-boundary docs: no edit/culling/scoring, local-only storage, no bundled LR client plugin, semantic search operator activation, checked-in site config behavior, service-worker offline limits, and public edge/proxy contracts.
 
 ## Findings
 
-### DOC-C35-01 - nginx public limiter is documented as page-only, but it also catches public API routes
+### DOC-C36-01 - Cycle 35 plan status still says push/deploy are pending after the signed push landed
 
+- Classification: confirmed documentation/provenance mismatch
 - Severity: Medium
 - Confidence: High
-- Classification: confirmed documentation/comment mismatch
-- Region: `CLAUDE.md:248`; `apps/web/nginx/default.conf:274-295`; public API routes under `apps/web/src/app/api/search/**`, `apps/web/src/app/api/og/**`, `apps/web/src/app/api/health/route.ts`, and `apps/web/src/app/api/live/route.ts`
+- Region: `.context/plans/run10-cycle35/plan.md:1-3`; `.context/plans/run10-cycle35/plan.md:154-162`; `.context/plans/README.md:34-38`; git evidence from `c62c8c1e`
+- Failure scenario: `origin/master` is already at signed commit `c62c8c1e` (`git show --show-signature` reports good signature), but the cycle-35 plan still says `Status: IMPLEMENTED - gates/deploy pending` and leaves `Signed commit pushed` unchecked. The same file records full gates as green. A follow-on planner can misread the active ledger as pre-push and either duplicate release work or fail to distinguish "push complete, deploy evidence absent" from "nothing after implementation completed."
+- Suggested fix: update the Cycle 35 plan status/checklist to the precise state, for example "implemented, signed push complete, deploy evidence absent/pending" unless deploy evidence is added. If a deploy was run outside committed logs, add the terminal deploy/live-smoke evidence; otherwise leave only the deploy checkbox open and move signed push to completed.
 
-Current docs say public pages are throttled at the nginx edge and that "static/asset/upload/API locations match longer prefixes and are deliberately excluded." The nginx template has explicit longer matches for admin API, uploads, `_next/static`, and `_next/image`, but no general public `/api/` location. Nginx therefore sends non-admin public API routes through `location /`, where `limit_req zone=public burst=40 nodelay` applies. The in-file comment also says what lands there is page navigation plus same-URL RSC/prefetch requests, which excludes real traffic such as `/api/search/semantic`, `/api/search/similar/[id]`, `/api/og`, `/api/og/photo/[id]`, `/api/health`, and `/api/live`.
+### DOC-C36-02 - Checked-in deployment-specific site config can become fresh-install production metadata
 
-Concrete failure scenario:
-
-An operator tunes `zone=public` believing it is a page-navigation limiter only, then unintentionally rate-limits public search, OG card generation, or monitoring endpoints. Conversely, a reviewer may believe public APIs are protected only by app-layer limiters and miss that they are also under the page-zone budget, causing incorrect capacity and abuse-response guidance.
-
-Suggested fix:
-
-Either update `CLAUDE.md` and the `location /` comment to state that this is a catch-all public/non-admin limiter covering public APIs too, or add explicit public API locations with the intended limiter/exemption policy. If public APIs remain in `location /`, rename the prose from "Public SSR page" to "public catch-all" and list the API routes that also inherit the budget.
-
-### DOC-C35-02 - Current review/provenance index still points at Cycle 34 while Cycle 35 root lane reports are active
-
+- Classification: risk
 - Severity: Medium
 - Confidence: High
-- Classification: confirmed stale provenance/runbook mismatch
-- Region: `.context/reviews/_aggregate.md:1-13`; `.context/plans/README.md:34-38`; root lane headers in `.context/reviews/code-reviewer.md`, `.context/reviews/critic.md`, `.context/reviews/perf-reviewer.md`, `.context/reviews/security-reviewer.md`, `.context/reviews/test-engineer.md`, `.context/reviews/tracer.md`, `.context/reviews/verifier.md`; stale root `.context/reviews/architect.md`
-
-The current aggregate is still titled `Run-10 Cycle 34/100 Aggregate Review` and describes Cycle 34 required lanes. The plans index lists Run-10 Cycle 34 as the active current-cycle plan/deferred pair. At the same time, multiple root lane files now have Cycle 35 headers, while `architect.md` is still Cycle 34. That makes the root review directory a mixed-generation handoff surface.
-
-Concrete failure scenario:
-
-A follow-on planner or aggregator reads root `.context/reviews/*.md` and combines Cycle 35 findings with the Cycle 34 aggregate and stale Cycle 34 architect report. That can duplicate already-scheduled Cycle 34 work, drop a live Cycle 35 lane, or treat Cycle 34 implementation planning as the active control surface for Cycle 35 review results.
-
-Suggested fix:
-
-Create a cycle-scoped Cycle 35 aggregate or root handoff once lanes finish, and update `.context/plans/README.md` so the active review/plan pointer matches the current cycle. Archive or clearly label stale root lane files, or enforce a preflight that rejects mixed `Cycle 34` / `Cycle 35` headers in active root review inputs.
+- Region: `README.md:31`; `README.md:60-77`; `README.md:171-172`; `apps/web/src/site-config.json:1-10`; `apps/web/scripts/ensure-site-config.mjs:11-42`
+- Failure scenario: the README says the linked Atik deployment may have deployment-specific branding and then documents generic fresh-install config values. The tracked `apps/web/src/site-config.json` is not generic; it contains `Atik Gallery` and `https://gallery.atik.kr`. `ensure-site-config.mjs` rejects empty, malformed, or placeholder production URLs, but it accepts the checked-in Atik URL. A self-hosting operator who clones and runs a production build without setting `BASE_URL` or replacing `site-config.json` ships Atik canonical metadata, OpenGraph fallback, footer/nav branding, and any file-backed non-DB-overridable fields into their image.
+- Suggested fix: either track only `site-config.example.json` and require an explicit local `site-config.json`, or make production builds reject the known deployment-specific Atik config unless an explicit override such as `ALLOW_DEPLOYMENT_SITE_CONFIG=true` is present. At minimum, add a prominent README/`ensure-site-config` warning that the tracked file is for the example deployment and must be replaced for distribution.
 
 ## Aligned Areas Checked
 
-- Deploy docs match `scripts/deploy-remote.sh` and `apps/web/deploy.sh`: root `.env.deploy` precedence, fallback env path, derived SSH command, remote `git pull --ff-only`, health check on `/api/live`, and post-start Docker prune.
-- Docker persistence/prune docs match compose and deploy script: mutable data uses bind mounts, MySQL is host-managed, and automatic `docker volume prune` omits `-a`.
-- Migration docs match current source: 31 SQL files and journal entries are paired; `migrate.js` uses hash postconditions and reconcile/baseline safeguards; the non-monotonic historical `when` issue is documented.
-- Privacy/admin-only field docs match source/tests for the checked schema surface; `avif_10bit` is intentionally public-safe and `privacy-fields.test.ts` passed.
-- Semantic-search docs match current code gates and UI posture.
-- Product-boundary docs match source for local-only storage support, no bundled Lightroom Classic plugin, no Stripe/payment surface, no edit/culling/scoring features, and smart-collection public read without admin authoring UI.
-- Quality-gate docs match package scripts and CI workflow names.
+- Current package/version docs align with local manifests: Node 24 via `.nvmrc`, Next 16, React 19, TypeScript 6, MySQL 8.0+.
+- The previous C35 public-nginx-limiter mismatch is fixed: `CLAUDE.md:248` and `apps/web/nginx/default.conf:274-295` now describe the public catch-all as covering public non-admin API routes without longer locations.
+- Deploy docs align with helper scripts for root `.env.deploy` precedence, fallback deploy env path, derived SSH command, remote `git pull --ff-only`, runtime env permission checks, `/api/live` health, and post-health Docker prune.
+- Docker persistence/prune docs align with compose and deploy script: persistent data is bind-mounted, host MySQL is outside Docker volumes, and automatic volume prune does not use `-a`.
+- Migration docs align with current source: journal/sql pairing, fresh DB reconcile, DML baseline refusal, and post-migrate hash assertion are present.
+- Semantic-search activation docs align with code gates: default disabled mode, env-gated production mode, sidecar backfill, offline weights, and model-version honesty are documented.
+- Product boundaries align with source for local filesystem storage only, no payment/Stripe surface, no editing/culling/scoring product feature, no bundled Lightroom Classic plugin, and public smart-collection reads without an admin authoring UI.
 
-## Final Sweep / Skipped Files
+## Final Missed-Issue Sweep
 
-Commonly missed issue classes swept: README/package version drift, env example defaults, deploy helper behavior, Docker pruning safety, nginx route matching, migration/schema checklist, privacy guard comments, semantic-search activation claims, storage/S3 claims, payment/Stripe claims, smart-collection UI claims, PAT upload route docs, service-worker offline claims, and current review/provenance docs.
+Swept docs/code mismatch classes: README package badges and manifests, env examples, deploy helper behavior, Docker build args, nginx route comments, quality gate names, CI workflow gates, migration/schema checklist, privacy guard docs, service-worker cache posture, semantic-search runbook, storage/S3 claims, payment/editing claims, PAT upload route docs, and current-cycle provenance.
 
-Skipped or sampled only:
-
-- `.claude/worktrees/**`, `.omc/**`, and `.omx/**` cache/runtime histories were not treated as authoritative live docs.
-- Large historical `.context/reviews/archive/**`, `.context/plans/archive/**`, and root `plan/**` histories were sampled for provenance patterns but not exhaustively line-reviewed; current source/tests and live docs were used as authority.
-- No live host, deployed nginx, production DB, CLIP model directory, deploy, push, or browser smoke validation was performed in this document-only lane.
+Skipped or sampled only: historical archive plans/reviews, `.omx`/`.omc` runtime state, binary screenshots, live host nginx, production DB rows, deployed CLIP model directory, and browser/live production smoke. This document lane did not deploy or mutate production state.
