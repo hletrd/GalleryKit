@@ -317,10 +317,10 @@ export function TopicManager({ initialTopics }: { initialTopics: Topic[] }) {
                                 />
                             </TableCell>
                             <TableCell className="text-right space-x-2">
-                                <Button variant="ghost" size="icon" onClick={() => { setEditError(null); setAliasError(null); setEditingTopic(topic); }} aria-label={t('categories.editTopicAria', { label: topic.label })}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditError(null); setAliasError(null); setEditingTopic(topic); }} aria-label={t('categories.editTopicAria', { label: topic.label })}>
                                     <Pencil className="h-4 w-4" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="text-destructive-text" onClick={() => setDeleteSlug(topic.slug)} aria-label={t('categories.deleteTopicAria', { label: topic.label })}>
+                                <Button variant="ghost" size="icon" className="text-destructive-text h-8 w-8" onClick={() => setDeleteSlug(topic.slug)} aria-label={t('categories.deleteTopicAria', { label: topic.label })}>
                                     <Trash2 className="h-4 w-4" />
                                 </Button>
                             </TableCell>

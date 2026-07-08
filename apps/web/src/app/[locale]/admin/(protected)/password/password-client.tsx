@@ -8,7 +8,7 @@ export function PasswordClient() {
     const { t } = useTranslation();
 
     return (
-        <div className="max-w-2xl">
+        <div className="max-w-2xl mx-auto">
             <Card>
                 <CardHeader>
                     <h1 className="text-2xl font-semibold leading-none tracking-tight">{t('password.title')}</h1>

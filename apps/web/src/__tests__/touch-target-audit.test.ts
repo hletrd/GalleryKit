@@ -232,10 +232,16 @@ const KNOWN_VIOLATIONS: Record<string, number> = {
     // - one retry button per failed image in the failed-images section
     // All on a desktop-priority surface.
     'app/[locale]/admin/(protected)/dashboard/dashboard-client.tsx': 5,
-    // topic-manager.tsx: back arrow (`size="icon"`) + per-row
-    // edit/delete on each topic row (`size="icon"` x 2).
+    // topic-manager.tsx: back arrow + per-row edit/delete buttons use
+    // `size="icon"`, which renders 44 px via the Button primitive today.
+    // The scanner still counts bare size="icon" conservatively because it
+    // cannot see cva variant CSS. Re-open: if button.tsx removes the size-11
+    // floor, or if explicit h-8/h-9/h-10 overrides reappear.
     'app/[locale]/admin/(protected)/categories/topic-manager.tsx': 3,
-    // tag-manager.tsx: back arrow + per-row edit/delete.
+    // tag-manager.tsx: same shape — back arrow + edit/delete buttons use
+    // runtime-compliant size="icon" and are counted only by the conservative
+    // static pattern. Re-open: if the Button primitive floor changes or compact
+    // overrides return.
     'app/[locale]/admin/(protected)/tags/tag-manager.tsx': 3,
     // settings-client.tsx: single back-arrow `size="icon"`.
     'app/[locale]/admin/(protected)/settings/settings-client.tsx': 1,
@@ -445,14 +451,18 @@ const FORBIDDEN: Array<{ pattern: RegExp; description: string }> = [
         pattern: /<select\b(?![^>]*\b(?:h-1[12]|min-h-1[12])\b)[^>]*\bclassName=\{[^}]*["'`][^"'`]*\bmin-h-\[(?:\d|[123]\d|4[0-3])px\]/,
         description: 'native <select className={cn("...min-h-[<44px]...")}> composite arbitrary value below the 44 px floor',
     },
-    // DES-C13-02: raw visible text-like inputs. shadcn <Input> is a primitive
-    // with its own sizing contract, but ad-hoc `<input type="text">` surfaces
-    // can bypass that primitive and present only a text-line target. Hidden,
-    // file, checkbox, and radio inputs are excluded; checkbox/radio have a
-    // dedicated wrapper-aware scan below.
+    // DES-C13-02 / VER-C38-02: raw visible text-like inputs. shadcn <Input> is
+    // a primitive with its own sizing contract, but ad-hoc `<input type="text">`
+    // and default `<input>` surfaces can bypass that primitive and present only
+    // a text-line target. Hidden, file, checkbox, and radio inputs are excluded;
+    // checkbox/radio have a dedicated wrapper-aware scan below.
     {
         pattern: /<input\b(?=[^>]*\btype=["'](?:text|search|email|password)["'])(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*>/,
         description: 'raw visible text/search/email/password <input> without explicit ≥44 px height',
+    },
+    {
+        pattern: /<input\b(?![^>]*\btype=)(?![^>]*\b(?:h-1[12]|min-h-1[12]|size-1[12])\b)[^>]*>/,
+        description: 'raw visible default text <input> without explicit ≥44 px height',
     },
     // AGG-R5C3-06 (CRT-R5C3-01): anchor-based touch targets. The cycle-2
     // fixes added `min-h-11` links in g/[key]/page.tsx, not-found.tsx, and
@@ -995,6 +1005,13 @@ describe('touch-target audit (44 px floor)', () => {
 
         const compliant = '<input type="text" className="flex-1 min-h-11 min-w-[120px] bg-transparent" />';
         expect(scanSource('fixture/text-input-ok.tsx', compliant)).toEqual([]);
+
+        const defaultTextInput = '<input className="flex-1 min-w-[120px] bg-transparent" />';
+        const defaultIssues = scanSource('fixture/default-text-input-violation.tsx', defaultTextInput);
+        expect(defaultIssues.some((i) => i.pattern.includes('raw visible default text'))).toBe(true);
+
+        const defaultTextCompliant = '<input className="flex-1 min-h-11 min-w-[120px] bg-transparent" />';
+        expect(scanSource('fixture/default-text-input-ok.tsx', defaultTextCompliant)).toEqual([]);
 
         const fileInput = '<input type="file" className="sr-only" />';
         expect(scanSource('fixture/file-input-ok.tsx', fileInput)).toEqual([]);
