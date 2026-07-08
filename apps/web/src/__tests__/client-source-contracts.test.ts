@@ -70,10 +70,11 @@ describe('client component source contracts', () => {
 
   it('shows visible search copy on every viewport when production semantic search is active', () => {
     const code = source('components/search.tsx');
-    expect(code).toContain("const showSearchLabel = semanticSearchMode === 'production'");
+    expect(code).toContain("const showSearchLabel = semanticSearchMode === 'production' || showDesktopLabel");
     expect(code).toContain("size={showSearchLabel ? 'default' : 'icon'}");
     expect(code).toContain('className={showSearchLabel ? "h-11 min-w-11 gap-2 px-3" : "h-11 w-11"}');
-    expect(code).toContain("{showSearchLabel && <span className=\"inline text-sm\">{t('aria.searchPhotos')}</span>}");
+    expect(code).toContain("showDesktopLabel && semanticSearchMode !== 'production' ? \"hidden lg:inline\" : \"inline\"");
+    expect(code).toContain("{t('aria.searchPhotos')}</span>}");
   });
 
   it('keeps admin taxonomy and SEO save failures visible after toast dismissal', () => {

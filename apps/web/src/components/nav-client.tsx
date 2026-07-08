@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ChevronUp, ChevronDown, Sun, Moon, Monitor, Circle } from "lucide-react";
+import { CalendarDays, ChevronUp, ChevronDown, MapPinned, Sun, Moon, Monitor, Circle } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "next-themes";
 
@@ -41,7 +41,11 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     const [mounted, setMounted] = useState(false);
     const currentTheme = (mounted ? (theme ?? 'system') : 'system') as StoredTheme;
     const nextThemeValue = nextTheme(currentTheme);
-    const hasExpandableMobileContent = topics.length > 0;
+    const browseLinks = [
+        { href: localizePath(locale, '/timeline'), label: t('footer.timeline'), icon: CalendarDays },
+        { href: localizePath(locale, '/map'), label: t('footer.map'), icon: MapPinned },
+    ];
+    const hasExpandableMobileContent = topics.length > 0 || browseLinks.length > 0;
     const themeAriaLabel = t('aria.cycleTheme', {
         theme: t(`theme.${currentTheme}`),
         nextTheme: t(`theme.${nextThemeValue}`),
@@ -111,6 +115,26 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                         : "hidden",
                     "md:flex md:flex-1 md:ml-auto md:justify-end md:mask-none md:overflow-visible md:flex-wrap md:w-auto md:mt-0"
                 )}>
+                    {browseLinks.map((link) => {
+                        const isActive = stripLocalePrefix(pathname) === stripLocalePrefix(link.href);
+                        const Icon = link.icon;
+                        return (
+                            <Link
+                                key={link.href}
+                                href={link.href}
+                                aria-current={isActive ? "page" : undefined}
+                                className={cn(
+                                    "transition-all duration-200 flex items-center gap-2 px-3 py-1.5 min-h-[44px] rounded-full whitespace-nowrap shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                                    isActive
+                                        ? "bg-foreground text-background font-semibold"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                )}
+                            >
+                                <Icon className="h-4 w-4" aria-hidden="true" />
+                                <span>{link.label}</span>
+                            </Link>
+                        );
+                    })}
                     {topics.map((topic) => {
                         const href = localizePath(locale, `/${topic.slug}`);
                         const isActive = stripLocalePrefix(pathname) === `/${topic.slug}`;
@@ -147,7 +171,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     "items-center gap-1 shrink-0",
                     isExpanded ? "flex w-full mt-2" : "flex ml-auto"
                 )}>
-                    <Search previewImageSizes={imageSizes} semanticSearchMode={semanticSearchMode} />
+                    <Search previewImageSizes={imageSizes} semanticSearchMode={semanticSearchMode} showDesktopLabel />
                     <button
                         onClick={() => setTheme(nextThemeValue)}
                         className="min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"

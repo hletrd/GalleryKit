@@ -19,7 +19,7 @@ import { localizePath } from '@/lib/locale-path';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { SEMANTIC_TOP_K_DEFAULT } from '@/lib/clip-embedding-constants';
 import { formatStoredExifDate } from '@/lib/exif-datetime';
-import { countCodePoints } from '@/lib/utils';
+import { cn, countCodePoints } from '@/lib/utils';
 import { useModalTreeIsolation } from '@/components/use-modal-tree-isolation';
 import { getPhotoResultLabel } from '@/lib/photo-title';
 
@@ -32,6 +32,7 @@ const SEMANTIC_MIN_QUERY_CODEPOINTS = 3;
 interface SearchProps {
     previewImageSizes?: number[];
     semanticSearchMode?: string;
+    showDesktopLabel?: boolean;
 }
 
 interface SearchResultItemProps {
@@ -128,7 +129,7 @@ interface SearchResult {
     capture_date: string | null;
 }
 
-export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearchMode = 'disabled' }: SearchProps) {
+export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearchMode = 'disabled', showDesktopLabel = false }: SearchProps) {
     const { t, locale } = useTranslation();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -378,7 +379,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
     }, [isOpen]);
 
     if (!isOpen) {
-        const showSearchLabel = semanticSearchMode === 'production';
+        const showSearchLabel = semanticSearchMode === 'production' || showDesktopLabel;
         return (
             <Button
                 ref={triggerRef}
@@ -393,7 +394,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 className={showSearchLabel ? "h-11 min-w-11 gap-2 px-3" : "h-11 w-11"}
             >
                 <SearchIcon className="h-4 w-4" />
-                {showSearchLabel && <span className="inline text-sm">{t('aria.searchPhotos')}</span>}
+                {showSearchLabel && <span className={cn("text-sm", showDesktopLabel && semanticSearchMode !== 'production' ? "hidden lg:inline" : "inline")}>{t('aria.searchPhotos')}</span>}
             </Button>
         );
     }

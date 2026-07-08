@@ -57,7 +57,17 @@ describe('cycle 11 source contracts', () => {
         expect(footer).toContain("href={localizePath(locale, '/privacy')}");
         expect(footer).toContain("href={localizePath(locale, '/timeline')}");
         expect(footer).toContain("href={localizePath(locale, '/map')}");
+        expect(footer).toContain('flex-wrap');
         expect(footer).not.toContain('hasGoogleAnalytics');
+    });
+
+    it('primary navigation exposes timeline and map as core browse links', () => {
+        const nav = src('components/nav-client.tsx');
+        expect(nav).toContain("href: localizePath(locale, '/timeline')");
+        expect(nav).toContain("href: localizePath(locale, '/map')");
+        expect(nav).toContain("t('footer.timeline')");
+        expect(nav).toContain("t('footer.map')");
+        expect(nav).toContain('showDesktopLabel');
     });
 
     it('timeline and year archive cards eager-load initial images and guard invalid geometry', () => {
