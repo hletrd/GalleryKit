@@ -6,8 +6,8 @@ import koMessages from '../../messages/ko.json';
 
 // C2-45 (run-10 c2): restoreDatabase() sequentially attempts four
 // non-blocking advisory-lock acquisitions (the restore lock itself, the
-// upload-processing-contract lock, the color-pipeline backfill lock, and
-// the semantic-embedding backfill lock) and previously returned the
+// upload-processing-contract lock, the color-pipeline backfill lock,
+// semantic-embedding backfill lock, and alt-text backfill lock) and previously returned the
 // IDENTICAL restoreInProgress message for all four, misleading operators
 // when the real blocker was a backfill or an in-flight upload. This file
 // pins the branch -> message-key mapping via source-contract assertions
@@ -65,13 +65,27 @@ describe('restore blocker messages (C2-45)', () => {
     it('maps the semantic-embedding backfill lock branch to restoreBlockedByBackfill', () => {
         const source = readFileSync(dbActionsPath, 'utf8');
         const semanticGetLockIdx = source.indexOf('[LOCK_SEMANTIC_EMBEDDING_BACKFILL]');
-        const maintenanceIdx = source.indexOf('restoreMaintenanceStarted = beginDurableRestoreMaintenance({ allowExisting: true })');
+        const altTextGetLockIdx = source.indexOf('[LOCK_ALT_TEXT_BACKFILL]');
 
         expect(semanticGetLockIdx).toBeGreaterThan(-1);
-        expect(maintenanceIdx).toBeGreaterThan(semanticGetLockIdx);
+        expect(altTextGetLockIdx).toBeGreaterThan(semanticGetLockIdx);
 
-        const branchWindow = source.slice(semanticGetLockIdx, maintenanceIdx);
+        const branchWindow = source.slice(semanticGetLockIdx, altTextGetLockIdx);
         expect(branchWindow).toContain('if (!isAdvisoryLockAcquired(semanticBackfillLockAcquired)) {');
+        expect(branchWindow).toContain("t('restoreBlockedByBackfill')");
+        expect(branchWindow).not.toContain("t('restoreInProgress')");
+    });
+
+    it('maps the alt-text backfill lock branch to restoreBlockedByBackfill', () => {
+        const source = readFileSync(dbActionsPath, 'utf8');
+        const altTextGetLockIdx = source.indexOf('[LOCK_ALT_TEXT_BACKFILL]');
+        const maintenanceIdx = source.indexOf('restoreMaintenanceStarted = beginDurableRestoreMaintenance({ allowExisting: true })');
+
+        expect(altTextGetLockIdx).toBeGreaterThan(-1);
+        expect(maintenanceIdx).toBeGreaterThan(altTextGetLockIdx);
+
+        const branchWindow = source.slice(altTextGetLockIdx, maintenanceIdx);
+        expect(branchWindow).toContain('if (!isAdvisoryLockAcquired(altTextBackfillLockAcquired)) {');
         expect(branchWindow).toContain("t('restoreBlockedByBackfill')");
         expect(branchWindow).not.toContain("t('restoreInProgress')");
     });

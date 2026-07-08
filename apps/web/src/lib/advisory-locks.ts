@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
  * GalleryKit instances pointed at the same MySQL server share the same lock
  * namespace and will serialize each other's restores, upload-contract changes,
  * topic renames, admin-user deletes, color-pipeline backfill runs, semantic
- * embedding backfill runs, and image-processing claims
+ * embedding backfill runs, alt-text backfill runs, and image-processing claims
  * across tenants. Run one GalleryKit per MySQL server — or prefix advisory-lock
  * names with a per-instance identifier if multi-tenant co-location is required.
  */
@@ -47,6 +47,9 @@ export const LOCK_COLOR_PIPELINE_BACKFILL = 'gallerykit_color_pipeline_backfill'
 
 /** Lock serializes CLIP embedding backfill operations against database restore. */
 export const LOCK_SEMANTIC_EMBEDDING_BACKFILL = 'gallerykit_semantic_embedding_backfill';
+
+/** Lock serializes alt-text suggestion backfill operations against database restore. */
+export const LOCK_ALT_TEXT_BACKFILL = 'gallerykit_alt_text_backfill';
 
 /**
  * Lock signals single-writer liveness at boot (C2-03, run-10 c2). Unlike the

@@ -1685,6 +1685,23 @@ describe('checkActionSource — public analytics actions', () => {
         expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
     });
 
+    it('fails an exempt public mutation when a limiter helper name is imported from an unapproved module', () => {
+        const src = `
+            import { checkViewRecordRateLimit } from './fake-rate-limit';
+            /** @action-origin-exempt: public analytics endpoint */
+            export async function recordView(id) {
+                const params = await buildViewParams(await headers());
+                const limitResult = await checkViewRecordRateLimit(params.ip, Date.now());
+                if (limitResult.status === 'rateLimited') return;
+                db.insert(imageViews).values({ imageId: id });
+            }
+        `;
+        const report = checkActionSource(src, 'src/app/actions/public.ts');
+        expect(report.passed).toEqual([]);
+        expect(report.failed).toHaveLength(1);
+        expect(report.failed[0]).toContain('EXEMPT COMMENT ON MUTATING ACTION');
+    });
+
     it('fails an exempt public mutation when the rate-limit rejection branch mutates before return', () => {
         const src = `
             /** @action-origin-exempt: public analytics endpoint */

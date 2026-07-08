@@ -45,6 +45,19 @@ describe('restore/upload writer coordination', () => {
         expect(source).toContain("await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill restore finally')");
     });
 
+    it('holds the alt-text backfill lock during database restore', () => {
+        const source = readFileSync(dbActionsPath, 'utf8');
+
+        const semanticLockIdx = source.indexOf('[LOCK_SEMANTIC_EMBEDDING_BACKFILL]');
+        const altTextLockIdx = source.indexOf('[LOCK_ALT_TEXT_BACKFILL]');
+        const maintenanceIdx = source.indexOf('restoreMaintenanceStarted = beginDurableRestoreMaintenance({ allowExisting: true })');
+        expect(semanticLockIdx).toBeGreaterThan(-1);
+        expect(altTextLockIdx).toBeGreaterThan(semanticLockIdx);
+        expect(maintenanceIdx).toBeGreaterThan(altTextLockIdx);
+        expect(source).toContain('altTextBackfillLockHeld = true');
+        expect(source).toContain("await lockReleaser.release(LOCK_ALT_TEXT_BACKFILL, 'alt-text-backfill restore finally')");
+    });
+
     it('runs migrations after mysql import before reporting restore success', () => {
         const source = readFileSync(dbActionsPath, 'utf8');
 
@@ -65,6 +78,7 @@ describe('restore/upload writer coordination', () => {
         expect(source).toContain('dbRestoreLockHeld = true');
         expect(source).toContain('upload-processing contract release (setup fallback) failed');
         expect(source).toContain("await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'backfill setup fallback')");
+        expect(source).toContain("await lockReleaser.release(LOCK_ALT_TEXT_BACKFILL, 'alt-text-backfill setup fallback')");
         expect(source).toContain("await lockReleaser.release(LOCK_DB_RESTORE, 'setup fallback')");
         expect(source).toContain('lockReleaser.finish()');
     });

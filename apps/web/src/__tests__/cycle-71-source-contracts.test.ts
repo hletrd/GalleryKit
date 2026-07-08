@@ -35,16 +35,21 @@ describe('cycle 71 sidecar restore-maintenance guards', () => {
         const source = readApp('scripts/backfill-alt-text.ts');
         expect(source).toContain("import { assertNoDurableRestoreMaintenanceForScript } from '../src/lib/restore-maintenance-durable'");
         expect(source).toContain("const SCRIPT_NAME = 'backfill-alt-text'");
+        expect(source).toContain('LOCK_ALT_TEXT_BACKFILL');
+        expect(source).toContain('SELECT GET_LOCK(?, 0) AS acquired');
+        expect(source).toContain('SELECT RELEASE_LOCK(?)');
         const firstGuard = source.indexOf('assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME)');
+        const lockQuery = source.indexOf('SELECT GET_LOCK');
         const settingsRead = source.indexOf('const enabled = await checkAutoAltTextEnabled()');
         const candidateRead = source.indexOf('id: images.id');
         const writeBatch = source.indexOf('await Promise.all(chunk.map');
         expect(firstGuard).toBeGreaterThanOrEqual(0);
+        expect(lockQuery).toBeGreaterThan(firstGuard);
         expect(settingsRead).toBeGreaterThan(firstGuard);
         expect(candidateRead).toBeGreaterThan(firstGuard);
         expect(source.lastIndexOf('assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME)', writeBatch))
             .toBeGreaterThan(candidateRead);
-        expect(source.match(/assertNoDurableRestoreMaintenanceForScript\(SCRIPT_NAME\)/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+        expect(source.match(/assertNoDurableRestoreMaintenanceForScript\(SCRIPT_NAME\)/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
     });
 });
 

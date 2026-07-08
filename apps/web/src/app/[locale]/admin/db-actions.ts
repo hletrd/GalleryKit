@@ -33,7 +33,7 @@ import { hasPlausibleSqlDumpHeader, isIgnorableRestoreStdinError, MAX_RESTORE_SI
 import { getMysqlCliSslArgs } from "@/lib/mysql-cli-ssl";
 import { acquireUploadProcessingContractLock } from "@/lib/upload-processing-contract-lock";
 import { sanitizeStderr } from "@/lib/sanitize";
-import { LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE, LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from "@/lib/advisory-locks";
+import { LOCK_ALT_TEXT_BACKFILL, LOCK_COLOR_PIPELINE_BACKFILL, LOCK_DB_RESTORE, LOCK_SEMANTIC_EMBEDDING_BACKFILL, isAdvisoryLockAcquired } from "@/lib/advisory-locks";
 import { createPooledAdvisoryLockReleaser, destroyPooledAdvisoryLockConnectionOnAcquireError, releasePooledAdvisoryLocks } from "@/lib/advisory-lock-release";
 import { armDbChildProcessWatchdog } from "@/lib/db-child-watchdog";
 
@@ -449,6 +449,7 @@ export async function restoreDatabase(formData: FormData) {
     let dbRestoreLockHeld = false;
     let backfillLockHeld = false;
     let semanticBackfillLockHeld = false;
+    let altTextBackfillLockHeld = false;
     let restoreLifecycleVerified = false;
     let keepRestoreMaintenance = false;
     let imageQueueQuiesced = false;
@@ -460,6 +461,7 @@ export async function restoreDatabase(formData: FormData) {
         dbRestoreLockHeld = false;
         backfillLockHeld = false;
         semanticBackfillLockHeld = false;
+        altTextBackfillLockHeld = false;
     };
     try {
         // C2R-03: name the column via `AS acquired` and read it by name
@@ -542,6 +544,30 @@ export async function restoreDatabase(formData: FormData) {
         }
         semanticBackfillLockHeld = true;
 
+        let altTextBackfillLockRows: (RowDataPacket & { acquired: number | bigint | null })[];
+        try {
+            [altTextBackfillLockRows] = await conn.query<(RowDataPacket & { acquired: number | bigint | null })[]>(
+                "SELECT GET_LOCK(?, 0) AS acquired",
+                [LOCK_ALT_TEXT_BACKFILL]
+            );
+        } catch (err) {
+            destroyRestoreLockConnectionOnAcquireError('restore alt-text backfill lock', err);
+            throw err;
+        }
+        const altTextBackfillLockAcquired = altTextBackfillLockRows[0]?.acquired;
+        if (!isAdvisoryLockAcquired(altTextBackfillLockAcquired)) {
+            await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'alt-text-backfill early-return semantic-lock');
+            semanticBackfillLockHeld = false;
+            await lockReleaser.release(LOCK_COLOR_PIPELINE_BACKFILL, 'alt-text-backfill early-return color-lock');
+            backfillLockHeld = false;
+            await lockReleaser.release(LOCK_DB_RESTORE, 'alt-text-backfill early-return restore-lock');
+            dbRestoreLockHeld = false;
+            await uploadContractLock.release();
+            uploadContractLock = null;
+            return { success: false, error: t('restoreBlockedByBackfill') };
+        }
+        altTextBackfillLockHeld = true;
+
         let restoreMaintenanceStarted = false;
         let restoreMaintenanceStartError: unknown = null;
         try {
@@ -573,6 +599,10 @@ export async function restoreDatabase(formData: FormData) {
             if (semanticBackfillLockHeld) {
                 await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill maintenance-begin early-return');
                 semanticBackfillLockHeld = false;
+            }
+            if (altTextBackfillLockHeld) {
+                await lockReleaser.release(LOCK_ALT_TEXT_BACKFILL, 'alt-text-backfill maintenance-begin early-return');
+                altTextBackfillLockHeld = false;
             }
             await uploadContractLock.release();
             uploadContractLock = null;
@@ -714,6 +744,10 @@ export async function restoreDatabase(formData: FormData) {
                 await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill restore finally');
                 semanticBackfillLockHeld = false;
             }
+            if (altTextBackfillLockHeld) {
+                await lockReleaser.release(LOCK_ALT_TEXT_BACKFILL, 'alt-text-backfill restore finally');
+                altTextBackfillLockHeld = false;
+            }
             await uploadContractLock?.release();
             uploadContractLock = null;
             if (restoreFinalizerResult) {
@@ -735,6 +769,9 @@ export async function restoreDatabase(formData: FormData) {
         }
         if (semanticBackfillLockHeld) {
             await lockReleaser.release(LOCK_SEMANTIC_EMBEDDING_BACKFILL, 'semantic-backfill setup fallback');
+        }
+        if (altTextBackfillLockHeld) {
+            await lockReleaser.release(LOCK_ALT_TEXT_BACKFILL, 'alt-text-backfill setup fallback');
         }
         if (dbRestoreLockHeld) {
             await lockReleaser.release(LOCK_DB_RESTORE, 'setup fallback');

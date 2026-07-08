@@ -25,6 +25,7 @@ import {
     LOCK_ADMIN_DELETE,
     LOCK_COLOR_PIPELINE_BACKFILL,
     LOCK_SEMANTIC_EMBEDDING_BACKFILL,
+    LOCK_ALT_TEXT_BACKFILL,
     getImageProcessingLockName,
     isAdvisoryLockAcquired,
 } from '@/lib/advisory-locks';
@@ -37,6 +38,7 @@ describe('advisory lock name contract', () => {
         expect(LOCK_ADMIN_DELETE).toBe('gallerykit_admin_delete');
         expect(LOCK_COLOR_PIPELINE_BACKFILL).toBe('gallerykit_color_pipeline_backfill');
         expect(LOCK_SEMANTIC_EMBEDDING_BACKFILL).toBe('gallerykit_semantic_embedding_backfill');
+        expect(LOCK_ALT_TEXT_BACKFILL).toBe('gallerykit_alt_text_backfill');
     });
 
     it('builds the per-image processing lock name as gallerykit:image-processing:{jobId}', () => {
@@ -53,6 +55,7 @@ describe('advisory lock name contract', () => {
             LOCK_ADMIN_DELETE,
             LOCK_COLOR_PIPELINE_BACKFILL,
             LOCK_SEMANTIC_EMBEDDING_BACKFILL,
+            LOCK_ALT_TEXT_BACKFILL,
         ];
         expect(new Set(names).size).toBe(names.length);
     });
@@ -66,6 +69,7 @@ describe('advisory lock name contract', () => {
             LOCK_ADMIN_DELETE,
             LOCK_COLOR_PIPELINE_BACKFILL,
             LOCK_SEMANTIC_EMBEDDING_BACKFILL,
+            LOCK_ALT_TEXT_BACKFILL,
         ];
         expect(globals).not.toContain(perImage);
     });

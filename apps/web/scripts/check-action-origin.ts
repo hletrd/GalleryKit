@@ -654,6 +654,8 @@ const PRE_ORIGIN_AUTH_READ_FUNCTION_NAMES = new Set([
     'isAdmin',
 ]);
 
+const APPROVED_PUBLIC_RATE_LIMIT_MODULE = '@/lib/rate-limit';
+
 const PUBLIC_RATE_LIMIT_HELPER_NAMES = new Set([
     'checkLoadMoreRateLimit',
     'preIncrementLoadMoreAttempt',
@@ -662,6 +664,28 @@ const PUBLIC_RATE_LIMIT_HELPER_NAMES = new Set([
     'isViewRecordRateLimited',
     'checkViewRecordRateLimit',
 ]);
+
+function collectUnapprovedPublicRateLimitImports(sourceFile: ts.SourceFile): Set<string> {
+    const names = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (
+            !ts.isImportDeclaration(statement)
+            || !ts.isStringLiteral(statement.moduleSpecifier)
+            || !statement.importClause?.namedBindings
+            || !ts.isNamedImports(statement.importClause.namedBindings)
+        ) {
+            continue;
+        }
+        const approvedModule = statement.moduleSpecifier.text === APPROVED_PUBLIC_RATE_LIMIT_MODULE;
+        for (const element of statement.importClause.namedBindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (PUBLIC_RATE_LIMIT_HELPER_NAMES.has(importedName) && !approvedModule) {
+                names.add(element.name.text);
+            }
+        }
+    }
+    return names;
+}
 
 function collectImportedSideEffectFunctionNames(sourceFile: ts.SourceFile): Set<string> {
     const names = new Set<string>();
@@ -1482,6 +1506,7 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
     const approvedAdminMutationSlotImports = collectApprovedAdminMutationSlotImports(sourceFile);
     const preOriginAuthReadNames = collectPreOriginAuthReadNames(sourceFile);
     const approvedReadAuthNames = collectApprovedReadAuthNames(sourceFile);
+    const unapprovedPublicRateLimitImports = collectUnapprovedPublicRateLimitImports(sourceFile);
     const dbReadBindings = collectDbReadBindings(sourceFile, relative);
     const importedSideEffectFunctionNames = collectImportedSideEffectFunctionNames(sourceFile);
     const isAuthActionsFile = /(?:^|[/\\])actions[/\\]auth\.[cm]?[jt]sx?$/.test(relative);
@@ -1567,7 +1592,8 @@ export function checkActionSource(content: string, relative: string = 'input.ts'
                         body,
                         localMutatingFunctions,
                         importedSideEffectFunctionNames,
-                        functionInfoDeclaresBindingName(bodyInfo, PUBLIC_RATE_LIMIT_HELPER_NAMES),
+                        functionInfoDeclaresBindingName(bodyInfo, PUBLIC_RATE_LIMIT_HELPER_NAMES)
+                            || unapprovedPublicRateLimitImports.size > 0,
                     )
                 ) {
                     report.passed.push(`OK (public rate-limited action): ${relative}::${name}`);

@@ -1,6 +1,6 @@
 # Run-10 Cycle 32/100 Implementation Plan
 
-Status: IMPLEMENTED - full gates passed; signed push and deploy pending
+Status: IMPLEMENTED - full gates passed; signed push complete; committed deploy evidence absent and superseded by Cycle 33 deploy
 Aggregate: `.context/reviews/run10-cycle32/_aggregate.md`
 Date: 2026-07-08 KST
 Review start HEAD: `4a728335ada304371743689de7f5bbf8670985b5`
@@ -77,7 +77,7 @@ Deferred this cycle: none.
 - [x] WP1 Cycle 31 deploy-evidence ledger honesty.
 - [x] WP2 dependency-audit gate alignment.
 - [x] Required full gates.
-- [ ] Signed commit/push.
+- [x] Signed commit/push.
 - [ ] Per-cycle deploy and live smoke.
 
 ## Gate Evidence
@@ -92,3 +92,8 @@ Deferred this cycle: none.
 - Focused gate-contract test passed after the script indirection fix: `npm test --workspace=apps/web -- --run src/__tests__/cycle12-ops-contracts.test.ts` (5 tests passed).
 - Full unit suite passed: `npm test --workspace=apps/web` (361 files passed, 2 skipped; 3389 tests passed, 4 skipped).
 - Browser e2e not run: Cycle 32 changed documentation, CI/package script wiring, and a source-contract test only; no browser-flow behavior changed.
+
+## Terminal Evidence
+
+- Signed commit/push complete: `959e45afdfcf901f9f88e3eb8e675a12545ced8c` (`docs(cycle32): 📝 align audit gate ledgers`) is present at `origin/master`.
+- Committed deploy/live-smoke evidence remains absent from the Cycle 32 ledger. Cycle 33 records this as `C33-02` and uses the Cycle 33 per-cycle deploy as the next production evidence point after the pushed Cycle 32 history.

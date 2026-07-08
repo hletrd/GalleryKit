@@ -24,11 +24,13 @@ import path from 'node:path';
 // - scripts/backfill-clip-embeddings.ts / scripts/backfill-color-pipeline.ts:
 //   sidecar `--rm` processes that exit immediately after the release; process
 //   exit closes every connection, so a failed release cannot outlive the run.
+// - scripts/backfill-alt-text.ts: same sidecar process-exit boundary.
 const ALLOWED = new Set([
     'src/lib/advisory-lock-release.ts',
     'src/lib/single-writer-guard.ts',
     'scripts/backfill-clip-embeddings.ts',
     'scripts/backfill-color-pipeline.ts',
+    'scripts/backfill-alt-text.ts',
 ]);
 
 function walk(dir: string, out: string[] = []): string[] {

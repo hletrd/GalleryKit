@@ -820,18 +820,27 @@ export async function deleteImages(ids: number[]) {
                     filename_avif: image.filename_avif,
                     filename_jpeg: image.filename_jpeg,
                 });
-                pendingDeletions.push({
+                const pendingDeletion = {
                     id: safeInsertId(pendingResult.insertId),
                     image_id: image.id,
                     filename_original: image.filename_original,
                     filename_webp: image.filename_webp,
                     filename_avif: image.filename_avif,
                     filename_jpeg: image.filename_jpeg,
-                });
+                };
+                await tx.delete(imageTags).where(eq(imageTags.imageId, image.id));
+                const [deleteResult] = await tx.delete(images).where(eq(images.id, image.id));
+                if (deleteResult.affectedRows === 1) {
+                    pendingDeletions.push(pendingDeletion);
+                    deletedRows++;
+                    continue;
+                }
+
+                // Another writer removed the row after our pre-fetch. Drop the
+                // ledger entry and never unlink files for an image this
+                // transaction did not actually delete.
+                await tx.delete(pendingFileDeletions).where(eq(pendingFileDeletions.id, pendingDeletion.id));
             }
-            await tx.delete(imageTags).where(inArray(imageTags.imageId, foundIds));
-            const [deleteResult] = await tx.delete(images).where(inArray(images.id, foundIds));
-            deletedRows = deleteResult.affectedRows;
         });
     }
 

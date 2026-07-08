@@ -33,6 +33,10 @@ describe('pending file deletion durability', () => {
         expect(deleteImagesBody, 'deleteImages body must be findable').toBeTruthy();
         expect(deleteImagesBody!).toContain('tx.insert(pendingFileDeletions)');
         expect(deleteImagesBody!.indexOf('tx.insert(pendingFileDeletions)')).toBeLessThan(deleteImagesBody!.indexOf('tx.delete(images)'));
+        expect(deleteImagesBody!).toContain('if (deleteResult.affectedRows === 1)');
+        expect(deleteImagesBody!).toContain('pendingDeletions.push(pendingDeletion)');
+        expect(deleteImagesBody!.indexOf('if (deleteResult.affectedRows === 1)')).toBeLessThan(deleteImagesBody!.indexOf('pendingDeletions.push(pendingDeletion)'));
+        expect(deleteImagesBody!).toContain('tx.delete(pendingFileDeletions).where(eq(pendingFileDeletions.id, pendingDeletion.id))');
         expect(deleteImagesBody!).toContain('cleanupPendingFileDeletion(pendingDeletion)');
     });
 
