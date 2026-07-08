@@ -1,86 +1,157 @@
-# Cycle 24 Verifier Review
+# Run-10 Cycle 34 Verifier Review
 
-Role: `verifier`
+Role: verifier lane
 Repo: `/Users/hletrd/flash-shared/gallery`
-Mode: review-only; no source code edited.
+Mode: review-only; no implementation or source behavior changes
 Date: 2026-07-08 KST
 
 ## Inventory
 
-Guidance read first: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, and the local `code-review` skill.
+Guidance read first: `AGENTS.md`, `CLAUDE.md`, and the local `code-review` skill. I then inventoried docs, deploy scripts, gates, tests, and the runtime code paths that back documented operational claims.
 
-Review-relevant inventory was built before judging findings. The repo currently has 624 TypeScript/JavaScript/SQL/JSON/shell/YAML files in the reviewed source, script, migration, deploy, and test directories:
+Relevant files and regions inspected:
 
-- Auth and admin API enforcement: `apps/web/scripts/check-api-auth.ts`, `apps/web/src/lib/api-auth.ts`, admin API routes, and `apps/web/src/__tests__/check-api-auth.test.ts`.
-- Server-action origin and mutation barrier: `apps/web/scripts/check-action-origin.ts`, `apps/web/src/lib/action-guards.ts`, `apps/web/src/lib/request-origin.ts`, `apps/web/src/lib/admin-mutation-barrier.ts`, all `apps/web/src/app/actions/**`, `apps/web/src/app/[locale]/admin/db-actions.ts`, and related tests.
-- Public route rate limits: `apps/web/scripts/check-public-route-rate-limit.ts`, every `apps/web/src/app/**/route.ts(x)` handler, rate-limit helpers, and route-rate tests.
-- Privacy projections: `apps/web/src/lib/data.ts`, `apps/web/src/lib/data-timeline.ts`, `apps/web/src/lib/search-enrichment-fields.ts`, public semantic/similar routes, map query paths, and privacy tests.
-- Migrations and reconcile: `apps/web/src/db/schema.ts`, all `apps/web/drizzle/*.sql`, `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, and migration coverage tests.
-- Restore maintenance: `apps/web/src/app/[locale]/admin/db-actions.ts`, restore durable marker helpers, recovery script, restore SQL scanner, drain checklist, queue/background-drain helpers, and restore tests.
-- Queue/backfill locks: image queue, admin color backfill runner, color/CLIP sidecar scripts, advisory-lock helpers, upload-processing contract lock, and lock/backfill/queue tests.
-- Deploy and cache/PWA: root deploy wrapper, `apps/web/deploy.sh`, Dockerfile/Compose/nginx config, service worker template/generated worker, SW cache helper, proxy admin-render marker, and deploy/SW/cache tests.
-- Docs and plan rules: `AGENTS.md`, `CLAUDE.md`, `.context/plans/README.md`, `README.md`, and `apps/web/README.md`.
+- Workspace and repo contracts: `AGENTS.md:5-46`, `CLAUDE.md:1-765`, `README.md:171-177`, `apps/web/README.md:57-64`.
+- Root and app scripts: `package.json:17-30`, `apps/web/package.json:5-30`, `scripts/deploy-remote.sh:1-93`, `apps/web/deploy.sh:1-108`.
+- Runtime packaging and proxy config: `apps/web/Dockerfile:1-198`, `apps/web/docker-compose.yml:1-79`, `apps/web/nginx/default.conf:1-312`, `scripts/check-proxy-topology.mjs:1-134`.
+- Schema and privacy contracts: `apps/web/drizzle/meta/_journal.json`, `apps/web/scripts/migrate.js`, `apps/web/src/lib/data.ts:260-488`, `apps/web/src/__tests__/privacy-fields.test.ts:41-220`.
+- Color/HDR and settings-hash contracts: `apps/web/src/lib/settings-hash.ts:44-183`, `apps/web/src/__tests__/settings-hash.test.ts:20-260`.
+- CLIP semantic-search contracts: `apps/web/src/lib/clip-model.ts:53-216`, `apps/web/src/lib/clip-paths.ts:60-97`, `apps/web/src/app/api/search/semantic/route.ts:1-194`, `apps/web/src/app/api/search/similar/[id]/route.ts:1-171`, `apps/web/src/__tests__/clip-offline-load.test.ts:15-42`, `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31`.
+- Public freshness and admin dynamism: public pages under `apps/web/src/app/[locale]/(public)/**/page.tsx` with `revalidate = 0`, admin pages under `apps/web/src/app/[locale]/admin/**` with `dynamic = "force-dynamic"`, and dynamic API routes under `apps/web/src/app/api/**`.
+- Gate scripts and tests: `apps/web/scripts/check-api-auth.ts`, `apps/web/scripts/check-action-origin.ts`, `apps/web/scripts/check-public-route-rate-limit.ts`, migration journal/reconcile tests, deploy/nginx tests, and targeted privacy/settings tests.
 
-## Findings
+## Verification Evidence
 
-No confirmed code correctness findings were found in this verifier pass.
-
-No likely issues are being reported. The source and tests I examined provide executable enforcement for the claimed invariants in scope: admin API wrappers, action-origin checks, restore mutation barriers, public route rate limits, privacy omissions, migration/reconcile mirrors, restore maintenance fences, queue/backfill locks, deployment disk-safety claims, and PWA/cache behavior.
-
-## Evidence
-
-Fresh checks run in this lane:
+Fresh commands run in this lane:
 
 ```bash
 npm run lint:api-auth --workspace=apps/web
 npm run lint:action-origin --workspace=apps/web
 npm run lint:public-route-rate-limit --workspace=apps/web
-npm test --workspace=apps/web -- src/__tests__/check-api-auth.test.ts src/__tests__/check-action-origin.test.ts src/__tests__/check-public-route-rate-limit.test.ts src/__tests__/api-auth-response-headers.test.ts src/__tests__/request-origin.test.ts src/__tests__/privacy-fields.test.ts src/__tests__/search-route-privacy.test.ts src/__tests__/map-privacy.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/db-restore.test.ts src/__tests__/sql-restore-scan.test.ts src/__tests__/restore-maintenance.test.ts src/__tests__/restore-maintenance-recovery-mjs.test.ts src/__tests__/restore-upload-lock.test.ts src/__tests__/restore-drain-checklist.test.ts src/__tests__/admin-mutation-barrier.test.ts src/__tests__/auth-mutation-barrier-source.test.ts src/__tests__/image-queue-quiesce.test.ts src/__tests__/advisory-lock-release.test.ts src/__tests__/advisory-lock-release-contract.test.ts src/__tests__/admin-backfill-concurrency-cap.test.ts src/__tests__/admin-backfill-runner-batching.test.ts src/__tests__/admin-backfill-runner-leak.test.ts src/__tests__/backfill-color-pipeline.test.ts src/__tests__/backfill-clip-embeddings-reembed.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/nginx-config.test.ts src/__tests__/sw-cache.test.ts src/__tests__/sw-template-contract.test.ts src/__tests__/serve-upload.test.ts
-npm run typecheck --workspace=apps/web
-npm run lint --workspace=apps/web
+npm test --workspace=apps/web -- --run src/__tests__/migration-journal.test.ts src/__tests__/migration-journal-monotonicity.test.ts src/__tests__/migrate-reconcile-coverage.test.ts src/__tests__/privacy-fields.test.ts src/__tests__/settings-hash.test.ts src/__tests__/deploy-script-contract.test.ts src/__tests__/nginx-config.test.ts
 ```
 
 Results:
 
-- `lint:api-auth`: passed; both admin API route exports are wrapped by `withAdminAuth(...)`.
-- `lint:action-origin`: passed; mutating server actions are guarded by same-origin checks and restore mutation slots or explicit exemptions.
-- `lint:public-route-rate-limit`: passed; public mutating/expensive route handlers have pre-increment rate limits or explicit exemptions.
-- Targeted invariant suite: 32 test files passed, 616 tests passed.
-- `typecheck`: passed for app route types and scripts.
-- `lint`: passed.
+- `lint:api-auth`: passed; admin API exports are wrapped by `withAdminAuth(...)`.
+- `lint:action-origin`: passed; mutating non-auth server actions enforce same-origin provenance or carry explicit exemptions.
+- `lint:public-route-rate-limit`: passed; public mutating or expensive route handlers have pre-increment rate limits or explicit exemptions.
+- Targeted invariant suite: 7 test files passed, 156 tests passed.
 
-## Confirmed Enforcement
+Full `lint`, `typecheck`, `build`, full unit suite, Playwright E2E, production audit, live deploy, and live host checks were not run in this verifier lane.
 
-- Admin API wrappers are executable, not just convention: `apps/web/scripts/check-api-auth.ts` rejects unwrapped exports, spoofed imports, star re-exports, and alias/export shapes; `apps/web/src/__tests__/check-api-auth.test.ts` covers those cases. Runtime `withAdminAuth` in `apps/web/src/lib/api-auth.ts` applies same-origin admin-cookie auth and scoped token auth with no-store/nosniff defaults.
-- Action origin and mutation barrier are enforced by scanner and runtime primitives: `apps/web/scripts/check-action-origin.ts` requires `requireSameOriginAdmin()` or the approved auth guard and also requires `using ... = acquireAdminMutationSlot()` for mutating actions. The current tests include nested/sibling mutation, auth-before-origin, imported side-effect helper, revalidation-before-origin, public action rate-limit, and barrier-spoofing cases.
-- Public routes are rate-limited before expensive work: `apps/web/scripts/check-public-route-rate-limit.ts` scans public App Router routes, recognizes approved pre-increment helpers, rejects protected work before limiter calls, and treats upload helper routes and cheap health/live routes through documented exemptions.
-- Privacy fields have symmetric compile/test guards: `apps/web/src/lib/data.ts` derives public selectors from admin selectors by omitting sensitive fields, defines `_PrivacySensitiveKeys`, and map GPS exposure is isolated to `getMapImages()` with `topics.map_visible = true`. `privacy-fields.test.ts`, `data-viewer-select-fields.test.ts`, `search-route-privacy.test.ts`, and map privacy tests pin these contracts.
-- Migration/reconcile invariants are executable: journal tags match files, new `when` values are monotonic after the documented historical inversion, `migrate.js` has a silent-skip post-condition, and `migrate-reconcile-coverage.test.ts` checks schema table/column/index/FK/drop coverage against executable reconcile code.
-- Restore maintenance is fenced across process and durable markers: restore writes a durable marker before drains/import, drains image queue/background DB writes/maintenance/admin mutation slots, holds restore/upload/backfill advisory locks, and keeps maintenance active on import/migration failure. Restore SQL scanning blocks dangerous or unknown-table writes and is covered across chunk-boundary cases.
-- Queue/backfill locks are source- and behavior-backed: image processing uses per-image advisory locks with destroy-on-release-failure discipline; restore quiesce clears queued work before `onIdle()`; admin color backfill and sidecar share the color backfill lock; semantic backfill uses its own restore-serialized lock; pooled raw `RELEASE_LOCK` call sites are allowlisted and tested.
-- Deployment claims are enforced: root deploy target is env-file driven, deploy/runtime env files are permission-checked before sourcing/Compose, `apps/web/deploy.sh` waits for health before Docker prune, and tests pin no `docker volume prune -a`, narrow bind mounts, immutable assets in the image, and no recursive chown of bind-mounted data.
-- PWA/cache claims are pinned: the service worker bypasses admin routes, caches only same-origin derivative paths for image SWR with a 50 MB LRU, uses offline-only HTML fallback with the `x-gk-admin-render` marker from `proxy.ts`, and source-contract tests compare template/generated worker behavior.
+## Confirmed Findings
 
-## Manual Validation Gaps
+No confirmed implementation-vs-documentation correctness gaps were found in the inspected scope.
 
-No source finding is attached to these gaps, but they still require operator or browser validation outside this review lane:
+The checked docs, scripts, code, and tests agree on these core invariants: signed conventional git workflow, env-driven deploy helper, Docker prune after successful health, no `docker volume prune -a`, migration journal monotonicity and reconcile coverage, public selector privacy omissions, settings-hash key coverage for color-impacting config, public-route rate-limit scanning, admin API auth scanning, action-origin scanning, public page no-cache behavior, and CLIP production gating.
 
-- I did not run a production deploy or modify production infrastructure. Deploy behavior was verified through scripts and tests only.
-- I did not perform a real database restore/import against a live MySQL instance; restore behavior was verified through source inspection and unit/source-contract tests.
-- I did not run the real CLIP preflight or seed model weights. The runbook remains operator-gated in `CLAUDE.md`, and source/tests verify the gating/backfill paths.
-- I did not run Playwright or manual PWA browser flows in this lane; PWA/cache assertions are source-contract and unit-test backed.
+## Likely Findings
+
+No likely code-level findings are being reported. The remaining risks below are manual-validation risks because the repo intentionally cannot prove live host state, model-weight state, real proxy topology, or real upload memory envelope.
+
+## Manual-Validation Risks
+
+### M1. Host nginx limiter application is documented but not repo-verifiable
+
+Severity: Medium
+Confidence: High
+Classification: Manual-validation risk
+
+Evidence:
+
+- `CLAUDE.md:516-526` says deploys do not touch host nginx and the public/`_next/image` limiter zones must be applied manually.
+- `apps/web/nginx/default.conf:10-29` defines shared limiter zones and notes the limiter key is only correct when `$remote_addr` is the real client.
+- `apps/web/nginx/default.conf:246-312` applies the `_next/image` and catch-all public limiters.
+- `apps/web/deploy.sh:55-104` only performs Compose up, health checks, and Docker prune; it does not sync or reload host nginx.
+
+Failure scenario:
+
+An operator assumes `npm run deploy` activated the committed public and image rate limiters, but the host is still running an older nginx config. Public SSR and Next image optimizer traffic remain unthrottled. In a load-balancer topology without real-IP configuration, the opposite failure can also occur: all visitors share the load balancer IP bucket and receive unrelated 429s.
+
+Concrete fix/verification:
+
+Apply the committed nginx config on the host, run `nginx -t`, reload nginx, then burst-test `/` and `/_next/image` until overflow returns 429 while normal single-client page loads still succeed. In load-balancer topologies, configure and verify `real_ip` or PROXY protocol before accepting the limiter evidence.
+
+### M2. CLIP production readiness depends on seeded host weights and manual preflight
+
+Severity: Medium
+Confidence: High
+Classification: Manual-validation risk
+
+Evidence:
+
+- `CLAUDE.md:618-626` states CLIP weights are intentionally not in CI and the real ONNX/runtime preflight must be run manually with seeded weights.
+- `apps/web/package.json:23` exposes `test:clip:preflight`, requiring `CLIP_MODELS_ROOT` and enabling offline/integration gates.
+- `apps/web/src/__tests__/clip-offline-load.test.ts:15-42` skips unless `CLIP_OFFLINE_LOAD=1` and a seeded model root exist.
+- `apps/web/src/__tests__/clip-semantic-integration.test.ts:8-31` skips by default unless `CLIP_INTEGRATION=1`.
+- `apps/web/Dockerfile:131-135` creates and exports `/app/data/models/clip`; it does not bake model weights into the image.
+- `apps/web/src/lib/clip-model.ts:203-216` disables remote model loading and loads from the configured local cache.
+
+Failure scenario:
+
+The DB row or env gate is flipped to production mode on a host without the expected model snapshots or without a successful preflight. Semantic search then returns 503/errors or empty production results even though ordinary CI and local tests passed.
+
+Concrete fix/verification:
+
+Seed the model snapshots into the deployed `CLIP_MODELS_ROOT`, run the documented sidecar/backfill, then run `CLIP_MODELS_ROOT=<absolute-host-path> npm run test:clip:preflight --workspace=apps/web` on the deployment host. Record the preflight output and a production semantic query result before enabling the DB production gate.
+
+### M3. Proxy topology check does not prove effective client-IP buckets
+
+Severity: Medium
+Confidence: High
+Classification: Manual-validation risk
+
+Evidence:
+
+- `README.md:171-177` and `apps/web/README.md:57-64` require `TRUST_PROXY=true` only behind a trusted proxy that overwrites `X-Forwarded-*`.
+- `apps/web/nginx/default.conf:20-28` and `apps/web/nginx/default.conf:59-71` warn that `$binary_remote_addr` and `X-Forwarded-For` behavior are only correct when nginx sees the real client or is configured for the upstream load balancer.
+- `scripts/check-proxy-topology.mjs:7-16` explicitly says it cannot prove `X-Forwarded-For` or effective client-IP bucket behavior.
+- `scripts/check-proxy-topology.mjs:131-134` reports effective client-IP bucket / XFF overwrite as `not-verified`.
+
+Failure scenario:
+
+The spoof-resistance check passes while all app or nginx rate-limit decisions still key on the load balancer IP. That can cause global lockouts under normal multi-user traffic, or it can make per-client throttles ineffective depending on where the wrong IP is trusted.
+
+Concrete fix/verification:
+
+Add or run an operational diagnostic that proves the effective client key from two distinct real clients through the production proxy chain. Pair `npm run check:proxy-topology -- --url <origin>` with nginx/app log evidence, and configure `set_real_ip_from` plus `real_ip_header X-Forwarded-For` or PROXY protocol where needed.
+
+### M4. Large multipart upload RSS envelope remains unmeasured on the production host
+
+Severity: Medium
+Confidence: High
+Classification: Manual-validation risk
+
+Evidence:
+
+- `CLAUDE.md:661-663` documents that on-host RSS measurement for multipart uploads is still pending, while upload caps default to 200 MiB total and 100 MiB per file.
+- `AGENTS.md:29-39` lists broad gates, but none of those gates prove concurrent production-host memory behavior under real multipart uploads.
+
+Failure scenario:
+
+Operators raise upload caps or accept multiple concurrent large uploads assuming the pipeline is fully disk-streamed. If the framework or runtime buffers multipart `File` objects on heap before downstream image processing, the container can OOM or restart under concurrent admin uploads.
+
+Concrete fix/verification:
+
+Run a controlled production-like upload load test at the documented caps and expected concurrency, capture container RSS and restart evidence, then record the safe concurrency/memory budget in `CLAUDE.md` or an operational runbook. Add a repeatable smoke or load-test command if the budget becomes a release invariant.
 
 ## Final Sweep
 
 Checked common missed issue classes:
 
-- New admin API route without `withAdminAuth(...)`: not found; scanner passed.
-- Mutating server action without same-origin return-early or restore mutation slot: not found; scanner passed.
-- Public mutating or expensive route doing work before rate-limit pre-increment: not found; scanner passed.
-- Admin-only or upload/color/HDR/GPS fields leaking through public selectors, search enrichment, timeline, or map paths: not found in inspected selectors/routes/tests.
-- New migration missing journal entry, stale `when`, missing reconcile mirror, or silent-skip post-condition: not found in inspected journal/reconcile tests.
-- Restore marker clear before import/migration failure, missing drain, or raw pooled advisory-lock release leak: not found in inspected restore and lock paths.
-- Deployment docs claiming data safety without script/test backing: not found; deploy docs/scripts/tests agree on bind mounts and prune-after-health.
-- PWA/cache claims drifting between TS helper, template, generated worker, and proxy marker: not found; contract tests cover the duplicated worker surface.
+- Docs claiming deploy behavior not backed by scripts/tests: no confirmed mismatch found for env-file selection, permission checks, bind mounts, health-before-prune, and no `volume prune -a`.
+- Migration entry without journal or reconcile mirror: no confirmed mismatch found in targeted migration tests.
+- Public selectors leaking admin-only fields: no confirmed mismatch found in `data.ts` or targeted privacy tests.
+- Color/HDR setting key drift: no confirmed mismatch found in settings hash source or targeted tests.
+- Public route doing expensive or mutating work before a limiter: scanner passed.
+- Admin API route lacking `withAdminAuth(...)`: scanner passed.
+- Mutating server action lacking same-origin return-early: scanner passed.
+- Public page cache freshness drift: inspected public page exports use `revalidate = 0`; admin pages inspected use dynamic rendering.
+- CLIP production routes lacking same-origin or production gating: no confirmed mismatch found in inspected semantic/similar route regions.
 
-Concurrent note: `.context/reviews/code-reviewer.md` already had unrelated working-tree changes during this lane. I did not edit it.
+Skipped or outside this lane:
+
+- Historical `.context/reviews/**` and `.context/plans/**` were inventoried but not exhaustively re-reviewed because `CLAUDE.md` and `AGENTS.md` are the current authority for this verifier pass.
+- I did not run full blocking gates, Playwright E2E, production audit, production deploy, live nginx reload checks, real CLIP model preflight, real proxy-client-IP diagnostics, or upload RSS measurement.
+- Pre-existing unrelated working-tree change observed: `.context/reviews/perf-reviewer.md`. I did not inspect or edit it.
