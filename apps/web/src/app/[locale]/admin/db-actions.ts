@@ -672,27 +672,34 @@ export async function restoreDatabase(formData: FormData) {
                 }
             }
             if (restoreLifecycleVerified || !keepRestoreMaintenance) {
+                let restoreMaintenanceEnded = false;
                 try {
                     endDurableRestoreMaintenance();
                 } catch (err) {
-                    console.error('Failed to clear durable restore maintenance marker', err);
+                    console.error('Failed to clear durable restore maintenance marker; keeping restore maintenance active', err);
+                    keepRestoreMaintenance = true;
+                    restoreLifecycleVerified = false;
+                    restoreFinalizerResult = { success: false, error: t('restoreFailed'), keepMaintenance: true };
                 }
-                if (restoreLifecycleVerified || imageQueueQuiesced) {
+                restoreMaintenanceEnded = !keepRestoreMaintenance && !restoreFinalizerResult;
+                if (restoreMaintenanceEnded && (restoreLifecycleVerified || imageQueueQuiesced)) {
                     await resumeImageProcessingQueueAfterRestore().catch((err) => {
                         console.error('Failed to resume image-processing queue after restore', err);
                     });
                 }
-                // C7-01/C23 AGG-C23-02: best-effort backstop for non-restore
-                // cleanup paths; successful restores already used the strict
-                // pre-marker flush above.
-                await flushPendingSessionRevocations();
-                // C22 AGG-C22-03: a DB restore can reintroduce pending
-                // file-deletion rows after their files were already removed.
-                // Drain them after the marker clears so stale rows do not
-                // remain until a future manual cleanup.
-                await drainPendingFileDeletions().catch((err) => {
-                    console.error('Failed to drain pending file deletions after restore', err);
-                });
+                if (restoreMaintenanceEnded) {
+                    // C7-01/C23 AGG-C23-02: best-effort backstop for non-restore
+                    // cleanup paths; successful restores already used the strict
+                    // pre-marker flush above.
+                    await flushPendingSessionRevocations();
+                    // C22 AGG-C22-03: a DB restore can reintroduce pending
+                    // file-deletion rows after their files were already removed.
+                    // Drain them after the marker clears so stale rows do not
+                    // remain until a future manual cleanup.
+                    await drainPendingFileDeletions().catch((err) => {
+                        console.error('Failed to drain pending file deletions after restore', err);
+                    });
+                }
             }
             // C8R-RPL-09 / AGG8R-03: log release failure at debug
             // instead of silencing so the operator has a signal if

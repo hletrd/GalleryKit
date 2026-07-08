@@ -119,11 +119,8 @@ export function beginDurableRestoreMaintenance(options: { allowExisting?: boolea
 }
 
 export function endDurableRestoreMaintenance() {
-    try {
-        clearDurableRestoreMaintenance();
-    } finally {
-        endRestoreMaintenance();
-    }
+    clearDurableRestoreMaintenance();
+    endRestoreMaintenance();
 }
 
 export function clearDurableRestoreMaintenanceForRecovery() {

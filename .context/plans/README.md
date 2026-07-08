@@ -33,8 +33,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 25/100 Implementation Plan - active ledger from Cycle 25 aggregate: fail-closed color re-encode config reads, restore temp cleanup ownership, persistent admin form errors, production semantic-search mobile affordance, gates, push, and per-cycle deploy (`cycle-25-2026-07-08-plan.md`)
-- Run-10 Cycle 25/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for broad upload/restore ingress, background DB/CPU budgeting, upload-ingest extraction, topology/storage/operator validation, public search/map/vector scale, test-infra gaps, site-config distribution, and backup/restore/security boundaries (`cycle-25-2026-07-08-deferred.md`)
+- Run-10 Cycle 26/100 Implementation Plan - active ledger from Cycle 26 aggregate: fail-closed durable restore-maintenance clearing, admin maintenance-before-auth ordering, lightbox color-pip disclosure semantics, shared-group empty copy, map topic-label fallback, gates, push, and per-cycle deploy (`cycle-26-2026-07-08-plan.md`)
+- Run-10 Cycle 26/100 Deferred Findings - active deferred register preserving severity/confidence and exit criteria for the shared background DB budget carry-forward plus sidecar/restore/admin UI test-strength gaps (`cycle-26-2026-07-08-deferred.md`)
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
@@ -45,6 +45,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 25/100 Implementation Plan - completed and pushed as `101ebef5`; local gates and deploy policy were satisfied before Cycle 26 start per the user-provided Start HEAD. Its in-file "pending commit/push/deploy" wording is stale and superseded by Cycle 26's per-cycle deploy after current pushed fixes (`cycle-25-2026-07-08-plan.md`)
+- Run-10 Cycle 25/100 Deferred Findings - superseded by the Cycle 26 deferred register where findings remain open (`cycle-25-2026-07-08-deferred.md`)
 - Run-10 Cycle 24/100 Implementation Plan - completed and pushed as `f78c8437`; local gates and Playwright evidence are recorded in the plan. Its in-file "push/deploy pending" wording is superseded by this index and by Cycle 25's per-cycle deploy after current pushed fixes (`cycle-24-2026-07-08-plan.md`)
 - Run-10 Cycle 24/100 Deferred Findings - superseded by the Cycle 25 deferred register where findings remain open (`cycle-24-2026-07-08-deferred.md`)
 - Run-10 Cycle 23/100 Implementation Plan - completed and pushed as `0f3e48e0`; local gates and Playwright evidence are recorded in the plan. Cycle 24 planning supersedes the stale in-file "push/deploy pending" wording and will run the next per-cycle deploy after its own pushed fixes (`cycle-23-2026-07-08-plan.md`)

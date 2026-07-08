@@ -1,5 +1,6 @@
 import { AdminHeader } from '@/components/admin-header';
 import { getCurrentUser } from '@/app/actions/auth';
+import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 
 export default async function AdminLayout({
     children,
@@ -12,10 +13,12 @@ export default async function AdminLayout({
     // is React cache()-wrapped so this does not duplicate DB work for the
     // protected sub-layout.
     let currentUser = null;
-    try {
-        currentUser = await getCurrentUser();
-    } catch (err) {
-        console.error('Admin layout: failed to resolve current user', err);
+    if (!isRestoreMaintenanceActive()) {
+        try {
+            currentUser = await getCurrentUser();
+        } catch (err) {
+            console.error('Admin layout: failed to resolve current user', err);
+        }
     }
 
     return (

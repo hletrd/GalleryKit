@@ -20,6 +20,7 @@ export interface MapMarker {
     displayTitle: string;
     filename_jpeg: string;
     topic: string;
+    topic_label: string | null;
 }
 
 interface MapClientProps {

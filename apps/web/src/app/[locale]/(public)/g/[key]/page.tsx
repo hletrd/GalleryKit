@@ -249,7 +249,7 @@ export default async function SharedGroupPage({ params, searchParams }: { params
             </GridPictureFallbackBoundary>
             {group.images.length === 0 && (
                 <div className="text-center py-20 text-muted-foreground">
-                    {t('processing')}
+                    {t('empty')}
                 </div>
             )}
         </div>

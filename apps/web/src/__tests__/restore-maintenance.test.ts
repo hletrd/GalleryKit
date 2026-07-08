@@ -101,13 +101,13 @@ describe('restore maintenance state', () => {
         expect(isRestoreMaintenanceActive()).toBe(true);
     });
 
-    it('clears process maintenance even when durable marker removal fails', () => {
+    it('keeps process maintenance active when durable marker removal fails', () => {
         const markerDir = join(tempDir, 'restore-maintenance.json');
         mkdirSync(markerDir);
 
         expect(beginRestoreMaintenance()).toBe(true);
         expect(() => endDurableRestoreMaintenance()).toThrow();
-        expect(isRestoreMaintenanceActive()).toBe(false);
+        expect(isRestoreMaintenanceActive()).toBe(true);
     });
 
     it('exposes an explicit recovery helper for stale durable markers', () => {

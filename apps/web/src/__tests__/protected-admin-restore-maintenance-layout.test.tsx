@@ -59,16 +59,20 @@ describe('protected admin restore-maintenance layout gate', () => {
             title: 'common.restoreMaintenanceTitle',
             body: 'common.restoreMaintenanceBody',
         });
+        expect(mocks.isAdmin).not.toHaveBeenCalled();
     });
 
-    it('still redirects unauthenticated requests before checking restore maintenance', async () => {
+    it('renders restore maintenance before redirecting unauthenticated requests', async () => {
         mocks.isAdmin.mockResolvedValue(false);
         mocks.isRestoreMaintenanceActive.mockReturnValue(true);
 
-        await expect(ProtectedLayout({
+        const result = await ProtectedLayout({
             children: <div />,
             params: Promise.resolve({ locale: 'ko' }),
-        })).rejects.toThrow('redirect:/ko/admin');
-        expect(mocks.isRestoreMaintenanceActive).not.toHaveBeenCalled();
+        });
+
+        expect(result.type).toBe(PublicRestoreMaintenance);
+        expect(mocks.isAdmin).not.toHaveBeenCalled();
+        expect(mocks.redirect).not.toHaveBeenCalled();
     });
 });

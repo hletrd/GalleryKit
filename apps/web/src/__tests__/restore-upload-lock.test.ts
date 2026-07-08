@@ -112,7 +112,7 @@ describe('restore/upload writer coordination', () => {
         // keyword at the call site.
         const drainIdx = source.indexOf('drainBackgroundDbWritesForRestore()');
         const maintenanceExitIdx = source.indexOf('if (restoreLifecycleVerified || !keepRestoreMaintenance)');
-        const resumeConditionIdx = source.indexOf('if (restoreLifecycleVerified || imageQueueQuiesced)');
+        const resumeConditionIdx = source.indexOf('if (restoreMaintenanceEnded && (restoreLifecycleVerified || imageQueueQuiesced))');
         const resumeIdx = source.indexOf('await resumeImageProcessingQueueAfterRestore()');
 
         expect(flagIdx).toBeGreaterThan(-1);
@@ -122,5 +122,6 @@ describe('restore/upload writer coordination', () => {
         expect(maintenanceExitIdx).toBeGreaterThan(setIdx);
         expect(resumeConditionIdx).toBeGreaterThan(maintenanceExitIdx);
         expect(resumeIdx).toBeGreaterThan(resumeConditionIdx);
+        expect(source).toContain('Failed to clear durable restore maintenance marker; keeping restore maintenance active');
     });
 });

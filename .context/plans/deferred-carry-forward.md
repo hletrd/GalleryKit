@@ -16,7 +16,16 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
-**Age-budget check (run-10 c25):** direct contained findings `AGG-C25-01`,
+**Age-budget check (run-10 c26):** direct restore-maintenance correctness findings
+`AGG-C26-01` and `AGG-C26-02`, plus bounded UI/accessibility findings
+`AGG-C26-03`, `AGG-C26-04`, and `AGG-C26-05`, are scheduled in
+`cycle-26-2026-07-08-plan.md`. No newly discovered High-severity finding is
+deferred. `AGG-C26-06` is the already-preserved shared background DB-budget item
+from Cycle 25 (`C25-04`); `AGG-C26-07` through `AGG-C26-09` are test-strength
+or UI interaction-coverage gaps with explicit exit criteria in
+`cycle-26-2026-07-08-deferred.md`.
+
+**Previous check (run-10 c25):** direct contained findings `AGG-C25-01`,
 `AGG-C25-02`, `AGG-C25-21`, and `AGG-C25-23` are scheduled in
 `cycle-25-2026-07-08-plan.md`. Newly deferred High-severity Cycle 25 rows
 (`AGG-C25-03`, `AGG-C25-04`, `AGG-C25-05`, and conditional operator row
@@ -292,6 +301,9 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C25-15..20 | mixed, up to MED | cycle-25-2026-07-08 | r10c25 | 0 | Migration parity, browser-flow, browser-matrix, visual-regression, CLIP preflight, and coverage-ratchet exit criteria in Cycle 25 deferred register |
 | C25-22 | MED/High | cycle-25-2026-07-08 | r10c25 | 0 | Before distributing GalleryKit as a template/package, or if copied installs publish wrong canonical URLs |
 | C25-24..30 | mixed, up to MED/HIGH-conditional | cycle-25-2026-07-08 | r10c25 | 0 | Restore scanner, secrets, backups, nginx/proxy, build-runtime config, restore recovery, and analytics-boundary exit criteria in Cycle 25 deferred register |
+| C26-07 | MED/High | cycle-26-2026-07-08 | r10c26 | 0 | Next sidecar/backfill test-harness cycle, sidecar refactor, or regression involving sidecar config fallback |
+| C26-08 | LOW-MED/High | cycle-26-2026-07-08 | r10c26 | 0 | Restore import helper extraction, temp-file leak incident, or future restore child-process setup/cleanup changes |
+| C26-09 | LOW-MED/Med-High | cycle-26-2026-07-08 | r10c26 | 0 | UI/accessibility test-hardening cycle, admin form error regression, or semantic-search mobile trigger visibility issue |
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 3 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 3 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 3 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |

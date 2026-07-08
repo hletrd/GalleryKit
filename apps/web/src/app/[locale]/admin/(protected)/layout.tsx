@@ -13,13 +13,13 @@ export default async function ProtectedLayout({
     params: Promise<{ locale: string }>;
 }) {
     const { locale } = await params;
-    if (!(await isAdmin())) {
-        redirect(localizePath(locale, '/admin'));
-    }
-
     if (isRestoreMaintenanceActive()) {
         const t = await getTranslations('common');
         return <PublicRestoreMaintenance title={t('restoreMaintenanceTitle')} body={t('restoreMaintenanceBody')} />;
+    }
+
+    if (!(await isAdmin())) {
+        redirect(localizePath(locale, '/admin'));
     }
 
     return <>{children}</>;

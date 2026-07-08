@@ -72,6 +72,7 @@ describe('map popup thumbnail wiring (PERF-R4C15-02)', () => {
         expect(page).toContain("tPhoto('titleWithId', { id: img.id })");
         expect(page).not.toContain("displayTitle: img.title ?? tPhoto('titleWithId', { id: img.id })");
         expect(page).toContain('{marker.displayTitle}');
+        expect(page).toContain('{marker.topic_label ?? marker.topic}');
         expect(page).not.toContain("`${t('openPhoto')} ${marker.id}`");
     });
 

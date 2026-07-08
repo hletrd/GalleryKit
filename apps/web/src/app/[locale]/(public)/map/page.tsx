@@ -63,6 +63,7 @@ export default async function MapPage() {
             ),
             filename_jpeg: img.filename_jpeg,
             topic: img.topic,
+            topic_label: img.topic_label ?? null,
         }));
 
     return (
@@ -103,7 +104,7 @@ export default async function MapPage() {
                                     className="block min-h-11 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                 >
                                     <span className="font-medium">{marker.displayTitle}</span>
-                                    <span className="block text-xs text-muted-foreground">{marker.topic}</span>
+                                    <span className="block text-xs text-muted-foreground">{marker.topic_label ?? marker.topic}</span>
                                 </Link>
                             </li>
                         ))}

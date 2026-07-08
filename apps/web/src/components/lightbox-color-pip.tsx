@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useId } from 'react';
 import { Histogram } from '@/components/histogram';
 import { ImageDetail } from '@/lib/image-types';
 import { imageUrl } from '@/lib/image-url';
@@ -53,6 +53,7 @@ export function LightboxColorPip({ image, t, open, onToggle, interactive = true,
     // ColorDetailsSection so both copy buttons feel identical to the
     // photographer regardless of which surface they used.
     const [copied, setCopied] = useState(false);
+    const panelId = useId();
     // C4-B1: Track the copy-feedback timer so we can clear it on unmount.
     const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => () => {
@@ -169,6 +170,7 @@ export function LightboxColorPip({ image, t, open, onToggle, interactive = true,
                 tabIndex={interactive ? 0 : -1}
                 className="lightbox-color-pip inline-flex items-center gap-1.5 rounded-full bg-black/70 px-3 min-h-11 text-xs text-white hover:bg-black/80 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors"
                 aria-expanded={interactive && open}
+                aria-controls={panelId}
                 aria-label={`${t('aria.toggleColorPip')}: ${[
                     primaries || t('viewer.colorUnknown'),
                     transfer,
@@ -195,7 +197,12 @@ export function LightboxColorPip({ image, t, open, onToggle, interactive = true,
                 )}
             </button>
             {interactive && open && (
-                <div className="mt-1.5 rounded-lg bg-black/80 p-3 text-xs text-white backdrop-blur-sm min-w-[180px] space-y-1.5">
+                <div
+                    id={panelId}
+                    role="region"
+                    aria-label={t('aria.toggleColorPip')}
+                    className="mt-1.5 rounded-lg bg-black/80 p-3 text-xs text-white backdrop-blur-sm min-w-[180px] space-y-1.5"
+                >
                     {image.color_primaries && (
                         <div className="flex justify-between gap-3">
                             <span className="opacity-70">{t('viewer.colorPrimaries')}</span>
