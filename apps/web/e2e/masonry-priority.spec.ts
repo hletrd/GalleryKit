@@ -20,27 +20,35 @@ for (const viewport of [
     const cards = page.locator('.masonry-card');
     await expect(cards.first()).toBeVisible();
     const layout = await cards.evaluateAll((nodes) => {
-      const cardsWithPriority = nodes.map((node, index) => {
+      const cardStates = nodes.map((node, index) => {
         const rect = node.getBoundingClientRect();
         const image = node.querySelector('img');
         return {
           index,
           top: rect.top,
-          isPriority: image?.getAttribute('loading') === 'eager'
-            && image.getAttribute('fetchpriority') === 'high',
+          loading: image?.getAttribute('loading'),
+          fetchPriority: image?.getAttribute('fetchpriority'),
         };
       });
-      const topEdge = Math.min(...cardsWithPriority.map((card) => card.top));
+      const topEdge = Math.min(...cardStates.map((card) => card.top));
       return {
-        leaderIndices: cardsWithPriority
+        leaderIndices: cardStates
           .filter((card) => Math.abs(card.top - topEdge) < 2)
           .map((card) => card.index),
-        priorityIndices: cardsWithPriority
-          .filter((card) => card.isPriority)
+        eagerIndices: cardStates
+          .filter((card) => card.loading === 'eager')
           .map((card) => card.index),
+        highPriorityIndices: cardStates
+          .filter((card) => card.fetchPriority === 'high')
+          .map((card) => card.index),
+        nonFirstStates: cardStates.slice(1).map(({ loading, fetchPriority }) => ({ loading, fetchPriority })),
       };
     });
-    expect(layout.priorityIndices).toEqual([0]);
+    expect(layout.eagerIndices).toEqual([0]);
+    expect(layout.highPriorityIndices).toEqual([0]);
+    expect(layout.nonFirstStates).toEqual(
+      layout.nonFirstStates.map(() => ({ loading: 'lazy', fetchPriority: 'auto' })),
+    );
     expect(layout.leaderIndices).toContain(0);
     if (viewport.name === 'mobile') {
       expect(layout.leaderIndices).toEqual([0]);
