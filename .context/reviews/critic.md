@@ -1,78 +1,39 @@
-# Critic Review — Cycle 8
+# Critic Review — Cycle 13
 
-Date: 2026-07-18 KST
-Review HEAD: `ff8c5f48`
+Review target: `8bd8999f`. Review only.
 
-## Inventory and method
+## Inventory and challenge method
 
-I inventoried the full maintained tree: 516 source `.ts` files, 113 source
-`.tsx` files, 31 migrations plus journal/reconcile, server actions/routes,
-scripts/configuration/deploy assets, 369 unit-test files, 16 Playwright files,
-governing docs, review/plan history, and the deferred register. The Cycle 7
-diff was an entry point, not the scope boundary. Cross-file traces covered
-responsive layout/source selection, auth/rate limits, public/private data,
-uploads/deletes/restores, background work, migrations, PWA/cache behavior,
-i18n/admin UI, and release provenance.
+After reading the repository instructions and current/historical plan state, I inventoried the complete maintained app, test, script, migration, build, deploy, and documentation surface: 3,705 tracked files, 631 maintained TS/TSX/JS source files, 372 unit-test files, 13 Playwright specs, 30 scripts, and 34 migrations. I challenged stated guarantees against executable behavior across archive/date semantics, schema convergence, privacy, auth/admission, uploads/deletes/restores, responsive delivery, cache behavior, and publication provenance rather than treating green gates or comments as proof by themselves.
 
 ## Findings
 
-### CRIT-C8-01 — Responsive source policy still belongs to the viewport, not the container
+### CRIT-C13-01 — The new “executable date semantics” proof omits the boundary its range model cannot represent
 
-- Severity / confidence / status: **Medium / High / Confirmed new Cycle 8 defect**
-- Regions: `apps/web/src/lib/responsive-masonry.ts:1-6,42-57`;
-  `apps/web/src/components/masonry-card.tsx:91-110`;
-  `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`
-- Problem: Cycle 7 made intrinsic layout container-owned but preserved
-  viewport-fraction `sizes` values. Above the 1,536 px container cap, source
-  selection and rendered geometry again describe different boxes.
-- Concrete failure: at 2,560 px and five columns, cards render at 288 px. DPR 2
-  needs 576 pixels and should use 640w, but `20vw` advertises 512 CSS px and
-  causes the two-entry 640w/1536w `srcset` to select 1536w. A three-column DPR-1
-  gallery similarly advertises about 845 px for a 491 px card and selects
-  1536w instead of 640w.
-- Fix: generate container-capped `sizes` expressions that include container
-  padding and column gaps, preferably in a shared helper usable during SSR.
+- Severity: **Medium**
+- Confidence: **High**
+- Label: **Confirmed validation defect with confirmed runtime consequence**
+- Exact regions: acceptance claim `.context/plans/cycle-12-2026-07-18-plan.md:88-104,116-128`; MySQL probe `apps/web/scripts/check-schema-convergence.mjs:151-227`; helper tests `apps/web/src/__tests__/data-timeline-behavior.test.ts:59-91`; route/source tests `apps/web/src/__tests__/data-timeline.test.ts:100-130`; implementation `apps/web/src/lib/data-timeline.ts:97-107`
 
-### CRIT-C8-02 — The new ultrawide test uses the one sparse shape that cannot reveal source overstatement
+Cycle 12 says MySQL itself proves capture-date semantics, but the live probe covers February 29 in ordinary years and the helper tests cover only 2025 month/year ranges. No test exercises the accepted lower/upper year domain. The half-open range helper always calculates `year + 1`, so its advertised 1..9999 domain has no representation for the upper endpoint.
 
-- Severity / confidence / status: **Medium / High / Confirmed test-design gap**
-- Regions: `apps/web/e2e/responsive-masonry.spec.ts:11-55,57-95`;
-  `apps/web/src/__tests__/responsive-masonry.test.ts:11-77`
-- Problem: the only 2,560 px main-gallery case has two cards. Its real card is
-  744 px and, with the coarse 640w/1536w ladder, legitimately requires 1536w at
-  DPR 2. Therefore the test passes whether `sizes` is accurate or grossly
-  viewport-based. Archive cases stop at 1,536 px, exactly where the container
-  has not diverged materially from the viewport. Unit tests lock the literal
-  `20vw`/`33vw` strings instead of testing their layout-domain accuracy.
-- Concrete failure: all focused tests pass 34/34 while the five-column DPR-2
-  and three-column DPR-1 counterexamples in CRIT-C8-01 still select 1536w over
-  the sufficient 640w derivative.
-- Fix: add a 2,560 px normal five-column case at DPR 2 and assert real card
-  width plus the 640w candidate. Add a three-item/DPR-1 case if sparse policies
-  remain a first-class invariant. Update unit expectations to a capped
-  container expression rather than preserving the faulty literal.
+Concrete scenario: every focused archive/schema test passes (25/25), yet `archiveRange(9999)` yields the invalid MySQL literal `10000-01-01 00:00:00`; a MySQL 8.4 execution fails with error 1525. Thus the green proof specifically misses the counterexample that breaks both public archive consumers.
 
-### CRIT-C8-03 — Cycle 7 still says signed release pending after its signed push
+Fix: add table-driven boundary tests to the pure helper, behavior tests that compile/execute the real query at the supported extremes, and public-route assertions for invalid/maximum years. Phrase the acceptance claim in terms of the exact tested domain. Prefer a shared `parseArchiveYear` contract so tests do not separately preserve inconsistent route rules.
 
-- Severity / confidence / status: **Low / High / Confirmed current provenance mismatch**
-- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:3-5,48-50,73-82`;
-  `.context/plans/README.md:34-40`; commits `498e5122`, `90a3bc07`, `ff8c5f48`
-- Problem: all three Cycle 7 commits have good GPG signatures and
-  `master == origin/master == ff8c5f48`, but the active plan still says
-  "signed release pending" and leaves signed commits/push unchecked. Deploy
-  completion is not independently established by this review, so it must not
-  be invented; the signed/pushed half is nevertheless already false.
-- Concrete failure: a recovery agent following the authoritative active plan
-  can repeat publication work or select the wrong terminal frontier.
-- Fix: reconcile the signed/pushed evidence now, record deploy evidence only
-  if independently available, then archive/advance the plan according to the
-  established one-cycle-later terminal-evidence pattern.
+### CRIT-C13-02 — The release ledger again stops one fact short of its own source history
+
+- Severity: **Low**
+- Confidence: **High**
+- Label: **Confirmed for publication; deployment manual-validation**
+- Exact regions: `.context/plans/cycle-12-2026-07-18-plan.md:5,101-114`; `.context/plans/README.md:34-48`; commits `0c49d53b`, `83bb17c5`, `267ed7d7`, `8bd8999f`
+
+The plan requires remote equality as acceptance, but still says signed publication is pending after four GPG-good commits reached `origin/master`. This is the same recurring terminal-evidence gap the prior cycle planned to correct.
+
+Concrete scenario: a recovery loop selects the stale plan status instead of the remote history and repeats push/release work. No deploy conclusion follows from Git and none should be invented.
+
+Fix: make the next-cycle bootstrap or orchestrator own a small post-push status update, recording signed push and deploy as separate facts. Reconcile Cycle 12's push now and leave deploy unknown without host evidence.
 
 ## Final missed-issue sweep
 
-The final sweep challenged the observer lifecycle, bucket math, effective
-columns, source ladder, memoization, behavior tests, route/action guards,
-privacy projection, migration convergence, upload/delete/restore ordering,
-background consumers, caches, build/deploy config, and every prior finding
-class in current history. No fourth current issue had sufficient distinct
-evidence to file.
+The final challenge pass revisited every current plan assertion, the disposable-MySQL upgrade lane, schema repair definitions, the privacy field symmetry, request/action guards, background connection ownership, file/DB dual writes, dynamic public pages, image source descriptors, service-worker freshness, and all open carry-forward rows. No third distinct critic finding met the evidence threshold.

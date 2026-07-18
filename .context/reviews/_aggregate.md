@@ -1,204 +1,185 @@
-# Aggregate Review — Cycle 12/100
+# Aggregate Review — Cycle 13/100
 
 Date: 2026-07-18
-Reviewed HEAD: `ff6532f4`
+Reviewed HEAD: `8bd8999f`
 
 ## Review coverage
 
 The collaboration runtime exposed two child slots after the root orchestrator
-and this cycle agent. Both slots were launched together and covered seven
-engineering perspectives; the lead covered the four remaining perspectives in
-parallel:
+and this cycle agent. Both were launched together; the lead covered the
+remaining roles while they ran:
 
-- child `review_code_arch`: code-reviewer, architect, debugger, test-engineer;
-- child `review_sec_perf`: security-reviewer, perf-reviewer, tracer;
-- lead: critic, verifier, document-specialist, designer.
+- child `quality_review_team`: code-reviewer, critic, verifier, architect;
+- child `risk_review_team`: security-reviewer, debugger, tracer,
+  test-engineer;
+- lead: perf-reviewer, document-specialist, designer.
 
-All eleven required perspectives returned. Each lane inventoried the tracked
-implementation and documentation, examined cross-file interactions, reviewed
-the complete Cycle 11 change surface, and performed a final missed-issue sweep.
-The designer read and used the full agent-browser skill family against the live
-public application with accessibility/DOM/computed-metric/runtime evidence.
-No child failed.
+All eleven required perspectives returned and wrote distinct provenance files.
+No additional registered reviewer definitions exist in `.claude`; historical
+review Markdown is evidence, not executable agent registration. Each lane
+inventoried the maintained repository, traced relevant cross-file behavior,
+and performed a final missed-issue sweep. The designer used the complete
+agent-browser skill family against the live public application at desktop and
+320 px mobile sizes with accessibility, DOM, runtime, network, theme, and
+keyboard evidence.
 
 ## Executive result
 
 Five unique findings survived deduplication:
 
-1. **SCHEMA-C12-01 (High/High):** the new convergence CI lane bootstraps its
-   reference schema through `reconcileLegacySchema`, then damages and repairs
-   that same reconcile-authored schema. It never executes the real latest
-   pending migration SQL, so a broken upgrade can pass.
-2. **SCHEMA-C12-02 (Medium/High):** reconcile accepts same-named malformed
-   generated columns and indexes whose column list matches but whose material
-   definition differs.
-3. **PERF-C12-03 (Medium/High):** every uncached timeline render applies
-   `DISTINCT YEAR(capture_date)` over all processed dates, and even an explicit
-   year waits for that unbounded predecessor before its bounded photo query.
-4. **TEST-C12-04 (Medium/High):** On This Day's new generated-column behavior
-   is asserted by source strings and a JavaScript imitation, not executable
-   MySQL date-generation/query semantics.
-5. **DOC-C12-05 (Low/High):** the Cycle 11 plan remains active and says signed
-   publication is pending although signed local and remote HEAD are equal.
-   Deployment remains unknown without independent evidence.
+1. **ARCHIVE-C13-01 (Medium/High):** archive callers accept years outside the
+   range representation's valid MySQL domain; year 9999 constructs the invalid
+   exclusive bound `10000-01-01`, while the query-string path also accepts
+   `0000`.
+2. **PERF-C13-02 (Medium/High):** timeline year discovery filters on the base
+   `capture_date`, defeating the new `(processed, capture_year)` covering plan.
+3. **UX-C13-03 (Medium/High):** syntactically valid but unavailable query years
+   become fake selected archive years and produce a misleading review link.
+4. **DOC-C13-04 (Low/High):** the timeline module header still claims all
+   queries use the capture-date index although two now use generated-key
+   indexes.
+5. **DOC-C13-05 (Low/High):** the Cycle 12 ledger still says signed publication
+   is pending although four GPG-good commits are on `origin/master`; deployment
+   remains unknown without independent evidence.
 
-No new authorization, privacy, data-loss, dependency, UI/accessibility, i18n,
-color-fidelity, or image-delivery defect survived validation.
+No new authorization, authentication, privacy, data-loss, dependency,
+concurrency, responsive-layout, keyboard/focus, touch-target, i18n, color/HDR,
+or image-delivery defect survived validation.
 
 ## Deduplicated findings
 
-### SCHEMA-C12-01 — Convergence CI never executes the real latest upgrade SQL
-
-- Severity: **High**
-- Confidence: **High**
-- Status: **Confirmed validation defect; current 0032 SQL appears correct by
-  inspection; live existing-DB upgrade remains manual-validation**
-- Cross-agent agreement: code-reviewer, architect, debugger, test-engineer,
-  tracer.
-- Regions: fresh bootstrap `apps/web/scripts/migrate.js:917-937`; production
-  migration call `apps/web/scripts/migrate.js:1073-1075`; convergence setup and
-  degradation `apps/web/scripts/check-schema-convergence.mjs:11,28-102`; source
-  test `apps/web/src/__tests__/schema-convergence-gate.test.ts:12-31`; CI order
-  `.github/workflows/quality.yml:72-78`.
-- Evidence: CI initializes an empty DB. The empty branch creates the current
-  schema via reconcile and baselines every journal hash, so the subsequent
-  migration runner is a no-op. The convergence script snapshots that output,
-  hard-codes damage to 0032 objects, calls the same reconcile function again,
-  and compares it with its own earlier output. Neither phase executes
-  `0032_capture_date_indexes.sql` as a pending upgrade.
-- Concrete failure: a future/latest migration contains invalid SQL or diverges
-  from its reconcile mirror. Fresh CI init baselines it without executing it,
-  and the self-comparison remains green; an existing production DB reaches the
-  pending-tail path and fails or converges to a different schema after earlier
-  DDL has auto-committed.
-- Required fix: retain the useful reconcile recovery/idempotence lane, but add
-  an independent keyed prior-release fixture that removes the latest hash and
-  restores the exact prior schema, invokes the real production migration
-  runner, asserts the latest hash, and compares the structured result with the
-  current schema. A new latest journal tag must fail until it has its own
-  explicit upgrade fixture.
-
-### SCHEMA-C12-02 — Same-named malformed generated columns/indexes survive reconcile
+### ARCHIVE-C13-01 — Accepted archive years exceed the range model's MySQL domain
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed reconciliation limitation; occurrence on the live DB
-  requires manual validation**
-- Cross-agent agreement: code-reviewer, architect, debugger, test-engineer.
-- Regions: column inspection/helpers `apps/web/scripts/migrate.js:234-283`;
-  generated-column adds `apps/web/scripts/migrate.js:505-506`; index inspection
-  and repair `apps/web/scripts/migrate.js:319-343,753-765`; convergence snapshot
-  dimensions `apps/web/scripts/check-schema-convergence.mjs:38-70` versus
-  absence/list-only degradation `:73-80`.
-- Evidence: `ensureColumn` checks only name presence. `ensureIndexColumns`
-  checks only ordered column names. The snapshot already records type,
-  nullability, generation expression, index uniqueness/direction/type/
-  visibility/sub-parts, but the repair path neither validates nor degrades
-  those fields.
-- Concrete failure: `capture_day` exists as an ordinary nullable integer, or
-  its intended index is invisible while retaining the correct columns.
-  Reconcile reports success; generated values remain null/stale or the optimizer
-  cannot use the promised index, so matching photos disappear or the query
-  regresses without an application error.
-- Required fix: definition-aware generated-column reconciliation must validate
-  type, nullability, generated/stored state, and normalized expression. The
-  latest three capture indexes must validate all material index properties and
-  recreate on drift. The live convergence fixture must damage same-named
-  definitions, not only remove/shorten objects.
+- Status: **Confirmed by source trace and disposable MySQL 8.4 execution**
+- Cross-agent agreement: code-reviewer, critic, verifier, architect, debugger,
+  tracer, test-engineer.
+- Regions: `apps/web/src/lib/data-timeline.ts:97-107,202-209`;
+  `apps/web/src/app/[locale]/(public)/year/[year]/layout.tsx:18-23`;
+  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:37-43,82-99`;
+  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:68-79`; missing boundary
+  coverage at `apps/web/src/__tests__/data-timeline-behavior.test.ts:59-91`.
+- Evidence: route-segment guards accept integers 1..9999, timeline accepts any
+  four digits, and `archiveRange` always represents a year by an exclusive
+  January 1 bound in `year + 1`. MySQL `DATETIME` cannot represent year 10000.
+  Both review teams independently executed the resulting comparison on MySQL
+  8.4 and received error 1525 for the invalid literal.
+- Concrete failure: `/en/year/9999` or `/en/timeline?year=9999` reaches
+  `getTimelineImages(9999)`, binds `10000-01-01 00:00:00`, and can return a
+  public 500 on a supported MySQL version. Conversely, `?year=0000` passes the
+  timeline parser despite being below MySQL `DATETIME`'s minimum year.
+- Required fix: establish one pure archive-year parser shared by both route
+  forms and make range construction total over that domain. Represent the
+  maximum year without a year-10000 sentinel, reject below-domain input, and
+  add lower/upper boundary tests plus executable MySQL proof.
 
-### PERF-C12-03 — Timeline year discovery scales with the full gallery
+### PERF-C13-02 — Timeline year discovery does not use its generated index as covering
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed query shape and uncached sequencing; production
-  `EXPLAIN ANALYZE`/latency requires manual validation**
-- Cross-agent agreement: perf-reviewer and tracer.
-- Regions: `apps/web/src/lib/data-timeline.ts:145-165,192-227`;
-  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:21,63-96`; current
-  indexes `apps/web/src/db/schema.ts:131-138`.
-- Evidence: `getTimelineYears()` selects and sorts
-  `DISTINCT YEAR(capture_date)`. The processed/capture-date index can constrain
-  `processed=true`, but applying `YEAR()` still scans every qualifying date.
-  `revalidate=0` makes it request-time work. The page awaits the year list
-  before starting `getTimelineImages()` even when `?year=YYYY` is already valid.
-- Concrete failure: at 100,000 processed photos, every timeline request scans
-  the full processed date index and builds/sorts the expression result before
-  a bounded 501-row year query begins. TTFB and MySQL CPU grow with total
-  gallery size rather than the requested year.
-- Required fix: add a stored/indexed capture-year key (or an equivalent bounded
-  summary/cache), query it directly, and run explicit-year image retrieval in
-  parallel with year discovery. Cover the no-`YEAR(capture_date)` contract.
+- Status: **Confirmed by query shape and disposable MySQL EXPLAIN**
+- Cross-agent agreement: perf-reviewer, tracer, test-engineer.
+- Regions: `apps/web/src/lib/data-timeline.ts:149-164`; index definition
+  `apps/web/src/db/schema.ts:135`; migration
+  `apps/web/drizzle/0033_capture_year_index.sql:4`.
+- Evidence: the query selects and orders only `capture_year` through
+  `(processed, capture_year)`, but filters `capture_date IS NOT NULL`, forcing
+  clustered-row access for a column absent from that index. MySQL EXPLAIN used
+  only the processed prefix and did not report an index-only plan. Replacing
+  the redundant predicate with `capture_year IS NOT NULL` used both indexed
+  key parts and the covering plan. The generated year is null exactly when
+  nullable `capture_date` is null.
+- Concrete failure: every uncached timeline render performs avoidable base-row
+  reads across processed photos merely to return a handful of distinct years,
+  retaining gallery-size-dependent I/O after migration 0033.
+- Required fix: filter on `isNotNull(images.capture_year)` and pin that exact
+  query contract in tests/executable schema evidence.
 
-### TEST-C12-04 — On This Day lacks executable generated-date/query proof
+### UX-C13-03 — Unavailable query years are presented as real archive selections
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed test-oracle gap; current query is correct by inspection**
-- Cross-agent agreement: test-engineer; the verifier independently challenged
-  this boundary without filing a duplicate.
-- Regions: query `apps/web/src/lib/data-timeline.ts:110-138`; source/JavaScript
-  tests `apps/web/src/__tests__/data-timeline.test.ts:49-89,184-207`; intended
-  schema/index `apps/web/src/db/schema.ts:40-47,131-138`.
-- Evidence: the tests assert source substrings and reproduce month/day matching
-  with JavaScript `Date`. They never ask MySQL to compute the stored generated
-  columns or execute the equivalent filtered order over null, cross-year,
-  nonmatching, and leap-day rows.
-- Concrete failure: an incorrect generated expression, storage definition, or
-  database binding/order discrepancy can keep the source checks and JavaScript
-  imitation green while the production widget omits or misorders photos.
-- Required fix: extend the disposable MySQL lane with executable fixtures for
-  null, cross-year, nonmatching, and February 29 dates, asserting generated
-  values, exact matching ids/order/limit, and the intended usable index shape.
+- Status: **Confirmed in source and live browser behavior**
+- Cross-agent agreement: designer; the archive-domain reviewers independently
+  confirmed the same parser is not authoritative, but this availability defect
+  remains after merely fixing numeric bounds.
+- Regions: `apps/web/src/app/[locale]/(public)/timeline/page.tsx:68-101` and
+  year scrubber/review link `:166-203`.
+- Evidence: any accepted query value becomes `selectedYear` without checking
+  the authoritative `years` result. Live `/en/timeline?year=9999` returned a
+  200 surface with only 2025 in the scrubber but exposed “9999 in Review” and
+  “No photos found for 9999.” This live MySQL deployment tolerated the invalid
+  comparison; the supported MySQL 8.4 lane above proves other deployments can
+  fail earlier.
+- Concrete failure: a malformed, bookmarked, or crawler URL presents an empty
+  invented archive and a prominent destination outside the actual year
+  scrubber, undermining the navigation's data authority.
+- Required fix: accept a requested selection only when it is present in the
+  loaded year list; otherwise fall back to the newest available year. Preserve
+  the explicit-year parallel query for valid requests, discard it when the
+  requested year is unavailable, and cover the fallback.
 
-### DOC-C12-05 — Cycle 11 release ledger stops before proven publication
+### DOC-C13-04 — Timeline module header names only one of three active indexes
 
 - Severity: **Low**
 - Confidence: **High**
-- Status: **Confirmed repository-state mismatch; deployment status unknown**
-- Cross-agent agreement: code-reviewer, architect, debugger.
-- Regions: `.context/plans/cycle-11-2026-07-18-plan.md:4,59-62,109-111`;
-  `.context/plans/README.md` active/recently-completed sections; signed Git
-  history `ff6532f4` and `origin/master`.
-- Evidence: the plan says publication is in progress and leaves signed
-  commit/push unchecked, while local and remote master are identical at signed
-  `ff6532f4` and the Cycle 11 work is present in history. Git equality does not
-  prove the deployment result.
-- Concrete failure: a recovery agent treats the stale plan as authoritative,
-  repeats publication, or starts from the pre-publication frontier.
-- Required fix: record signed push as complete, preserve deploy as unknown
-  unless independent evidence exists, archive Cycle 11, and advance the active
-  plan index.
+- Status: **Confirmed documentation/code mismatch**
+- Cross-agent agreement: document-specialist.
+- Regions: `apps/web/src/lib/data-timeline.ts:1-9`, versus query contracts at
+  `:112-116`, `:145-164`, and `:198-212`.
+- Evidence: the header says all queries target
+  `idx_images_processed_capture_date`; On This Day targets the month/day index
+  and year discovery targets the new year index.
+- Concrete failure: a maintainer reasons about the wrong query plan or removes
+  a generated-key index believed redundant.
+- Required fix: document the three query-family-to-index mappings explicitly.
+
+### DOC-C13-05 — Cycle 12 signed publication is still recorded as pending
+
+- Severity: **Low**
+- Confidence: **High**
+- Status: **Confirmed for signed push; deployment remains manual validation**
+- Cross-agent agreement: code-reviewer, critic, verifier, architect.
+- Regions: `.context/plans/cycle-12-2026-07-18-plan.md:3-5,101-114` and
+  `.context/plans/README.md:34-48`.
+- Evidence: commits `0c49d53b`, `83bb17c5`, `267ed7d7`, and `8bd8999f` all
+  verify GPG-good, and local/remote master both resolve to `8bd8999f`; the plan
+  still leaves signed push unchecked. Git does not prove deployment.
+- Concrete failure: a recovery cycle repeats publication or starts from the
+  obsolete `ff6532f4` frontier.
+- Required fix: record signed push complete, leave the original deploy result
+  unknown, archive Cycle 12 under the existing convention, and advance the
+  active plan index.
 
 ## Cross-agent adjudication
 
-- The five schema-validation reports under SCHEMA-C12-01 are one root cause,
-  not five findings. The existing self-comparison remains useful for reconcile
-  recovery and should be supplemented, not deleted.
-- SCHEMA-C12-02 is distinct: even a real pending-migration lane does not make
-  reconcile repair same-named malformed objects. Both upgrade equivalence and
-  definition-aware repair are required.
-- TEST-C12-04 is narrower than SCHEMA-C12-02. The former proves date behavior;
-  the latter proves schema repair. They may share one disposable-MySQL harness
-  but have separate acceptance criteria.
-- PERF-C12-03 is not a claim that the current 445-photo demo is slow. The
-  unbounded request-time query shape is confirmed; representative-cardinality
-  latency remains a measurement obligation.
-- DOC-C12-05 records only facts Git can prove. No deployed SHA or successful
-  Cycle 11 deploy is inferred.
+- ARCHIVE-C13-01 and UX-C13-03 share the query parser but are not duplicates.
+  A domain-correct year such as 2222 can still be absent from a gallery and
+  must not become an invented selection.
+- The production browser's tolerant 9999 response does not invalidate the
+  supported-MySQL failure: both teams reproduced strict MySQL 8.4 error 1525.
+  The fix must be portable across the documented MySQL 8.0+ contract.
+- PERF-C13-02 is not a claim that the current 445-photo demo is visibly slow.
+  The non-covering shape and corrected EXPLAIN are confirmed; representative
+  latency remains a scale measurement.
+- DOC-C13-05 records only facts Git proves. No deployed SHA or successful Cycle
+  12 deploy is inferred.
 
 ## Validation evidence from Prompt 1
 
-- Security lanes passed API-auth lint, action-origin/mutation-barrier lint,
-  public-route-rate-limit lint, and production dependency audit with zero
-  configured vulnerabilities.
-- Engineering lanes passed 176 focused migration, timeline, image, privacy,
-  and contract tests plus `git diff --check`.
-- Live browser review covered desktop/mobile, 320 px reflow, EN/KO structure,
-  search-dialog focus/Escape behavior, 44 px visible controls, dark mode,
-  runtime errors, and accessibility semantics. No UI finding survived.
-- No local MySQL was running during review; current SQL correctness and query
-  latency are not misrepresented as runtime-observed facts.
+- Both specialist teams passed ESLint, API-auth lint, action-origin/mutation-
+  barrier lint, public-route-rate-limit lint, typecheck, and the production
+  dependency audit; security review found no configured vulnerability.
+- Focused archive/schema/security suites passed (up to 145 tests per lane).
+- Disposable MySQL 8.4 reproduced the archive-bound error and the covering-
+  index EXPLAIN distinction; review containers were removed afterward.
+- Live browser coverage included desktop/mobile, 320 px reflow, light/dark
+  mode, EN structure, search-dialog focus/Escape behavior, runtime errors,
+  network evidence, storage, touch targets, and accessibility semantics.
 
 ## Agent failures
 
-None.
+None. A third child spawn was retried once and rejected by the runtime's
+thread limit; the lead completed those three roles directly, so no review role
+or provenance report failed.

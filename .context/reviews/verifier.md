@@ -1,61 +1,43 @@
-# Verifier Review — Cycle 8
+# Verifier Review — Cycle 13
 
-Date: 2026-07-18 KST
-Review HEAD: `ff8c5f48`
+Review target: `8bd8999f`. Review only.
 
-## Inventory and verification method
+## Verification coverage
 
-I verified Cycle 7 claims from `responsive-masonry.ts` through `HomeClient`,
-the ref-bearing grid boundary, `MasonryCard`, public container/CSS, unit and
-browser tests, commit signatures, remote state, current plan index, and prior
-findings. I also sampled every maintained route/action/schema/script boundary
-and checked the consolidated deferred register for reopened invariants.
+I read the full repository instructions and current plan/review history, inventoried all maintained implementation and test surfaces, and sampled every route/action/schema/script boundary before tracing the Cycle 12 schema and timeline changes end to end. The maintained inventory contains 631 TS/TSX/JS source files, 372 Vitest files, 13 Playwright specs, 30 scripts, and 34 migrations.
 
-Focused responsive tests passed 34/34. API-auth, action-origin/mutation-barrier,
-and public-route-rate-limit lints passed. Production dependency audit found
-zero vulnerabilities. All Cycle 7 commits are GPG-good and local/remote master
-both resolve to `ff8c5f48`.
+Current evidence: ESLint, API-auth lint, action-origin/mutation-barrier lint, public-route-rate-limit lint, app/script typecheck, and production audit all pass; the audit reports zero vulnerabilities. Focused `data-timeline`, `data-timeline-behavior`, and `schema-convergence-gate` tests pass 25/25. All Cycle 12 commits are GPG-good and local/remote master both resolve to `8bd8999f`.
 
-## Evidence-backed findings
+## Findings
 
-### VER-C8-01 — Container-owned intrinsic geometry is fixed, but source-candidate alignment is not
+### VER-C13-01 — Archive upper-bound behavior fails on the exact accepted maximum year
 
-- Severity / confidence / status: **Medium / High / Partially verified acceptance; confirmed residual defect**
-- Regions: `apps/web/src/components/home-client.tsx:69-105,257-272,350-360`;
-  `apps/web/src/lib/responsive-masonry.ts:24-35,42-57`;
-  `apps/web/src/components/masonry-card.tsx:91-110`;
-  `apps/web/e2e/responsive-masonry.spec.ts:11-55,57-95`
-- Verified good: one `ResizeObserver` owns the grid width, schedules a
-  quantized update, disconnects/cancels on unmount, and feeds item-capped card
-  geometry. Unit cases cover invalid/unmeasured, 288 px mobile, and 1,488 px
-  multi-column values; browser cases exercise 320, 1,536, and 2,560 px.
-- Verified failure: `getMainMasonrySizes()` still emits `20vw`/`33vw` based on
-  the uncapped viewport. At 2,560 px, the real five-column card is 288 px; DPR
-  2 requires 576 source pixels, while `20vw` declares a 512 px slot and asks
-  for about 1,024, selecting 1536w rather than sufficient 640w. The only
-  ultrawide E2E uses two 744 px cards, for which 1536w is legitimately needed,
-  so its passing result cannot verify normal-gallery candidate alignment.
-- Suggested fix: emit a container-capped sizes expression and add an ultrawide
-  full five-column candidate assertion.
+- Severity: **Medium**
+- Confidence: **High**
+- Label: **Confirmed by source trace and manual MySQL validation**
+- Exact regions: `apps/web/src/app/[locale]/(public)/year/[year]/layout.tsx:18-23`; `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:37-43,82-99`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:68-79`; `apps/web/src/lib/data-timeline.ts:97-107,202-209`; missing boundary coverage `apps/web/src/__tests__/data-timeline-behavior.test.ts:59-91`
 
-### VER-C8-02 — Cycle 7 release-state claims are stale at least for signature/push
+Verified good: normal-year ranges, December rollover, generated year/month/day columns, latest migration fixture enforcement, real pending-upgrade execution, and strict query/action gates are all represented in source/tests.
 
-- Severity / confidence / status: **Low / High / Confirmed; deploy remains unverified**
-- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:5,48-50,73-82`;
-  `.context/plans/README.md:34-40`
-- Evidence: `git verify-commit` reports good signatures for `498e5122`,
-  `90a3bc07`, and `ff8c5f48`; `master` and `origin/master` both resolve to
-  `ff8c5f48`. The plan still records signed commits/push as pending. This
-  review did not establish a production SHA or per-cycle deploy outcome.
-- Suggested fix: mark signed publication complete from the evidence above,
-  preserve deploy as pending unless terminal evidence exists, and advance the
-  plan only under the repository's truthful release-ledger convention.
+Verified failure: both archive pages admit year 9999, while the common helper constructs `[9999-01-01, 10000-01-01)`. Executing the same comparison on MySQL 8.4 with the repository's strict mode returned `ERROR 1525 (HY000)` for the upper literal. The focused tests remain green because their only whole-year case is 2025.
 
-## Revalidated carry-forward and final sweep
+Concrete scenario: `/en/year/9999` and `/en/timeline?year=9999` pass application validation, invoke `getTimelineImages(9999)`, and fail at the DB instead of returning a stable public response.
 
-The observer fix does not trigger existing topology, shared DB-budget,
-restore-generation, large-map/vector, upload-RSS, environment, or browser-test
-infrastructure exit criteria. The final sweep rechecked implementation claims
-against source behavior rather than comments/tests alone, plus guard gates,
-privacy, migrations, persistence races, caches, and release history. No third
-distinct verifier finding survived validation.
+Fix: centralize the archive-year domain, make the top-year query representable without an out-of-domain exclusive sentinel, and prove the real routes/helper at both edges in MySQL-backed coverage.
+
+### VER-C13-02 — Cycle 12 is remotely published but its plan still denies that fact
+
+- Severity: **Low**
+- Confidence: **High**
+- Label: **Confirmed publication mismatch; deployment manual-validation**
+- Exact regions: `.context/plans/cycle-12-2026-07-18-plan.md:3-5,101-114`; `.context/plans/README.md:34-48`
+
+Verified evidence: `git log --format='%G?' ff6532f4..HEAD` reports `G` for all four commits and `git rev-parse HEAD origin/master` returns `8bd8999f` twice. The progress list still leaves signed push unchecked. I found no independent production SHA/deploy transcript for Cycle 12.
+
+Concrete scenario: release recovery repeats a completed push or treats `ff6532f4` as current.
+
+Fix: record signed publication complete, retain deploy as unknown, then advance/archive the ledger according to the repository convention.
+
+## Final verification sweep
+
+I revalidated guard discovery, privacy compile/runtime fixtures, migration journal ordering and hashes, generated definitions, timeline ordering, restore/file cleanup fences, upload configuration snapshots, responsive derivative descriptors, service-worker/cache policy, and known deferred risks. No additional verifier finding survived confirmation.

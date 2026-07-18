@@ -1,50 +1,35 @@
-# Tracer — Cycle 12 Provenance
+# Tracer — Cycle 13
 
-Review target: `ff6532f4` (`master` / `origin/master` at review start). Review only; no product code or plan was modified.
+Review target: `8bd8999f`. Review only.
 
 ## Inventory and causal method
 
-I read `AGENTS.md`, all of `CLAUDE.md`, the active/archive review-plan frontier, and the complete tracked implementation inventory before tracing competing hypotheses across: request authentication/admission to mutation; upload settings to queue/backfill to persisted derivative metadata; schema/journal/reconcile to CI convergence proof; capture-date storage/indexes to public timeline rendering; restore quiescence to post-import migration; delete transactions to durable file cleanup; and signed commit to remote publication. Historical findings were checked against current source and excluded when fixed or already represented by an unfired carry-forward criterion.
+I read the repository instructions and complete maintained inventory, then traced request authentication to mutations, upload to derivative metadata, delete to durable cleanup, restore to post-import migration, migration journal to real pending upgrade and reconciliation, and capture-date storage to both public archive consumers. Competing hypotheses were checked with source, focused tests, and disposable MySQL 8.4 execution; the temporary container was stopped and removed.
 
-Fresh guard/audit validation passed, as did 137 focused tests. No local MySQL server was running, so DB execution-plan measurements are called out rather than inferred as observed latency.
-
-## TRC-C12-01 — the convergence gate compares `reconcileLegacySchema` with itself and is not migration-generic
-
-- Severity: **High (schema-validation infrastructure; no current live-schema drift confirmed)**
-- Confidence: **High**
-- Status: **Confirmed causal blind spot; actual current/production schema parity requires manual validation**
-- Exact regions: fresh bootstrap ownership `apps/web/scripts/migrate.js:917-937`; convergence baseline and hard-coded degradation `apps/web/scripts/check-schema-convergence.mjs:11,28-35,38-102`; source-contract coverage `apps/web/src/__tests__/schema-convergence-gate.test.ts:12-31`; CI ordering `.github/workflows/quality.yml:72-78`.
-
-Trace:
-
-1. CI initializes an empty DB.
-2. Empty DB initialization does not execute the migration chain; `prepareLegacyDatabaseIfNeeded()` builds the current schema through `reconcileLegacySchema()` and then baselines every journal hash.
-3. The convergence script snapshots that reconcile-produced schema as its truth.
-4. `simulateLegacyDrift()` removes only the two generated capture fields and three index shapes from migration 0032.
-5. The same `reconcileLegacySchema()` restores those hard-coded artifacts, and the script compares the result with its own earlier output.
-6. The latest-tag assertion forces a maintainer to rename `EXPECTED_LATEST_MIGRATION`, but neither it nor the unit test forces the drift scenario or canonical schema expectation to cover that new migration.
-
-Competing hypothesis—“the snapshot is an independent Drizzle/migration contract”—is disproved by the fresh-bootstrap branch at `migrate.js:920-937`: both sides originate from the same reconcile implementation. Competing hypothesis—“pinning the latest tag makes the probe generic”—is disproved by the fixed SQL at `check-schema-convergence.mjs:73-80` and the source-only assertion at `schema-convergence-gate.test.ts:13-16`.
-
-Concrete failure scenario: migration 0033 declares `foo INT NOT NULL DEFAULT 0`, but its reconcile mirror mistakenly creates `foo VARCHAR(255) NULL`. After the expected-tag string is updated, fresh CI init creates the wrong reconcile version, the baseline snapshot records that wrong version, the simulator only damages migration-0032 artifacts, and the second reconcile reproduces the same wrong baseline. The new “convergence” gate passes while migration SQL, Drizzle schema, fresh bootstrap, and upgraded production disagree.
-
-Suggested fix: make the proof independent and migration-generic. Build two disposable schemas—one from the canonical current contract and one upgraded from a prior-release fixture through the committed migration/reconcile paths—and compare structured `information_schema` output. At minimum, key downgrade fixtures by migration tag and fail unless the latest tag has an explicit degradation/upgrade scenario; also compare the reconcile result against a canonical schema snapshot not produced by that same reconcile run.
-
-## TRC-C12-02 — timeline admission is bounded at the photo query but unbounded at the year-list predecessor
+## TRC-C13-01 — the public year validator and archive range disagree at the type boundary
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed causal/query-shape defect; row-count latency requires manual validation**
-- Exact regions: `apps/web/src/lib/data-timeline.ts:145-165,192-227`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:21,63-96`; indexes `apps/web/src/db/schema.ts:131-138`.
+- Label: **Confirmed**
+- Exact regions: validator `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:37-43,82-86`; timeline parsing `apps/web/src/app/[locale]/(public)/timeline/page.tsx:68-79`; range construction/use `apps/web/src/lib/data-timeline.ts:97-107,202-209`
 
-Trace: uncached `/timeline` request → `getTimelineYears()` applies `YEAR()` and `DISTINCT` across every processed capture-date entry → only after that promise resolves can the page choose its default year → `getTimelineImages()` then performs the correctly range-bounded, limit-501 query. An explicit `?year=2025` does not remove the predecessor: the page still awaits the full year scan before starting the already-known year's photo query.
+Trace: route accepts `9999` → `getYearInReviewImages(9999)` delegates to `getTimelineImages(9999)` → `archiveRange` increments the year → query binds `capture_date < '10000-01-01 00:00:00'` → MySQL 8.4 raises `ER 1525`. The competing hypothesis that MySQL merely returns no rows was disproved by live execution. The competing hypothesis that the route rejects the value is disproved by the explicit `yearNum > 9999` condition. Timeline parsing is looser still and admits `0000`.
 
-Competing hypothesis—“migration 0032 makes every timeline query sargable”—holds for on-this-day month/day lookup and range-bounded archive rows, but not for the distinct `YEAR(capture_date)` expression. Competing hypothesis—“the result is cached”—is disproved at the route boundary by `revalidate = 0` and the absence of a cache wrapper on `getTimelineYears()`.
+Concrete scenario and fix are the same as DBG-C13-01: centralize domain validation and special-case the maximum representable year without constructing an out-of-domain exclusive bound.
 
-Concrete failure scenario: as the gallery grows, timeline TTFB and DB CPU rise with total image count even when the requested year contains only a few photos. Repeated public requests multiply the scan on the documented single-writer database.
+## TRC-C13-02 — the new year index is selected, but a redundant predicate defeats its covering shape
 
-Suggested fix: persist/index `capture_year` or maintain a bounded year summary, query it without applying a function to every capture timestamp, and parallelize explicit-year row retrieval with year-list retrieval. Confirm with `EXPLAIN ANALYZE` at representative cardinalities.
+- Severity: **Medium**
+- Confidence: **High**
+- Label: **Confirmed query-plan defect; production-cardinality latency needs manual validation**
+- Exact regions: index `apps/web/src/db/schema.ts:133-139`; query `apps/web/src/lib/data-timeline.ts:145-166`; live proof omission `apps/web/scripts/check-schema-convergence.mjs:185-224`; source-only assertion `apps/web/src/__tests__/data-timeline.test.ts:100-106`
+
+Trace: `capture_year` is generated as `YEAR(capture_date)`, so `capture_date IS NOT NULL` and `capture_year IS NOT NULL` are equivalent for this purpose. Nevertheless `getTimelineYears()` filters on the former while the new index contains only `(processed, capture_year)`. A disposable MySQL 8.4 `EXPLAIN FORMAT=JSON` therefore used only the `processed` key part, reported `using_index: false`, included `capture_date` in `used_columns`, and attached a base-row `capture_date is not null` condition. Replacing that predicate with `capture_year IS NOT NULL` used both key parts and reported `using_index: true`.
+
+Concrete scenario: a large gallery still performs base-table reads for every processed year candidate on every uncached `/timeline` request. The migration removes the `YEAR()` expression and filesort, but the redundant predicate leaves avoidable row fetches and weakens the intended scale fix.
+
+Fix: filter on `capture_year IS NOT NULL` (or remove the redundant null predicate and rely on the result filter), then extend the disposable MySQL lane with the real distinct-year query and assert the expected key parts plus covering/index-only access at representative cardinality.
 
 ## Final missed-issue sweep
 
-I retraced derivative-size production through all three persistence paths and every public consumer (the Cycle 11 maximum-width break is fixed); search result presentation through Next Link request behavior (prefetch suppression is coherent); schema mutation safety (local/disposable/explicit guards are present); auth/restore/cleanup failure paths; and capture-date queries against every current composite index. No third causal break survived competing-hypothesis checks.
+I retraced the real 0031→0033 upgrade, hash recording, same-name definition repair, date semantics, explicit-year parallelism, privacy omissions, restore barriers, and file-cleanup interleavings. No third causal break survived competing-hypothesis checks.

@@ -1,52 +1,37 @@
-# Test Engineer — Cycle 12 Provenance
+# Test Engineer — Cycle 13
 
-Review target: `ff6532f4`, 2026-07-18 KST. Review only.
+Review target: `8bd8999f`. Review only.
 
 ## Inventory and validation map
 
-I inventoried all 372 Vitest files and 16 Playwright files against the 639-file `apps/web/src` surface, 30 scripts, 12 route handlers, 13 server-action modules, and 33 migrations. I mapped the latest schema, image, and search changes to unit, source-tripwire, live-MySQL, and browser coverage, then checked the configured gate ordering and the prior-cycle acceptance claims. Focused Vitest passed 4 files / 39 tests.
+I inventoried 366 Vitest files and 14 Playwright TypeScript files against 631 source `.ts`/`.tsx` files, 30 scripts, 12 route handlers, 13 action modules, and 34 migrations. I mapped the latest schema/timeline changes to unit, source-contract, disposable-MySQL, and browser coverage, then ran the security guardrails, typecheck, dependency audit, and 145 focused tests. All passed.
 
-## Current findings
-
-### TEST-C12-01 — No executable test upgrades a prior-release database with the real latest SQL
-
-- Severity: **High**
-- Confidence: **High**
-- Status: **Confirmed coverage gap; current migration text is not claimed broken**
-- Regions: CI `.github/workflows/quality.yml:67-79`; probe `apps/web/scripts/check-schema-convergence.mjs:82-102`; routing unit `apps/web/src/__tests__/migrate-pending-migrations.test.ts:96-111,348-363`; source-only gate `apps/web/src/__tests__/schema-convergence-gate.test.ts:12-31`; migration `apps/web/drizzle/0032_capture_date_indexes.sql:1-13`
-
-The source gate checks strings and ordering. The routing test uses a mocked connection and synthetic migration function. The live gate starts from a fresh reconcile-authored database and calls reconcile after degradation. None builds the previous release schema and executes the actual pending migration file through Drizzle.
-
-Concrete counterexample: replace a 0032 statement with invalid SQL while keeping the journal tag and reconcile source intact. Every assertion in `schema-convergence-gate.test.ts` still passes, the live fresh initialization baselines the bad file without running it, and the degradation probe still succeeds. Only an existing-database deploy discovers the failure.
-
-Suggested fix: keep two disposable MySQL databases in the gate. Initialize one at HEAD through fresh bootstrap. Initialize the second with the previous migration set/schema, then run the unmodified production migration entry point against the complete current journal. Assert recorded hashes and compare full snapshots. Add a red-team fixture proving malformed SQL fails this lane.
-
-### TEST-C12-02 — The drift matrix tests absence, not malformed same-named objects
+## TEST-C13-01 — archive boundary tests omit both admitted endpoint years
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed coverage gap exposing a confirmed helper limitation**
-- Regions: drift setup `apps/web/scripts/check-schema-convergence.mjs:73-80`; column helper `apps/web/scripts/migrate.js:268-283`; index helper `apps/web/scripts/migrate.js:319-344`; snapshot dimensions `apps/web/scripts/check-schema-convergence.mjs:44-53`; latest objects `apps/web/scripts/migrate.js:502-506,753-765`
+- Label: **Confirmed coverage gap exposing a confirmed runtime defect**
+- Exact regions: production range `apps/web/src/lib/data-timeline.ts:97-107`; admitted route values `apps/web/src/app/[locale]/(public)/timeline/page.tsx:74-79` and `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:37-43,82-86`; tests `apps/web/src/__tests__/data-timeline-behavior.test.ts:59-91`; Playwright status test `apps/web/e2e/not-found-status.spec.ts:35-44`
 
-The probe drops generated columns and changes only index column lists. It never preserves an object name while corrupting generation expression, stored/virtual mode, type, nullability, index visibility, uniqueness, direction, or type. Yet the snapshot explicitly records those attributes, creating false breadth: they are compared after the narrow mutations but never challenged.
+The pure range suite covers only 2025 and validates December rollover without challenging the maximum `DATETIME` year. The browser suite checks an invalid nonnumeric year but not `0000` or `9999`. Direct execution proves `archiveRange(9999)` returns `10000-01-01`, and MySQL 8.4 rejects that literal.
 
-Concrete failure: make `capture_month` a plain nullable integer or mark the same-column composite index invisible. The probe has no case for either state, and current helpers accept them by name/column list.
+Concrete scenario: all configured tests stay green while `/year/9999` and `/timeline?year=9999` fail in production; `/timeline?year=0000` also follows a validation contract different from `/year/0000`.
 
-Suggested fix: parameterize degradation cases and run independent restore/idempotence checks for wrong generated expression, plain/generated, virtual/stored, type/nullability, missing index, old column list, and invisible index. Require every material snapshot dimension either to be repairable and tested or explicitly excluded from the convergence promise.
+Fix: add table-driven pure tests for 0, 1, 9998, and 9999; behavior tests for the maximum-year query predicate; and HTTP/E2E assertions that both public surfaces share the same valid/invalid-year contract.
 
-### TEST-C12-03 — On This Day's new database semantics are asserted with source text and a JavaScript imitation
+## TEST-C13-02 — the live schema gate never executes or explains the new distinct-year query
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed test-oracle gap; current query is correct by source inspection**
-- Regions: `apps/web/src/__tests__/data-timeline.test.ts:49-89,184-207`; production query `apps/web/src/lib/data-timeline.ts:117-136`; generated schema `apps/web/src/db/schema.ts:40-46`; Cycle 11 acceptance claim `.context/plans/cycle-11-2026-07-18-plan.md:44-48,96-103`
+- Label: **Confirmed coverage gap; production latency requires manual validation**
+- Exact regions: production query `apps/web/src/lib/data-timeline.ts:150-166`; source-only test `apps/web/src/__tests__/data-timeline.test.ts:100-106`; live schema semantics `apps/web/scripts/check-schema-convergence.mjs:185-224`; source gate `apps/web/src/__tests__/schema-convergence-gate.test.ts:24-38`
 
-The test asserts that source strings mention `eq(images.capture_month, month)` and then proves cross-year behavior with an unrelated JavaScript `Date` filter. It does not insert MySQL rows, verify generated values, run the Drizzle query, confirm leap-day/null matching, or inspect the query plan. Thus it cannot validate the behavior or the claimed index use.
+The new live lane proves `capture_year` generation and explains only the month/day query. The year-discovery acceptance test merely searches source strings. It therefore missed that `capture_date IS NOT NULL` prevents the `(processed, capture_year)` index from covering the real query. MySQL 8.4 reproduced `used_key_parts: ['processed']` and no `using_index`; the equivalent `capture_year IS NOT NULL` query used both parts and was index-only.
 
-Concrete failure: the generated expression could compute the wrong value, the query could bind/order incorrectly, or the intended index could be invisible; the source strings and JavaScript imitation still pass.
+Concrete scenario: migration, schema snapshot, source tests, and live date semantics all pass while the performance-critical public query retains avoidable base-row reads at full gallery cardinality.
 
-Suggested fix: in the disposable MySQL lane, insert null, normal cross-year, nonmatching, and February 29 capture dates; call or reproduce the real Drizzle query and verify exact ids/order/limit. Run `EXPLAIN FORMAT=JSON` (with sufficient representative rows if necessary) or at minimum assert the intended usable index definition separately rather than claiming sargability from source text.
+Fix: run the actual distinct-year SQL/compiled query in the disposable database, seed duplicate years plus nulls, assert exact results, and validate plan key parts/covering access. Keep plan assertions tolerant of harmless cost/row-estimate variation.
 
 ## Final missed-issue sweep
 
-I rechecked the real Sharp delivered-width test, search RSC listener timing/activation, security lint tests, privacy symmetry, migration journal/post-condition coverage, browser seed assumptions, and expected CLIP skips. No fourth independent current coverage gap survived deduplication.
+The final matrix rechecked real pending SQL execution, migration hashes, malformed generated/index recovery, idempotence, leap-day/null/order semantics, privacy symmetry, action/API scanners, upload/delete failure tests, restore cleanup, timer shutdown, and browser route coverage. No third test finding survived.
