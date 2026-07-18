@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     ARCHIVE_MASONRY_SIZES,
     SHARED_GROUP_MASONRY_SIZES,
+    getEffectiveMasonryColumns,
     getMainMasonrySizes,
 } from '@/lib/responsive-masonry';
 
@@ -38,5 +39,16 @@ describe('responsive masonry source-size policy', () => {
     it('uses the one-column safe floor for empty or invalid counts', () => {
         expect(getMainMasonrySizes(0)).toBe(getMainMasonrySizes(1));
         expect(getMainMasonrySizes(Number.NaN)).toBe(getMainMasonrySizes(1));
+    });
+
+    it.each([
+        { items: 0, maximum: 5, expected: 1 },
+        { items: Number.NaN, maximum: 5, expected: 1 },
+        { items: 2, maximum: 5, expected: 2 },
+        { items: 4, maximum: 3, expected: 3 },
+        { items: 50, maximum: 5, expected: 5 },
+        { items: 2, maximum: Number.NaN, expected: 1 },
+    ])('caps $items items at $maximum columns', ({ items, maximum, expected }) => {
+        expect(getEffectiveMasonryColumns(items, maximum)).toBe(expected);
     });
 });

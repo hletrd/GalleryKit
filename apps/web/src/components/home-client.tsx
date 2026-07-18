@@ -14,7 +14,7 @@ import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { humanizeTagLabel } from '@/lib/photo-title';
 import { useDisplayCapability } from '@/lib/use-display-capability';
-import { getMainMasonrySizes } from '@/lib/responsive-masonry';
+import { getEffectiveMasonryColumns, getMainMasonrySizes } from '@/lib/responsive-masonry';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
@@ -232,29 +232,31 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
     const orderedImages = allImages;
     const itemCount = orderedImages.length;
     const responsiveSizes = useMemo(() => getMainMasonrySizes(itemCount), [itemCount]);
+    const effectiveColumnCount = getEffectiveMasonryColumns(itemCount, columnCount);
 
     // DES-R5C3-04 (plan-315 item 26): estimate the rendered card width from the
-    // measured viewport / column count (minus the gap-4 = 16 px gutters between
-    // columns) so containIntrinsicSize's reserved height matches the real layout
-    // box rather than assuming a 300 px column. Falls back to 300 before the
-    // viewport is measured (SSR / first paint) — the documented constant.
+    // measured viewport / item-capped column count (minus the gap-4 = 16 px
+    // gutters between columns) so containIntrinsicSize's reserved height
+    // follows the same sparse-gallery geometry as the CSS classes and image
+    // sizes. Falls back to 300 before the viewport is measured (SSR / first
+    // paint) — the documented constant.
     const estimatedCardWidth = useMemo(() => {
-        if (!viewportWidth || columnCount < 1) return 300;
+        if (!viewportWidth) return 300;
         const GAP_PX = 16; // Tailwind gap-4 between masonry columns
-        const usable = viewportWidth - GAP_PX * (columnCount - 1);
-        const w = Math.floor(usable / columnCount);
+        const usable = viewportWidth - GAP_PX * (effectiveColumnCount - 1);
+        const w = Math.floor(usable / effectiveColumnCount);
         return w > 0 ? w : 300;
-    }, [viewportWidth, columnCount]);
+    }, [viewportWidth, effectiveColumnCount]);
 
     // Limit column count to actual item count so empty columns don't leave
     // unused whitespace on the right side of the masonry grid.
     // DES-R5C3-04: static Tailwind class mapping — the JIT compiler cannot
     // detect dynamically constructed class names like `columns-${n}`.
-    const colBase = Math.min(itemCount, 1);
-    const colSm = Math.min(itemCount, 2);
-    const colMd = Math.min(itemCount, 3);
-    const colXl = Math.min(itemCount, 4);
-    const col2xl = Math.min(itemCount, 5);
+    const colBase = getEffectiveMasonryColumns(itemCount, 1);
+    const colSm = getEffectiveMasonryColumns(itemCount, 2);
+    const colMd = getEffectiveMasonryColumns(itemCount, 3);
+    const colXl = getEffectiveMasonryColumns(itemCount, 4);
+    const col2xl = getEffectiveMasonryColumns(itemCount, 5);
 
     const COLUMN_CLASS_MAP: Record<number, string> = {
         1: 'columns-1',

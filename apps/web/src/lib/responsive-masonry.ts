@@ -6,13 +6,19 @@ const SLOT_SIZE_BY_COLUMNS = {
     5: '20vw',
 } as const;
 
+export type MasonryColumnCount = keyof typeof SLOT_SIZE_BY_COLUMNS;
+
 function normalizeItemCount(itemCount: number): number {
     if (!Number.isFinite(itemCount)) return 1;
     return Math.max(1, Math.min(5, Math.trunc(itemCount)));
 }
 
-function slotSize(itemCount: number, maximumColumns: keyof typeof SLOT_SIZE_BY_COLUMNS): string {
-    const columns = Math.min(normalizeItemCount(itemCount), maximumColumns) as keyof typeof SLOT_SIZE_BY_COLUMNS;
+export function getEffectiveMasonryColumns(itemCount: number, maximumColumns: number): MasonryColumnCount {
+    return Math.min(normalizeItemCount(itemCount), normalizeItemCount(maximumColumns)) as MasonryColumnCount;
+}
+
+function slotSize(itemCount: number, maximumColumns: MasonryColumnCount): string {
+    const columns = getEffectiveMasonryColumns(itemCount, maximumColumns);
     return SLOT_SIZE_BY_COLUMNS[columns];
 }
 
