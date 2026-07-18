@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { preload } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
@@ -11,9 +12,10 @@ import { MasonryCard } from '@/components/masonry-card';
 import { cn } from '@/lib/utils';
 import { localizePath } from '@/lib/locale-path';
 import type { ImageListCursorInput } from '@/lib/data';
-import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
+import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { humanizeTagLabel } from '@/lib/photo-title';
 import { useDisplayCapability } from '@/lib/use-display-capability';
+import { imageUrl } from '@/lib/image-url';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
@@ -24,7 +26,10 @@ const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 const VIEWPORT_WIDTH_BUCKET_PX = 48;
 
 function useColumnCount() {
-    const [count, setCount] = useState(2);
+    // SSR cannot know the viewport. Start at the mobile-safe one-column floor;
+    // media-qualified preloads below cover additional desktop first-row cards
+    // before hydration without making mobile download them.
+    const [count, setCount] = useState(1);
     // DES-R5C3-04 (plan-315 item 26): also track the viewport width so callers
     // can derive a per-card width estimate (container width / column count) for
     // containIntrinsicSize, instead of the fixed 300 px constant. 0 means "not
@@ -125,19 +130,43 @@ export function computeIsAboveFold(index: number, columnCount: number, itemCount
     return index < Math.min(columnCount, itemCount);
 }
 
-const MAX_MASONRY_COLUMNS = 5;
-
 export function computeShouldEagerLoad(
     index: number,
     columnCount: number,
     itemCount: number,
     hasMeasuredViewport: boolean,
 ): boolean {
-    // SSR cannot know the viewport. Eager-load one maximum-width row so cards
-    // 3-5 on desktop enter the browser's initial queue, while fetchPriority
-    // remains high only for the conservative initial two above-fold cards.
-    const eagerCount = hasMeasuredViewport ? columnCount : MAX_MASONRY_COLUMNS;
+    // Before measurement, only the universally above-fold first card is eager.
+    // Desktop cards enter the initial queue through media-qualified preloads,
+    // whose media predicates the browser can evaluate before hydration.
+    const eagerCount = hasMeasuredViewport ? columnCount : 1;
     return index < Math.min(eagerCount, itemCount);
+}
+
+const DESKTOP_FIRST_ROW_MEDIA = [
+    '(min-width: 640px)',
+    '(min-width: 768px)',
+    '(min-width: 1280px)',
+    '(min-width: 1536px)',
+] as const;
+
+export function preloadResponsiveFirstRow(images: GalleryImage[], imageSizes: number[]) {
+    const smallSize = imageSizes.length >= 2 ? imageSizes[0] : findNearestImageSize(imageSizes, 640);
+    const mediumSize = imageSizes.length >= 2 ? imageSizes[1] : findNearestImageSize(imageSizes, 1536);
+
+    for (let index = 1; index < Math.min(images.length, 5); index++) {
+        const baseAvif = images[index].filename_avif?.replace(/\.avif$/i, '');
+        if (!baseAvif) continue;
+        const smallUrl = imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`);
+        preload(smallUrl, {
+            as: 'image',
+            type: 'image/avif',
+            imageSrcSet: `${smallUrl} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
+            imageSizes: '(max-width: 639px) 100vw, (max-width: 767px) 50vw, (max-width: 1279px) 33vw, (max-width: 1535px) 25vw, 20vw',
+            media: DESKTOP_FIRST_ROW_MEDIA[index - 1],
+            fetchPriority: 'auto',
+        });
+    }
 }
 
 export function resolveTopicLabel(topic: string | undefined, topicsMap: Record<string, string>): string | undefined {
@@ -159,6 +188,7 @@ interface HomeClientProps {
 }
 
 export function HomeClient({ images, tags, topics, currentTags, topicSlug, smartCollectionSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES, forceShowColorChips = false }: HomeClientProps) {
+    preloadResponsiveFirstRow(images, imageSizes);
     const { t, locale } = useTranslation();
     const pathname = usePathname();
     const [allImages, setAllImages] = useState(images);

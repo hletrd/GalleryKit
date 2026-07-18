@@ -112,6 +112,16 @@ describe('C2-19 MasonryCard memoization contract', () => {
         expect(mapCall).toContain('onLinkClick={saveScrollPosition}');
     });
 
+    it('uses media-qualified preloads instead of a viewport-agnostic SSR eager row', () => {
+        const src = readSrc('components/home-client.tsx');
+        expect(src).toContain("import { preload } from 'react-dom'");
+        expect(src).toContain("const [count, setCount] = useState(1)");
+        expect(src).toContain("'(min-width: 640px)'");
+        expect(src).toContain("'(min-width: 1536px)'");
+        expect(src).toContain('media: DESKTOP_FIRST_ROW_MEDIA[index - 1]');
+        expect(src).toContain('preloadResponsiveFirstRow(images, imageSizes)');
+    });
+
     it('handleLoadMore appends via array spread, preserving existing entry identity', () => {
         const src = readSrc('components/home-client.tsx');
         expect(src).toContain('setAllImages(prev => [...prev, ...newImages])');
@@ -187,9 +197,10 @@ describe('C2-19 computeIsAboveFold / resolveTopicLabel pure helpers', () => {
         expect(computeIsAboveFold(2, 5, 2)).toBe(false);
     });
 
-    it('eager-loads a maximum first row before viewport measurement', () => {
-        expect(computeShouldEagerLoad(4, 2, 10, false)).toBe(true);
-        expect(computeShouldEagerLoad(5, 2, 10, false)).toBe(false);
+    it('keeps the unmeasured SSR eager set mobile-safe', () => {
+        expect(computeShouldEagerLoad(0, 1, 10, false)).toBe(true);
+        expect(computeShouldEagerLoad(1, 1, 10, false)).toBe(false);
+        expect(computeShouldEagerLoad(4, 5, 10, false)).toBe(false);
         expect(computeShouldEagerLoad(1, 2, 10, true)).toBe(true);
         expect(computeShouldEagerLoad(2, 2, 10, true)).toBe(false);
     });
