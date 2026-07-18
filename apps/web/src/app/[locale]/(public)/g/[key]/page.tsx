@@ -20,6 +20,7 @@ import { parseSafePositiveInteger } from '@/lib/validation';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
+import { SHARED_GROUP_MASONRY_SIZES } from '@/lib/responsive-masonry';
 
 export const revalidate = 0;
 
@@ -220,17 +221,17 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                     ...(image.filename_avif ? [{
                                         type: 'image/avif',
                                         srcSet: `${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${smallGridSize}.avif`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${mediumGridSize}.avif`)}`)} ${mediumGridSize}w`,
-                                        sizes: '(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw',
+                                        sizes: SHARED_GROUP_MASONRY_SIZES,
                                     }] : []),
                                     ...(image.filename_webp ? [{
                                         type: 'image/webp',
                                         srcSet: `${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${smallGridSize}.webp`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${mediumGridSize}.webp`)}`)} ${mediumGridSize}w`,
-                                        sizes: '(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw',
+                                        sizes: SHARED_GROUP_MASONRY_SIZES,
                                     }] : []),
                                     {
                                         type: 'image/jpeg',
                                         srcSet: `${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallGridSize, gridImageSizes)} ${smallGridSize}w, ${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, mediumGridSize, gridImageSizes)} ${mediumGridSize}w`,
-                                        sizes: '(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw',
+                                        sizes: SHARED_GROUP_MASONRY_SIZES,
                                     },
                                 ]}
                                 src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallGridSize, gridImageSizes)}

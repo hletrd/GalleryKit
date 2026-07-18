@@ -16,6 +16,7 @@ import type { Metadata } from 'next';
 import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
+import { ARCHIVE_MASONRY_SIZES } from '@/lib/responsive-masonry';
 
 export const revalidate = 0;
 
@@ -220,17 +221,17 @@ export default async function YearInReviewPage({
                                                                 {
                                                                     type: 'image/avif',
                                                                     srcSet: `${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
-                                                                    sizes: '(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw',
+                                                                    sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                                 {
                                                                     type: 'image/webp',
                                                                     srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
-                                                                    sizes: '(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw',
+                                                                    sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                                 {
                                                                     type: 'image/jpeg',
                                                                     srcSet: `${sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, smallSize, imageSizes)} ${smallSize}w, ${sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, mediumSize, imageSizes)} ${mediumSize}w`,
-                                                                    sizes: '(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw',
+                                                                    sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                             ]}
                                                             src={sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, smallSize, imageSizes)}

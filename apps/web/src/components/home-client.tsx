@@ -14,6 +14,7 @@ import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { humanizeTagLabel } from '@/lib/photo-title';
 import { useDisplayCapability } from '@/lib/use-display-capability';
+import { getMainMasonrySizes } from '@/lib/responsive-masonry';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
@@ -230,6 +231,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
     const { count: columnCount, viewportWidth } = useColumnCount();
     const orderedImages = allImages;
     const itemCount = orderedImages.length;
+    const responsiveSizes = useMemo(() => getMainMasonrySizes(itemCount), [itemCount]);
 
     // DES-R5C3-04 (plan-315 item 26): estimate the rendered card width from the
     // measured viewport / column count (minus the gap-4 = 16 px gutters between
@@ -327,6 +329,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                         isPriority={isUniversalPriorityCard(index, itemCount)}
                         topicLabel={resolveTopicLabel(image.topic, topicsMap)}
                         imageSizes={imageSizes}
+                        responsiveSizes={responsiveSizes}
                         onLinkClick={saveScrollPosition}
                     />
                 ))}

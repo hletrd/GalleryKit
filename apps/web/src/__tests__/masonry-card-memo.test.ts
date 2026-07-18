@@ -36,6 +36,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isUniversalPriorityCard, resolveTopicLabel } from '@/components/home-client';
+import { getMainMasonrySizes } from '@/lib/responsive-masonry';
 
 const readSrc = (rel: string) => readFileSync(resolve(__dirname, '..', rel), 'utf8');
 
@@ -76,6 +77,7 @@ function buildCardProps(
         isPriority: isUniversalPriorityCard(index, itemCount),
         topicLabel: resolveTopicLabel(image.topic, topicsMap),
         imageSizes,
+        responsiveSizes: getMainMasonrySizes(itemCount),
         onLinkClick,
     };
 }
@@ -106,6 +108,7 @@ describe('C2-19 MasonryCard memoization contract', () => {
         expect(mapCall).toContain('topicLabel={resolveTopicLabel(image.topic, topicsMap)}');
         // imageSizes is passed by reference, not spread into a new array.
         expect(mapCall).toContain('imageSizes={imageSizes}');
+        expect(mapCall).toContain('responsiveSizes={responsiveSizes}');
         expect(mapCall).toContain('onLinkClick={saveScrollPosition}');
     });
 
@@ -138,8 +141,14 @@ describe('C2-19 MasonryCard memoization contract', () => {
         const imageSizes = [640, 1536, 2048];
         const onLinkClick = () => {};
 
-        const prevImages = [imgA, imgB];
-        const newImages: FixtureImage[] = [{ id: 3, topic: 'travel' }];
+        const prevImages = [
+            imgA,
+            imgB,
+            { id: 3, topic: 'travel' },
+            { id: 4, topic: 'travel' },
+            { id: 5, topic: 'travel' },
+        ];
+        const newImages: FixtureImage[] = [{ id: 6, topic: 'travel' }];
         // Literal replica of home-client.tsx's handleLoadMore reducer.
         const nextImages = [...prevImages, ...newImages];
 
@@ -153,6 +162,18 @@ describe('C2-19 MasonryCard memoization contract', () => {
             const after = buildCardProps(nextImages[index], index, nextImages.length, estimatedCardWidth, topicsMap, imageSizes, onLinkClick);
             expect(shallowEqual(before, after), `card at index ${index} should have unchanged props after append`).toBe(true);
         }
+    });
+
+    it('an append that changes the effective column cap updates responsiveSizes', () => {
+        const imgA: FixtureImage = { id: 1, topic: 'travel' };
+        const topicsMap = { travel: 'Travel' };
+        const imageSizes = [640, 1536, 2048];
+        const onLinkClick = () => {};
+
+        const atTwoItems = buildCardProps(imgA, 0, 2, 300, topicsMap, imageSizes, onLinkClick);
+        const atThreeItems = buildCardProps(imgA, 0, 3, 300, topicsMap, imageSizes, onLinkClick);
+        expect(atTwoItems.responsiveSizes).not.toBe(atThreeItems.responsiveSizes);
+        expect(shallowEqual(atTwoItems, atThreeItems)).toBe(false);
     });
 
     it('a viewport-bucket change (estimatedCardWidth) changes props so memo does NOT bail out', () => {

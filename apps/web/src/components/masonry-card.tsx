@@ -18,8 +18,6 @@ import type { GalleryImage } from './home-client';
 // only re-runs for cards whose OWN props changed, instead of for every loaded
 // card on every allImages append (infinite scroll), viewport-bucket change, or
 // unrelated parent state flip (e.g. showBackToTop).
-const MASONRY_SIZES = "(min-width: 1536px) 20vw, (max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1280px) 33vw, 25vw";
-
 interface MasonryCardProps {
     image: GalleryImage;
     // DES-R5C3-04-derived estimate of the rendered card width; changes when
@@ -32,12 +30,15 @@ interface MasonryCardProps {
     // the card doesn't need the whole topicsMap object as a prop.
     topicLabel?: string;
     imageSizes: number[];
+    // Derived from the same item-count-capped breakpoint policy as the
+    // parent's masonry classes; changes only when the effective count changes.
+    responsiveSizes: string;
     // C2-19: stable useCallback from the parent (keyed only on scrollKey) so
     // its identity never breaks memoization across unrelated re-renders.
     onLinkClick: () => void;
 }
 
-function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, imageSizes, onLinkClick }: MasonryCardProps) {
+function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, imageSizes, responsiveSizes, onLinkClick }: MasonryCardProps) {
     const { t, locale } = useTranslation();
 
     // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is now baked into
@@ -96,17 +97,17 @@ function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, im
                                             {
                                                 type: 'image/avif',
                                                 srcSet: `${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
-                                                sizes: MASONRY_SIZES,
+                                                sizes: responsiveSizes,
                                             },
                                             {
                                                 type: 'image/webp',
                                                 srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
-                                                sizes: MASONRY_SIZES,
+                                                sizes: responsiveSizes,
                                             },
                                             {
                                                 type: 'image/jpeg',
                                                 srcSet: `${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallSize, imageSizes)} ${smallSize}w, ${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, mediumSize, imageSizes)} ${mediumSize}w`,
-                                                sizes: MASONRY_SIZES,
+                                                sizes: responsiveSizes,
                                             },
                                         ]}
                                         src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallSize, imageSizes)}
@@ -129,7 +130,7 @@ function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, im
                                     width={image.width}
                                     height={image.height}
                                     className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                    sizes={MASONRY_SIZES}
+                                    sizes={responsiveSizes}
                                     blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
                                     placeholder="blur"
                                     // R16-L3: parity with the primary <img> path above so
@@ -175,9 +176,11 @@ function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, im
 // C2-19 (run-10 c2): React.memo with the default shallow-props comparator —
 // image keeps referential identity across allImages appends (home-client's
 // setAllImages(prev => [...prev, ...newImages]) spreads, never clones,
-// existing entries), estimatedCardWidth/isPriority/topicLabel/imageSizes are
-// primitives or parent-stable references, and onLinkClick is a useCallback
-// keyed only on scrollKey. So an append, a viewport-bucket change that
-// doesn't affect this card, or an unrelated state flip (showBackToTop) all
-// bail out here instead of re-running title/alt/srcset derivation.
+// existing entries), estimatedCardWidth/isPriority/topicLabel/imageSizes/
+// responsiveSizes are primitives or parent-stable references, and onLinkClick
+// is a useCallback keyed only on scrollKey. So an append beyond the five-column
+// cap, a viewport-bucket change that doesn't affect this card, or an unrelated
+// state flip (showBackToTop) all bail out here. An append crossing a 2/3/4/5
+// item threshold intentionally changes responsiveSizes and re-renders existing
+// cards so candidate selection follows the newly available columns.
 export const MasonryCard = memo(MasonryCardImpl);
