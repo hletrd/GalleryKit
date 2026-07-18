@@ -38,4 +38,3 @@ reflow, dialog loading/empty/help states, theme modes, localization, and
 perceived-performance implications of result prefetch. The Cycle 11
 `prefetch={false}` change improves unused-result cost without weakening the
 activation affordance or keyboard model.
-

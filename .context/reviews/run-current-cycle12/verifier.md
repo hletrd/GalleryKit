@@ -39,4 +39,3 @@ tests, false-green convergence, EXIF orientation, nullable dates, index order,
 request timing, public-field leakage, and failure cleanup. Items requiring a
 real disposable MySQL instance are appropriately proved in the configured CI
 lane rather than claimed from source-text tests alone.
-

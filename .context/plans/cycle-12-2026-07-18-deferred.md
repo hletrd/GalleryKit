@@ -20,4 +20,3 @@ schema decision is not satisfied by this capture-date migration.
 All eventual work remains subject to `AGENTS.md`: GPG-signed gitmoji
 Conventional Commits, pull/rebase before push, no verification/signing bypass,
 all configured gates, and the configured per-iteration deploy policy.
-

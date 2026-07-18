@@ -38,4 +38,3 @@ recovery, unused search results), privacy projections, localization, touch
 targets, and historical deferred-trigger records. The remaining broad items
 are already represented in the authoritative deferred carry-forward ledger;
 none was silently recast as a new Cycle 12 finding.
-
