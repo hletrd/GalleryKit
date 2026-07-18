@@ -1,7 +1,7 @@
 # Cycle 11 UI/UX Designer Reviewer
 
-Date: 2026-07-18 KST  
-Reviewed HEAD: `7e40e95c`  
+Date: 2026-07-18 KST
+Reviewed HEAD: `7e40e95c`
 Lane: ui-ux-designer-reviewer
 
 ## Inventory, skill use, and evidence

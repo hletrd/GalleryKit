@@ -1,7 +1,7 @@
 # Cycle 11 Document Specialist Review
 
-Date: 2026-07-18 KST  
-Reviewed HEAD: `7e40e95c`  
+Date: 2026-07-18 KST
+Reviewed HEAD: `7e40e95c`
 Lane: document-specialist
 
 ## Inventory and coverage

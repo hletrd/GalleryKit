@@ -1,7 +1,7 @@
 # Cycle 11 Critic Review
 
-Date: 2026-07-18 KST  
-Reviewed HEAD: `7e40e95c46e09faf5faf6e87989a5586874b02d1`  
+Date: 2026-07-18 KST
+Reviewed HEAD: `7e40e95c46e09faf5faf6e87989a5586874b02d1`
 Lane: critic
 
 ## Inventory and coverage
