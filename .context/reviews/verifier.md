@@ -1,37 +1,38 @@
-# Cycle 4 Verifier Review
+# Verifier — Cycle 5 Provenance
 
-Review HEAD: `01d39653`. Inventory covered tracked source, tests, migrations,
-scripts, deployment configuration, and active plan/review ledgers. I verified
-the latest implementation against source, Git signatures/remote equality, and
-the deployed application rather than accepting plan checkboxes.
+Review target: `4926a3e4`. Inventory covered all tracked source, tests,
+migrations, scripts, build/deploy configuration, governing docs, and current
+review/plan ledgers. Assertions were checked against gates, Git state, and live
+browser behavior rather than accepted from comments or checkboxes.
 
-## VER-C4-01 — Browser proof does not establish the documented geometry invariant
+## New findings
+
+### VER-C5-01 — Browser evidence disproves responsive candidate alignment at 768 px
 
 - Severity / confidence: **Medium / High**
 - Status: **Confirmed**
-- Agreement: same defect as `CRIT-C4-01`
-- Regions: `apps/web/e2e/masonry-priority.spec.ts:20-32`,
-  `.context/plans/cycle-3-2026-07-18-plan.md:27-29`
-- Evidence: no `boundingBox`, `getBoundingClientRect`, `x`, or `y` assertion
-  exists in the test. Live 1536x900 DOM measurements produced top-edge leaders
-  at non-contiguous indices while the test only examined priority attributes.
-- Fix: add geometry assertions based on rendered rectangles and keep the
-  attribute/request assertion as a separate part of the contract.
+- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109`; duplicated archive/share declarations at `timeline/page.tsx:259-275`, `year/[year]/page.tsx:218-235`, and `g/[key]/page.tsx:218-235`
+- Evidence/failure: fresh production Chromium at 768×852, DPR 2 reported three columns, a 234.66px card, the 50vw source-size branch, and currentSrc `_1536.avif`. A separate fresh 769px session reported the same geometry and `_640.avif`. This is an actual excess-candidate selection, not a theoretical media-query concern.
+- Fix: match `sizes` to the min-width column breakpoints and verify each boundary at DPR 2.
 
-## VER-C4-02 — Terminal ledger is contradicted by Git and production
+### VER-C5-02 — Priority proof conflates two independent attributes
+
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed test-proof defect; live attributes currently correct**
+- Region: `apps/web/e2e/masonry-priority.spec.ts:22-49`
+- Evidence/failure: the predicate requires eager AND high before recording an index. Either attribute can affect scheduling independently, so a one-attribute regression is invisible. Live production currently reports index 0 eager/high and every other card lazy/auto; the defect is in what the test can prove.
+- Fix: derive and assert separate eager and high sets.
+
+### VER-C5-03 — Plan status is contradicted by repository state
 
 - Severity / confidence: **Low / High**
-- Status: **Confirmed**
-- Agreement: same defect as `CRIT-C4-02`
-- Regions: `.context/plans/cycle-3-2026-07-18-plan.md:5,45-48,64-65`,
-  `.context/plans/README.md:34-37`
-- Evidence: `master` and `origin/master` both resolve to signed `01d39653`;
-  production at `https://gallery.atik.kr/en` renders the closed tag panel as
-  hidden, keyboard expansion focuses the first topic, and only card 0 owns
-  eager/high priority.
-- Fix: close and archive the Cycle 3 ledger with the actual frontier/evidence.
+- Status: **Confirmed** for implementation/push; exact deploy commit needs manual confirmation
+- Regions: `.context/plans/cycle-4-2026-07-18-plan.md:5,40-42,63-69`; `.context/plans/README.md:34-38`
+- Evidence/failure: all implementation/gate boxes are checked, commits `b72bb0cd`, `ff5d4cd6`, and `4926a3e4` have good GPG signatures, and local/remote refs are identical, while the ledger still says implementation and signed push are pending.
+- Fix: reconcile the terminal ledger and archive it with separately verified deploy evidence.
 
 ## Final sweep
 
-No new mismatch was found in auth, privacy, color/HDR, migration, or deploy
-contracts after comparison with `CLAUDE.md` and the current source.
+The configured gates passed, including 3,409 Vitest tests. No new mismatch was
+found in auth, privacy projection, color/HDR, migration application, or persistence
+contracts. Known environment-only proofs remain carry-forward.

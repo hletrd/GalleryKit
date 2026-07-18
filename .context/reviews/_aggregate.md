@@ -1,116 +1,126 @@
-# Cycle 4 Aggregate Review
+# Cycle 5 Aggregate Review
 
 Date: 2026-07-18 KST
-Review HEAD: `01d39653`
+Review HEAD: `4926a3e4`
 
 ## Agent coverage
 
 Completed provenance reviews: code-reviewer, perf-reviewer,
 security-reviewer, critic, verifier, test-engineer, tracer, architect,
-debugger, document-specialist, designer, and the project-specific
-photographer/color-HDR lane. Each lane inventoried its relevant whole-repo
-surface and performed a final missed-issue sweep.
+debugger, document-specialist, and designer. The environment exposed one child
+review slot, so one review worker covered all eleven named lenses and wrote one
+file per role. It inventoried the maintained repository, checked the governing
+documentation and historical reviews/plans, ran the configured static/unit
+baseline, and performed a browser-backed designer pass against production at
+320, 393, 768 (DPR 2), 769 (DPR 2), and 1536 CSS pixels.
 
-The environment provided one child-review slot. The core/performance/security/
-architecture lanes ran there; the validation, test, documentation, debugger,
-and browser-backed designer lanes ran in this cycle agent. The designer read
-and used the full agent-browser skill set against production at 320, 393, and
-1536 px, using accessibility snapshots, keyboard interaction, computed DOM
-geometry/styles, theme/search states, network/debug buffers, trace, and visual
-captures. Authenticated admin, unsupported RTL locales, reliable
-reduced-motion emulation in this CLI build, and true cold-cache profiling
-remain manual-validation limits; no finding relies on those unavailable proofs.
+The aggregation pass revalidated every candidate against source and Git,
+deduplicated 19 role-level reports into the three cross-agent classes below,
+and added one adjacent main-gallery correctness issue found while tracing the
+shared responsive-size fix through the item-count-dependent column policy.
 
 ## New deduplicated findings
 
-### C4-01 — Masonry Playwright coverage claims geometry without asserting geometry
+### C5-01 — Responsive image hints disagree with the actual column breakpoints
 
 - Severity / confidence: **Medium / High**
-- Status: **Confirmed test/evidence defect; current production layout is not
-  observed broken**
-- Agreement: critic, verifier, test-engineer, debugger,
-  document-specialist, designer
-- Regions: `apps/web/e2e/masonry-priority.spec.ts:20-32` and the completed
-  claim in `.context/plans/cycle-3-2026-07-18-plan.md:23-31`
-- Failure: the test asserts that only DOM index 0 carries eager/high attributes
-  and that its request occurred, but never reads a rectangle. Live 1536x900
-  geometry placed the top-edge CSS-column leaders at non-contiguous indices 0,
-  6, 13, 16, and later, whereas 393x852 had only index 0. A future breakpoint
-  or masonry-class regression could move index 0 away from the visual top edge
-  while leaving its attributes unchanged; both viewport variants would remain
-  green and explicit priority could again target a below-fold card.
-- Disposition: **Schedule this cycle.** Collect browser-computed card
-  rectangles, derive the visual top-edge leaders, prove index 0 belongs to
-  that set at both viewports and that desktop has multiple/non-contiguous
-  leaders, then retain the explicit-priority and request assertions.
+- Status: **Confirmed live** on the main gallery; sibling archive/share impact
+  is source-confirmed
+- Agreement: code-reviewer, perf-reviewer, critic, verifier, test-engineer,
+  tracer, architect, debugger, designer
+- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109,126-142`;
+  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:229,259-285`;
+  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:191,218-244`;
+  `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:187,218-244`
+- Failure: Tailwind activates `sm`/`md`/`xl`/`2xl` at inclusive minimum
+  widths, while the image rules use inclusive `max-width` branches that keep
+  the preceding wider slot at 640, 768, and 1280 px. Fresh Chromium at 768 px
+  and DPR 2 rendered a 234.66 px three-column card but advertised 50vw and
+  selected the 1536w AVIF; 769 px selected 640w for effectively identical
+  geometry. The shared-group rule additionally omits its 1024 px three-column
+  and 1280 px four-column transitions over broad ranges.
+- Fix: centralize layout-specific responsive-size policy with descending
+  `min-width` ranges aligned to the Tailwind breakpoints, reuse it on every
+  AVIF/WebP/JPEG/fallback path, and add exact-boundary regression coverage.
 
-### C4-02 — The one-card priority fix left dead layout-policy APIs and obsolete contracts
+### C5-02 — Main-gallery responsive sizes ignore item-count-limited columns
+
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed source-level correctness defect; uncommon small-gallery
+  production state needs manual validation**
+- Agreement: aggregation-pass adjacent-flow finding
+- Regions: `apps/web/src/components/home-client.tsx:247-271,324-329` and
+  `apps/web/src/components/masonry-card.tsx:21,94-109,126-142`
+- Failure: `HomeClient` deliberately limits every responsive column count to
+  `itemCount`, so a gallery with one image remains one full-width column and a
+  gallery with two images never exceeds two columns. `MasonryCard` nevertheless
+  always advertises the five-column desktop rule. At 1536 px, a single full-
+  width photo is advertised as 20vw, encouraging selection of the 640w
+  derivative for a roughly 1400 px display box and producing visible softness;
+  two-to-four-photo galleries have the same mismatch at smaller magnitudes.
+- Fix: derive the main-gallery `sizes` value from the same item-count caps as
+  its responsive column classes, pass that stable value to each card, and pin
+  one/few/many-image outputs in unit tests.
+
+### C5-03 — Masonry E2E conflates two independent scheduling attributes
+
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed test-logic defect; current production attributes are
+  correct**
+- Agreement: code-reviewer, critic, verifier, test-engineer, debugger
+- Region: `apps/web/e2e/masonry-priority.spec.ts:22-49`
+- Failure: the test records a card only when `loading="eager"` **and**
+  `fetchpriority="high"` are both present. A non-first card regressing to
+  eager/auto or lazy/high is filtered out, leaving `priorityIndices === [0]`
+  even though the browser received an unintended scheduling instruction.
+- Fix: collect and assert eager and high-priority index sets independently,
+  require each to equal `[0]`, and explicitly require all non-first cards to be
+  lazy with auto/absent fetch priority. Preserve geometry and request proofs.
+
+### C5-04 — Cycle 4's plan remains active and pending after signed publication
 
 - Severity / confidence: **Low / High**
-- Status: **Confirmed maintainability defect; runtime behavior is correct**
-- Agreement: code-reviewer, tracer, architect
-- Regions: `apps/web/src/components/home-client.tsx:26-49,127-145,247-262,344-345`;
-  `apps/web/src/components/masonry-card.tsx:23-33`
-- Failure: adjacent comments still say media-qualified preloads cover desktop
-  first-row cards, and the priority helpers/props still model a wider
-  layout-aware policy. The helpers are now identical index-0 predicates and
-  ignore `columnCount` / `hasMeasuredViewport`. A maintainer following those
-  declarations can treat the removed first-N policy as missing implementation
-  and recreate the CSS-column bug Cycle 3 fixed.
-- Disposition: **Schedule this cycle.** Expose one universal-first-card
-  predicate, remove ignored policy arguments/duplicate derivation, keep column
-  count only for intrinsic-size estimation, and update comments/tests to the
-  actual ownership boundary.
-
-### C4-03 — Cycle 3 remains documented as pending and active after signed production release
-
-- Severity / confidence: **Low / High**
-- Status: **Confirmed release-provenance defect**
-- Agreement: code-reviewer, critic, verifier, test-engineer, tracer,
-  architect, debugger, document-specialist
-- Regions: `.context/plans/cycle-3-2026-07-18-plan.md:5,45-48,56-65` and
+- Status: **Confirmed** for implementation, signed commits, and remote push;
+  the exact deployed SHA remains manual-validation
+- Agreement: critic, verifier, tracer, architect, document-specialist
+- Regions: `.context/plans/cycle-4-2026-07-18-plan.md:5,18-42,61-69` and
   `.context/plans/README.md:34-38`
-- Failure: `master == origin/master` at signed `01d39653`, all five Cycle 3
-  commits have good signatures, and production renders the shipped tag/nav/
-  one-card-priority behavior. The plan nevertheless says signed push/deploy
-  are pending and remains active. Recovery work can resume from a false
-  frontier or repeat terminal actions.
-- Disposition: **Schedule this cycle.** Record the signed frontier and live
-  proof, check terminal tasks, mark complete, archive Cycle 3, and advance the
-  active index to Cycle 4.
+- Failure: every work package and gate is checked, commits `b72bb0cd`,
+  `ff5d4cd6`, and `4926a3e4` have good signatures, and
+  `master == origin/master == 4926a3e4`, but the authoritative plan still says
+  implementation is pending and leaves commit/push/deploy unchecked. Recovery
+  can repeat completed work or use the wrong frontier.
+- Fix: reconcile implementation and signed-push state, distinguish observable
+  live verification from unavailable exact deploy-SHA proof, archive Cycle 4,
+  and advance the active-plan index.
 
 ## Revalidated carry-forward findings
 
-These are not newly discovered and retain their authoritative severity,
-confidence, reason, and exit criterion in
-`.context/plans/deferred-carry-forward.md`:
-
-- shared image-queue/backfill DB-pool oversubscription (High / High);
-- warn-only single-writer enforcement with process-local coordination
-  (High / High in the security/topology lane);
-- failed deploy health without rollback (Medium / High);
-- SQL restore/file-store generation mismatch (Medium / High);
-- 10,000-row map rendering and repeated semantic vector scans
-  (Medium / High);
-- existing authenticated-admin, browser-matrix, zoom, model-weight, and broad
-  environment validation items.
-
-No security, correctness, or data-loss finding is newly deferred by Cycle 4.
+The shared image-queue/backfill pool budget, warn-only single-writer topology,
+failed-deploy rollback, SQL/file restore generation, large-map rendering,
+semantic-vector scanning, and environment/manual browser proofs remain in
+`.context/plans/deferred-carry-forward.md` with their original severity,
+confidence, reason, and exit criterion. No exit criterion fired, and Cycle 5
+does not reclassify or newly defer them.
 
 ## Baseline evidence and final sweep
 
-The independent lane reported green API-auth, action-origin/mutation-barrier,
-public-route-rate-limit, full typecheck, focused 42-test Vitest, and diff
-checks. Production SSR and browser interaction confirmed the Cycle 3 runtime
-fixes. The final aggregate sweep preserved the geometry-proof defect at the
-highest Medium/High classification, kept the distinct dead-policy abstraction
-and terminal-ledger findings at Low/High, and mapped every surviving historical
-risk to the carry-forward register.
+The review worker reported green ESLint, API-auth lint,
+action-origin/mutation-barrier lint, public-route-rate-limit lint, typecheck,
+production dependency audit, and full Vitest (361 files passed, 2 skipped;
+3,409 tests passed, 4 expected CLIP skips). Live browser checks also confirmed
+the current nav disclosure/focus behavior and current one-card eager/high state.
+These are review baselines; Prompt 3 must rerun every configured blocking gate
+against the implementation tree.
+
+The final aggregate sweep checked recent diffs, sibling gallery surfaces,
+item-count-dependent layout, auth/rate-limit/barrier exports,
+migration/journal/reconcile invariants, privacy projections, upload/delete/
+restore races, caches, and deployment scripts. No further fresh finding
+survived validation.
 
 ## AGENT FAILURES
 
-A second child-review worker was attempted twice but the thread tree rejected
-both starts at its concurrency limit. No perspective was dropped: the six
-assigned validation/UI roles were completed locally with their own provenance
-files and browser evidence. The one child worker that started returned
-successfully.
+A second parallel worker start was rejected by the global thread limit. The
+available worker completed all eleven required perspectives and provenance
+files, so no named review perspective was dropped.

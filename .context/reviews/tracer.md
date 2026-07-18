@@ -1,41 +1,31 @@
-# Tracer — cycle 4 provenance
+# Tracer — Cycle 5 Provenance
 
-Review target: `01d39653`, 2026-07-18 KST. Review only.
+Review target: `4926a3e4`. The inventory and causal sweep followed
+request→guard→mutation→DB, upload→queue→derivatives, delete→durable cleanup,
+restore→locks/barrier/import, migration→journal/postcondition, SSR→picture
+sources→CSS columns→candidate request, navigation→focus/collapse, and
+commit→remote→plan→deploy evidence across the full maintained tree.
 
-## Inventory and trace coverage
+## New findings
 
-I inventoried the full maintained repository, then traced request→guards→mutation→DB, upload→quota→private original→queue→derivatives/embedding, delete→transaction→durable cleanup, restore→locks/barrier/import/migrations/stores, SSR→image attributes→CSS placement→browser request, nav activation→focus→collapse, tag disclosure→layout/hit testing, semantic inference→ranking/enrichment, migration journal→apply→postcondition, and deploy→replacement→health→production. Every post-Cycle-3 change was followed through callers, tests, SSR output, and current production output.
+### TRC-C5-01 — Layout and image-selection traces fork at their breakpoint boundary
 
-## New trace findings
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed live** for the home flow; sibling traces are likely/source-confirmed
+- Trace/regions: column classes in `home-client.tsx:247-271`, `timeline/page.tsx:229`, `year/[year]/page.tsx:191`, and `g/[key]/page.tsx:187` → independent size declarations in `masonry-card.tsx:21`, `timeline/page.tsx:264-274`, `year/[year]/page.tsx:223-233`, and `g/[key]/page.tsx:223-233` → browser currentSrc
+- Failure: at 768px/DPR2 the layout trace enters three columns while the image trace remains in the prior 50vw branch, fetching 1536w for a 234.66px card. The shared-group trace has broader 1024–1200 and 1280+ divergence.
+- Fix: give layout and responsive-image selection one shared breakpoint policy per grid variant, then trace it with browser boundary tests.
 
-### TRC-C4-01 — The Cycle 3 release trace reaches production but not its authoritative terminal ledger
+### TRC-C5-02 — Cycle 4's implementation trace reaches the remote but stops before its ledger
 
-- Severity: **Low**
-- Confidence: **High**
-- Status: **Confirmed** evidence-chain break; same root as `CR-C4-01`
-- Trace/regions: `.context/plans/cycle-3-2026-07-18-plan.md:5` declares push/deploy pending → signed commits `2d9060de..01d39653` exist on `origin/master` → production SSR contains the changed tag/nav/masonry output → `.context/plans/cycle-3-2026-07-18-plan.md:45-48,64-65` still terminates before push/deploy → `.context/plans/README.md:34-38` keeps Cycle 3 active
+- Severity / confidence: **Low / High**
+- Status: **Confirmed** through signed remote publication; deployment SHA is manual-validation
+- Trace/regions: checked work/gates at `.context/plans/cycle-4-2026-07-18-plan.md:18-39,63-67` → signed commits `b72bb0cd`, `ff5d4cd6`, `4926a3e4` → `master == origin/master` → stale status/tasks at plan lines `5,40-42,68-69` and active index `.context/plans/README.md:34-38`
+- Failure: recovery follows a frontier behind actual implementation and remote state.
+- Fix: reconcile the ledger after terminal operations and record deploy evidence independently.
 
-Concrete failure: recovery tooling or a reviewer follows the ledger rather than reconstructing git plus live state, and repeats terminal work or misstates which release production runs.
+## Final trace sweep
 
-Suggested fix: append the signed commit frontier and live proof, mark both transitions complete, archive Cycle 3, and make Cycle 4 the active trace root.
-
-### TRC-C4-02 — The image-priority code path and its adjacent declared contract now diverge
-
-- Severity: **Low**
-- Confidence: **High**
-- Status: **Confirmed** maintainability trace break; runtime output is correct
-- Trace/regions: `apps/web/src/components/home-client.tsx:26-49` declares desktop media preloads/first-row eager scheduling → `home-client.tsx:127-145` actually returns true only for index 0 and contains no preload call → `masonry-card.tsx:28-33` still declares first-N/wider-eager props → `masonry-card.tsx:121-144` receives only the index-0 policy
-
-Concrete failure: a maintainer traces from interface comments, assumes missing first-row scheduling is an implementation omission, and restores the invalid DOM-first-N behavior.
-
-Suggested fix: align comments and types with the actual trace, remove ignored policy inputs, and expose one universal-first-card predicate.
-
-## Revalidated carry-forward traces
-
-- **TRC-C4-R1 — background reservation traces converge on one DB pool** — High / High / confirmed carry-forward; `db/index.ts:21-45`, `image-queue.ts:120-152`, `admin-backfill-runner.ts:97-142`. Use a shared weighted budget.
-- **TRC-C4-R2 — restore consistency stops at the SQL/filesystem generation boundary** — Medium / High / documented carry-forward; `db-actions.ts:789-1098`, `docker-compose.yml:24-32`. Pair snapshots with a generation/manifest or reconcile after restore.
-- **TRC-C4-R3 — deploy failure is observed after promotion with no reverse transition** — Medium / High / confirmed carry-forward; `apps/web/deploy.sh:63-89`. Preserve and restore the prior release or promote a candidate only after health.
-
-## Final causal sweep
-
-The closing trace rechecked sitemap runtime cache ownership, search/listbox ownership, every writer's origin/rate-limit/barrier sequence, processing/delete races, restore sidecars/advisory locks, schema application, settings→encoder→ETag flow, proxy IP→rate-limit/analytics flow, service-worker cache mutation, and deploy/prune ordering. No further new causal break survived validation.
+Writer guards, processing/deletion races, restore sidecars and locks, schema
+application, config→encoder→cache flow, proxy→limiter flow, SW mutations, and
+deploy/prune ordering were rechecked. No further new causal break survived.

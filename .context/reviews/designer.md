@@ -1,45 +1,52 @@
-# Cycle 4 Designer Review
+# Designer — Cycle 5 Provenance
 
-Review HEAD: `01d39653`. I read and used the complete agent-browser core,
-interact, query, wait, network, visual, debug, state, and config skills. The
-deployed app was exercised at 393x852, 320x700, and 1536x900 with accessibility
-snapshots, keyboard focus, search states, computed rectangles/styles, dark
-theme, request/debug buffers, trace, and full-page captures. Raw screenshots
-were not used as evidence.
+Review target: `4926a3e4`. I read and used the applicable agent-browser core,
+configuration, query, interaction, visual, and debug skills. Production was
+loaded and interacted with at 320×700 DPR2, 393×852, 768×852 DPR2,
+769×852 DPR2, and 1536×900. Evidence included accessibility snapshots, keyboard
+focus, disclosure/search/theme states, computed geometry, responsive source
+selection/currentSrc, errors, and full/viewport captures.
 
-## DES-C4-01 — The masonry browser test does not preserve its visual-layout contract
+The UI inventory covered all localized public/admin route files, 61 components,
+global theme/motion CSS, English/Korean messages, all Playwright specs, and the
+touch/focus/ARIA/contrast/i18n source-contract tests. Authenticated protected
+admin workbenches, RTL (no shipped RTL locale), real color/HDR display hardware,
+and exact production build SHA remain manual-validation limits.
+
+## New finding
+
+### DES-C5-01 — Common exact-width tablet view downloads a desktop-sized masonry derivative
 
 - Severity / confidence: **Medium / High**
-- Status: **Confirmed test/evidence defect; current production behavior itself
-  was not observed broken**
-- Region: `apps/web/e2e/masonry-priority.spec.ts:20-32`
-- Browser evidence: at 1536x900 the top edge was `y=196`; visual leaders
-  included non-contiguous DOM indices 0, 6, 13, and 16. Only index 0 carried
-  `loading=eager` / `fetchpriority=high`, as intended. At 393x852 index 0 was
-  the sole top leader. The committed spec never collects these rectangles, so
-  its desktop and mobile variants do not distinguish their actual layouts.
-- Failure scenario: a breakpoint or masonry-class regression moves index 0
-  away from the top edge while leaving its attributes unchanged; the test
-  passes and explicit priority targets a below-fold card again.
-- Fix: derive visual leaders from `getBoundingClientRect()` at each viewport,
-  assert index 0 is a leader, assert multiple/non-contiguous leaders exist on
-  desktop, then assert only index 0 owns explicit priority.
+- Status: **Confirmed live** on the main gallery; archive/share siblings are likely from source parity
+- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109`; archive duplicates at `timeline/page.tsx:229,259-285` and `year/[year]/page.tsx:191,218-244`; shared-group policy at `g/[key]/page.tsx:187,218-244`
 
-## Live UX sweep
+At 768px the rendered gallery is already three columns, but the responsive image
+hint still matches `(max-width: 768px) 50vw`. In a fresh DPR-2 session, the first
+card was 234.66px wide and Chromium selected `_1536.avif`. A separate fresh 769px
+session rendered the same card width/three-column layout, matched 33vw, and
+selected `_640.avif`. The shared gallery similarly advertises slots wider than
+its 3/4-column geometry over broad desktop ranges.
 
-- Mobile tag disclosure was collapsed with a 44px summary and no rendered tag
-  panel; opening/collapsing preserved flow.
-- Keyboard Enter on **Expand menu** focused the first revealed topic; Escape
-  restored the toggle. Topic controls were 44px tall.
-- Search correctly exposed a dialog, combobox/listbox ownership, result count,
-  arrow-key guidance, and body scroll lock; Escape closed it.
-- Dark theme produced the expected dark root/background. Global reduced-motion
-  CSS remains present; this CLI build did not successfully emulate the media
-  query, so no finding depends on that unverified runtime state.
-- No page errors were captured. Authenticated admin, RTL (unsupported locales),
-  and a true cold-cache performance profile remain manual-validation limits.
+Concrete failure: an iPad-class visitor waits for and decodes substantially more
+image data at exactly 768 CSS pixels without receiving more visible detail,
+hurting perceived gallery paint on constrained networks.
 
-## Final sweep
+Suggested fix: align `sizes` with the inclusive Tailwind min-width breakpoints,
+centralize the main/archive and shared variants, and add high-DPR breakpoint
+visual/network regressions.
 
-No additional fresh IA, affordance, focus, WCAG 2.2, responsive, empty/error,
-theme, i18n, or perceived-performance defect survived source and live checks.
+## Live UX sweep and final missed-issue pass
+
+- At 320px there was no horizontal overflow; nav and first-card geometry stayed
+  inside the viewport.
+- Mobile tag disclosure was absent while closed and flowed correctly when open.
+- Keyboard activation of the menu focused the first revealed link; Escape
+  collapsed and restored the toggle.
+- Search exposed a named dialog/combobox and restored the search button after
+  Escape. Desktop/mobile landmarks and control names were coherent.
+- No page errors were captured. Full-page desktop/mobile captures showed no new
+  overlap, clipping, empty-state, focus-order, or theme defect.
+
+No additional fresh IA, WCAG, responsive, theme, i18n, or interaction issue
+survived the closing sweep.

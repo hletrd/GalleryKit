@@ -1,46 +1,76 @@
-# Code reviewer — cycle 4 provenance
+# Code Reviewer — Cycle 5 Provenance
 
-Review target: `01d39653` (`master`), 2026-07-18 KST. Review only; no source or plan file was changed.
+Review target: `4926a3e4` (`master == origin/master`), 2026-07-18 KST. Review only.
 
-## Complete inventory and method
+## Inventory and scope
 
-I enumerated the entire working tree before reviewing. Excluding generated/dependency/cache/history artifacts, the maintained product surface comprises 635 `apps/web/src` files (81 App Router files, 115 libraries, 61 components, 3 DB files, and 369 unit-test files), 12 Playwright files, 29 scripts, 31 migration SQL files plus the Drizzle journal/reconcile implementation, build/package/CI configuration, Docker/Compose/nginx/deploy assets, PWA assets, and the governing `AGENTS.md`, full `CLAUDE.md`, current plans, current reviews, and deferred registers. I reviewed every file changed from the Cycle 3 review target `afa11cf4` through HEAD and traced every changed symbol through callers, tests, server-rendered output, and production-visible behavior. The final whole-repository sweep covered routes/actions, auth/rate-limit/mutation barriers, DB/filesystem lifecycles, queues/locks, migrations, privacy projections, color/HDR, image delivery, caches, build/runtime configuration, deployment, and suppressions.
+I enumerated the complete maintained tree before review: 633 files under
+`apps/web/src` (81 App Router files, 115 libraries, 61 components, 368 unit-test
+files), 15 Playwright files, 29 scripts, 31 migration SQL files plus the Drizzle
+journal/reconcile path, package/build/runtime/deploy/PWA assets, and the governing
+documentation and review/plan history. I inspected the full Cycle 4-to-HEAD diff,
+traced each changed symbol through callers and tests, and swept the wider
+auth/rate-limit/barrier, DB/filesystem lifecycle, queue/restore, privacy, color,
+image-delivery, cache, and deployment surfaces. Prior aggregates and the
+carry-forward register were checked before classifying anything as new.
 
-Evidence: API-auth lint, action-origin/mutation-barrier lint, public-route-rate-limit lint, full typecheck, focused 42-test Vitest run, and `git diff --check` passed. `master == origin/master`; all five post-review commits report good GPG signatures. The live home document contains the new `group-open:flex` disclosure fix, the two-id nav control relationship, 30 masonry cards, and exactly one eager image, confirming the current release reached production.
+Evidence: ESLint, API-auth lint, action-origin/mutation-barrier lint, public-route
+rate-limit lint, typecheck, production dependency audit, and the full Vitest suite
+passed (361 files passed, 2 skipped; 3,409 tests passed, 4 expected CLIP skips).
 
 ## New findings
 
-### CR-C4-01 — Cycle 3 is pushed and deployed but its authoritative plan still says both operations are pending
+### CR-C5-01 — Responsive `sizes` rules disagree with the inclusive Tailwind column breakpoints
 
-- Severity: **Low**
+- Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed** current-head provenance defect
-- Regions: `.context/plans/cycle-3-2026-07-18-plan.md:5,45-48,56-65`; `.context/plans/README.md:34-38`
+- Status: **Confirmed** in production for the main gallery; **source-confirmed likely** on archive/share siblings
+- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109,126-142`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:229,259-285`; `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:191,218-244`; `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:187,218-244`
 
-The plan's status, unchecked terminal work package, and progress list still say signed push and deploy are pending. In current repository state, `master` and `origin/master` are both `01d39653`; commits `2d9060de`, `235e8cb8`, `d2ef7817`, `54418100`, and `01d39653` all have good signatures. The production HTML contains the shipped Cycle 3 tag-disclosure, nav, and one-eager-card output, so deploy is also complete. The index nevertheless keeps Cycle 3 under active plans without terminal evidence.
+The main, timeline, and year grids switch to 2/3/4/5 columns at inclusive
+`sm`/`md`/`xl`/`2xl` minimum widths, but their source-size string uses inclusive
+`max-width: 640/768/1280px` branches. At the exact breakpoint, the old wider slot
+wins. The shared-group grid drifts over whole ranges: it is three columns from
+1,024 px while advertising 50vw through 1,200 px, and four columns from 1,280 px
+while advertising 33vw.
 
-Concrete failure: a recovery agent trusts the authoritative plan, repeats a deploy or release audit, or starts Cycle 4 from a false release frontier. This is the same failure class Cycle 3 fixed for Cycle 2, so leaving it open immediately recreates the recently closed operational ambiguity.
+Concrete failure: fresh Chromium sessions at DPR 2 rendered the production home
+grid at 768 px as three 234.66 px columns, but `sizes` selected the 50vw (384 px)
+slot and fetched the 1,536w AVIF. At 769 px, the same three-column/card geometry
+selected the 33vw slot and fetched the 640w AVIF. Common 768px tablet viewports
+therefore download a materially larger candidate with no visual benefit.
 
-Suggested fix: mark the plan complete, record the signed terminal frontier and production proof, check the push/deploy boxes, archive the plan, and advance the active-plan index to Cycle 4.
+Suggested fix: define shared layout-specific `sizes` constants using the same
+minimum-width breakpoints as the Tailwind classes (and a distinct 1/2/3/4-column
+constant for shared groups), then reuse them across AVIF/WebP/JPEG and fallback
+paths. Add exact-boundary DPR-2 browser coverage at 640, 768, 1,024, 1,280, and
+1,536 px.
 
-### CR-C4-02 — The masonry fix left obsolete first-row preload contracts beside the corrected code
+### CR-C5-02 — The masonry E2E treats partial priority regressions as non-priority
 
-- Severity: **Low**
+- Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed** maintainability defect; runtime behavior is currently correct
-- Regions: `apps/web/src/components/home-client.tsx:26-49,127-145,247-262,344-345`; `apps/web/src/components/masonry-card.tsx:23-33`
+- Status: **Confirmed test-logic defect; current production attributes are correct**
+- Region: `apps/web/e2e/masonry-priority.spec.ts:22-49`
 
-The implementation now correctly marks only DOM index 0 eager/high, but `useColumnCount` still says media-qualified preloads cover desktop first-row cards and that column-count tracking exists so 4/5 first-row images receive eager/high. Those preloads were deleted. `MasonryCardProps` likewise still defines `isAboveFold` as the first N cards and says `shouldEagerLoad` may be wider for a five-column first row. The two derivation helpers are now identical predicates and retain ignored `columnCount` / `hasMeasuredViewport` parameters solely from the removed policy.
+`isPriority` is true only when `loading="eager"` **and**
+`fetchpriority="high"` are both present. A later card regressing to eager/auto or
+lazy/high is filtered out, so `priorityIndices` can remain `[0]` while the browser
+still receives an unintended explicit scheduling instruction.
 
-Concrete failure: the next performance change follows the adjacent comments/interface contract and reintroduces first-N priority or media preloads, recreating the CSS-column defect just fixed in `d2ef7817`. At minimum, reviewers must reverse-engineer whether comments or code are authoritative.
+Concrete failure: a refactor forwards only `fetchPriority` to card 6. The test
+reports card 6 as non-priority and passes, although the network scheduler is again
+biased toward a non-universal visual leader.
 
-Suggested fix: update the comments and prop documentation to the universal-first-card contract. Then collapse the two identical derivations into one explicit priority predicate (or pass direct `index === 0`) and remove parameters that no longer participate, while retaining `useColumnCount` only for intrinsic-size/layout estimation.
-
-## Revalidated carry-forward, not new
-
-- **CR-C4-R1 — failed deployment health has no rollback transition** — Medium / High / confirmed carry-forward; `apps/web/deploy.sh:63-89`. The fixed-name service is replaced before health passes, and failure exits without restoring the prior release.
-- **CR-C4-R2 — DB restore does not restore the matching mutable file generation** — Medium / High / confirmed documented boundary; `apps/web/src/app/[locale]/admin/db-actions.ts:789-1098`, `apps/web/docker-compose.yml:24-32`.
+Suggested fix: collect and assert `eagerIndices` and `highPriorityIndices`
+independently, each exactly `[0]`, and assert non-first cards are lazy plus
+auto/absent. Preserve the geometry and request assertions.
 
 ## Final missed-issue sweep
 
-The closing sweep rechecked every changed file plus sibling implementations, all action/route exports, raw SQL/child processes, path construction and cleanup, migration journal/reconcile parity, privacy guards, image/CLIP queues, render/cache ownership, event/timer cleanup, and current historical findings. The tag and nav fixes match their runtime ownership, and the one-card masonry policy is correct. No other new correctness defect survived validation; established topology, restore, map/vector-scale, and deploy-recovery items remain carry-forward rather than being relabeled.
+The closing sweep rechecked all recent changes, sibling masonry surfaces, route
+and action exports, migration/journal/reconcile invariants, privacy projections,
+raw SQL/child processes, upload/delete/restore races, caches, listeners, and
+deployment scripts. No further new code defect survived validation. Established
+pool-budget, scale-out, restore-generation, and rollback risks remain
+carry-forward and are not relabeled here.

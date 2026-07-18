@@ -1,62 +1,58 @@
-# Architect — cycle 4 provenance
+# Architect — Cycle 5 Provenance
 
-Review target: `01d39653`, 2026-07-18 KST. Review only.
+Review target: `4926a3e4`. The architecture inventory covered all App Router
+files, libraries, components, DB/schema/migration/reconcile paths, scripts/jobs,
+tests, runtime/build/deploy/PWA assets, and governing/current/deferred docs. The
+sweep emphasized ownership, coupling, config lifetime, persistence, concurrency,
+privacy, caches, and image delivery.
 
-## Architecture inventory
+## New findings
 
-The full maintained system inventory covers 81 App Router files, 115 libraries, 61 components, DB/schema/migrations/reconcile, scripts/background jobs, 369 unit-test files and 12 Playwright files, build/runtime/deploy/nginx/PWA assets, and governing/operator/current/deferred documentation. I reviewed all post-Cycle-3 changes and swept server/client ownership, config lifetime, persistence, concurrency, privacy, caching, image/color delivery, and operational state across the repository.
+### ARCH-C5-01 — Column layout and responsive-image policy have multiple unsynchronized owners
 
-## New architecture findings
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed architecture defect with live performance impact**
+- Regions: layout policy in `home-client.tsx:247-271`, `timeline/page.tsx:229`, `year/[year]/page.tsx:191`, `g/[key]/page.tsx:187`; duplicated image policy in `masonry-card.tsx:21`, `timeline/page.tsx:264-274`, `year/[year]/page.tsx:223-233`, `g/[key]/page.tsx:223-233`
 
-### ARCH-C4-01 — Release state has two owners and the plan owner is stale
+The same breakpoint-to-column relationship is independently encoded in Tailwind
+class strings and four responsive-image literals. They already disagree: exact
+main/archive breakpoints select the previous slot, and the shared-group literal
+does not model `lg` or four-column `xl` correctly.
 
-- Severity: **Low**
-- Confidence: **High**
-- Status: **Confirmed** current-head architecture/provenance issue
-- Regions: `.context/plans/cycle-3-2026-07-18-plan.md:5,45-48,56-65`; `.context/plans/README.md:34-38`
+Concrete failure: a common 768px DPR-2 home viewport fetches 1536w instead of
+640w; future layout changes can silently widen the drift across every copied
+surface.
 
-Git/production own the actual release transition, while the committed plan/index own the recovery frontier. The first pair says Cycle 3 is signed, pushed, and live; the latter still says terminal work is pending. There is no reconciliation step that forces the durable ledger to match the external transition.
+Suggested fix: create client-safe layout policy constants/helpers that produce or
+co-locate both approved class mappings and `sizes` strings for the main/archive
+and shared-grid variants. Pin the ownership with browser boundary tests.
 
-Concrete failure: the next cycle must rediscover release state from multiple systems and can repeat deploy work or archive the wrong frontier.
+### ARCH-C5-02 — Release state still has unreconciled Git and ledger owners
 
-Suggested fix: close and archive the plan with exact commit/live evidence. Longer term, make terminal ledger sync a required final release commit or generate the status from machine-verifiable commit/deploy metadata.
+- Severity / confidence: **Low / High**
+- Status: **Confirmed** for implementation and remote state; deploy SHA manual-validation
+- Regions: `.context/plans/cycle-4-2026-07-18-plan.md:5,40-42,61-69`; `.context/plans/README.md:34-38`
 
-### ARCH-C4-02 — The old layout-aware priority abstraction remains after layout ownership was removed
+The plan owns recovery state but is written before terminal Git/deploy operations
+and is not reconciled afterward. Git proves signed remote publication through
+`4926a3e4`; the plan still says implementation and push are pending.
 
-- Severity: **Low**
-- Confidence: **High**
-- Status: **Confirmed** structural debt; runtime code is correct
-- Regions: `apps/web/src/components/home-client.tsx:26-49,127-145,247-262,344-345`; `apps/web/src/components/masonry-card.tsx:23-33,121-144`
+Concrete failure: the next cycle must reconstruct the frontier from multiple
+systems and can repeat release work.
 
-Cycle 3 correctly transferred image-priority ownership away from column-count inference: only the invariant first DOM card receives explicit eager/high policy. However, two separate helpers, two props, ignored column/measurement arguments, and comments still model a wider layout-aware policy. Layout estimation legitimately still needs column count, but scheduling no longer does.
+Suggested fix: make terminal ledger reconciliation a required post-push step and
+record deploy identity in a machine-verifiable way (or explicitly mark it
+unverified instead of pending implementation).
 
-Concrete failure: the obsolete abstraction suggests that priority can safely consume column-count state, reopening the architectural mismatch between scheduling and browser-owned CSS balancing.
+## Revalidated carry-forward
 
-Suggested fix: define one explicit `isUniversalPriorityCard(index, itemCount)` policy, derive eager/high from it, and keep viewport/column state solely inside intrinsic-size/layout estimation. Update interface comments and tests to that ownership boundary.
-
-## Revalidated carry-forward architecture risks
-
-### ARCH-C4-R1 — Background DB capacity has non-composable owners
-
-- Severity/Confidence: **High / High**
-- Status: confirmed carry-forward
-- Regions: `apps/web/src/db/index.ts:21-45`; `apps/web/src/lib/image-queue.ts:120-152`; `apps/web/src/lib/admin-backfill-runner.ts:97-142`; `apps/web/src/lib/background-db-writes.ts`
-- Failure/fix: overlapping modules can exhaust foreground reserve; centralize weighted admission or quiesce conflicting workers.
-
-### ARCH-C4-R2 — Single-instance correctness is an operator convention, not enforced architecture
-
-- Severity/Confidence: **High / High** in the security/topology lane
-- Status: confirmed carry-forward under current single-instance policy
-- Regions: `apps/web/src/lib/single-writer-guard.ts:6-16,218-235`; process-local `rate-limit.ts`, `admin-mutation-barrier.ts`, `image-queue.ts`, and `upload-tracker-state.ts`
-- Failure/fix: a second replica splits safety state; fail closed on the lifetime lease or migrate coordinators to shared storage.
-
-### ARCH-C4-R3 — SQL and mutable photo stores have no shared restore generation
-
-- Severity/Confidence: **Medium / High**
-- Status: documented carry-forward
-- Regions: `apps/web/src/app/[locale]/admin/db-actions.ts:789-1098`; `apps/web/docker-compose.yml:24-32`
-- Failure/fix: restoring old rows can reference missing files and orphan newer ones; add paired generation manifests and reconciliation if full-stack rollback becomes a requirement.
+Shared DB background admission, warn-only single-instance enforcement, SQL/file
+restore generations, and failed-release rollback remain open architecture risks
+with existing provenance. They are not new Cycle 5 findings.
 
 ## Final architecture sweep
 
-The closing sweep covered request boundaries, runtime/build-time config, all persistence mounts, schema journal/reconcile, every writer against restore barriers/locks, file-lifecycle durability, process-local versus DB-shared coordination, cache invalidation, image/color/HDR delivery, and deploy promotion. No additional new architectural break survived cross-file validation.
+All persistence mounts, build/runtime config ownership, schema/reconcile paths,
+writers versus restore fences, file lifecycle, process-local coordination,
+caches, color delivery, and promotion were rechecked. No further fresh break
+survived.

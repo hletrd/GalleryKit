@@ -1,34 +1,30 @@
-# Cycle 4 Test Engineer Review
+# Test Engineer — Cycle 5 Provenance
 
-I inventoried the 361-file Vitest surface, Playwright specs, scanner fixtures,
-build/type scripts, and source areas changed since Cycle 3's review baseline.
+Review target: `4926a3e4`. I inventoried 368 unit-test files, 15 Playwright files,
+the scanner fixtures, type/build scripts, and every source area changed since
+Cycle 4's review baseline. Full Vitest passed: 361 files passed, 2 skipped;
+3,409 tests passed, 4 expected model-weight skips.
 
-## TEST-C4-01 — Masonry regression is browser-run but not geometry-sensitive
+## New findings
+
+### TEST-C5-01 — Masonry priority regression test misses eager-only and high-only regressions
 
 - Severity / confidence: **Medium / High**
-- Status: **Confirmed coverage gap**
-- Region: `apps/web/e2e/masonry-priority.spec.ts:20-32`
-- Concrete miss: changing the masonry class/layout so index 0 is displaced, or
-  changing column balancing so a later DOM card becomes the only top leader,
-  does not affect `priorityIndices === [0]`; the test stays green without
-  proving the user-visible invariant named by Cycle 3.
-- Suggested regression: collect rectangles for all initially rendered cards;
-  derive the minimum top edge and leader indices; assert index 0 belongs to the
-  leader set, desktop leaders are non-contiguous/multiple, and explicit
-  eager/high remains exactly index 0. Keep the request assertion.
+- Status: **Confirmed coverage defect; current runtime is not broken**
+- Region: `apps/web/e2e/masonry-priority.spec.ts:22-49`
+- Concrete miss: `isPriority` is the conjunction of `loading=eager` and `fetchpriority=high`. Card 6 can receive one of those explicit signals and remain absent from `priorityIndices`; `[0]` still passes.
+- Suggested fix/regression: record `{loading, fetchPriority}` per card, assert eager indices exactly `[0]`, high indices exactly `[0]`, and all other cards lazy plus auto/absent. Keep geometry, no-media-preload, and request checks separate.
 
-## TEST-C4-02 — Release-state checks have no durable closure
+### TEST-C5-02 — No test crosses the CSS-column and `sizes` policies at exact breakpoints
 
-- Severity / confidence: **Low / High**
-- Status: **Confirmed documentation-test gap**
-- Region: `.context/plans/cycle-3-2026-07-18-plan.md:45-65`
-- Scenario: a later cycle repeats push/deploy work or reports it blocked because
-  the durable ledger is left pending after success.
-- Fix: archive the completed plan and update the index in this cycle.
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed missing regression for a live bug**
+- Regions: responsive strings in `masonry-card.tsx:21`, `timeline/page.tsx:264-274`, `year/[year]/page.tsx:223-233`, and `g/[key]/page.tsx:223-233`; existing viewport list at `apps/web/e2e/masonry-priority.spec.ts:4-7`
+- Concrete miss: the E2E uses 393 and 1536 px only. It cannot detect the 640/768/1280 inclusive-boundary mismatch or the shared grid's missing 1024/1280 slot transitions. Fresh DPR-2 browser proof at 768 versus 769 selected 1536w versus 640w for equivalent three-column geometry.
+- Suggested fix/regression: parameterize boundary-minus-one/boundary/boundary-plus-one at DPR 2 and assert column count, card width, advertised source slot, and selected candidate class. Cover the shared-group layout separately.
 
-## Final sweep
+## Final missed-test sweep
 
-Focused source inspection found no fresh unsafe test suppression or passing
-assertion converted to skip/xfail. Existing environment-dependent admin,
-browser-matrix, zoom, and production-model validations remain in the carry-
-forward register with their original exit criteria.
+I checked skips/suppressions, scanner reach, source-only contracts, mutation guards,
+privacy symmetry, migration fixtures, async cleanup, and recent browser specs. No
+other new unsafe suppression or false-green assertion survived.
