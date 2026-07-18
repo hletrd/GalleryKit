@@ -1,115 +1,127 @@
-# Cycle 38 Verifier Review
+# Verifier Review — Cycle 1 Group B
 
-Date: 2026-07-08 KST
-Role: cycle-38 verifier
-Repository: `/Users/hletrd/flash-shared/gallery`
-Mode: evidence-based correctness review only. I edited only this required review file.
+Date: 2026-07-18 KST
+Start HEAD: `64f6ac63`
+Role: verifier
 
-## Provenance
+## Inventory and verification approach
 
-- Read first, as requested: `AGENTS.md` and `CLAUDE.md`.
-- Loaded review workflow guidance: `/Users/hletrd/.agents/skills/code-review/SKILL.md`.
-- Built inventory before reviewing:
-  - Tracked files: 3641.
-  - Current behavior surface reviewed: `AGENTS.md`, `CLAUDE.md`, root/workspace package files, `apps/web/src/{app,components,lib,db}`, `apps/web/src/__tests__`, `apps/web/e2e`, `apps/web/scripts`, root `scripts`, `apps/web/drizzle`, `.github/workflows`, Docker/deploy/config files.
-  - Counted current source/test/script/config files under `apps/web/src`, `apps/web/scripts`, `apps/web/drizzle`, `apps/web/e2e`, root `scripts`, and `.github`: 716.
-  - Historical review/plan artifacts were used as provenance and regression leads, not as current runtime behavior definitions.
-- Fresh validation evidence:
-  - `npm run lint:api-auth --workspace=apps/web` passed.
-  - `npm run lint:action-origin --workspace=apps/web` passed.
-  - `npm run lint:public-route-rate-limit --workspace=apps/web` passed.
-  - `npm run typecheck --workspace=apps/web` passed.
-  - `rg -n "\.only\(" apps/web/src apps/web/e2e apps/web/scripts` returned no focused-test markers.
-- Worktree note: before writing this file, unrelated modifications already existed in `.context/reviews/code-reviewer.md`, `apps/web/src/app/[locale]/admin/(protected)/tokens/page.tsx`, and `apps/web/src/app/[locale]/admin/(protected)/users/page.tsx`. I did not inspect or modify them as part of this artifact.
+I read `AGENTS.md` and `CLAUDE.md`, enumerated all 635 files under
+`apps/web/src`, and inspected the supporting scripts, migrations, deployment
+files, package graph, translation changes, and current test/review history. I
+verified comments and tests against executable control flow, with special focus
+on the latest i18n/nav and GeoIP changes plus auth, lifecycle, public projection,
+and deployment invariants.
 
 ## Findings
 
-### VER-C38-01 - Analytics privacy claim is false for the DB-backed rate-limit path
+### VER-C1-01 — Account-rate-limit fallback claim is false on the first DB increment error
 
-Severity: Medium
-Confidence: High
-Classification: Confirmed issue
+- Severity: **High**
+- Confidence: **High**
+- Status: Reproduced by control-flow proof
+- Regions: `apps/web/src/app/actions/auth.ts:125-175`,
+  `apps/web/src/lib/auth-rate-limit.ts:13-19,36-44,86-99`
+- Inadequate test: `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts:118-130`
 
-Evidence:
-- `apps/web/src/app/actions/public.ts:331-339` documents the public view-recording actions and states: "Full IPs are never stored; only country_code derived from the IP."
-- The same actions pass the raw request IP into the limiter before writing view rows: `recordPhotoView` at `apps/web/src/app/actions/public.ts:443-450`, `recordTopicView` at `apps/web/src/app/actions/public.ts:477-490`, and `recordSharedGroupView` at `apps/web/src/app/actions/public.ts:517-527`.
-- `checkViewRecordRateLimit` persists the limiter attempt through `incrementRateLimit(ip, ...)` at `apps/web/src/app/actions/public.ts:377-414`.
-- `incrementRateLimit` inserts the `ip` value into `rateLimitBuckets` at `apps/web/src/lib/rate-limit.ts:491-506`.
-- The schema stores that value in `rate_limit_buckets.ip varchar(45)` as part of the primary key at `apps/web/src/db/schema.ts:244-251`.
-- `apps/web/src/db/schema.ts:254-255` repeats the narrower analytics privacy claim immediately after the limiter table definition, which makes the mismatch easy to miss during schema review.
+Claim under verification: the account-scoped map “remains the fast-path fallback
+when the DB rate-limit table is unavailable” (`auth-rate-limit.ts:13-18`).
 
-Failure scenario:
-An operator or future maintainer relies on the "full IPs are never stored" claim for privacy/compliance reasoning. The view event rows do omit full IPs, but each accepted analytics view attempt can store the client IP in `rate_limit_buckets` until the bounded purge removes old buckets. That is materially different from "never stored."
+Control-flow proof: `accountLimitData` is read at `auth.ts:129-130`, but it is
+not incremented/stored until lines 146-149. Line 144 awaits the IP durable
+increment first. A rejection at line 144 jumps to line 150, so neither lines
+146-149 nor any other account-map update runs. Both DB checks then reject and
+the fallback branch compares the unchanged account count at line 172. The
+documented account fallback is therefore absent for that attempt.
 
-Concrete fix:
-Either hash the IP before using the persistent DB limiter key and migrate/rename `rate_limit_buckets.ip` to a neutral `bucket_key`, or narrow the documentation and comments to say that analytics event rows do not store full IPs while the rate-limit table may temporarily retain the client IP for abuse control. Add a regression test that asserts the documented privacy contract explicitly.
+Suggested fix and verification: synchronously increment/set both maps before
+any durable await; inject a first-call rejection in a behavioral login test and
+assert the account map advances. Repeat across different mocked IPs until the
+account budget rejects the shared username.
 
-### VER-C38-02 - The touch-target audit misses raw default text inputs
+### VER-C1-02 — Similar Photos violates its own mounted-component guard in Strict Mode
 
-Severity: Medium
-Confidence: High
-Classification: Likely issue; confirmed test false-negative class, no current violating source found
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Reproduced by React effect lifecycle proof
+- Regions: `apps/web/src/components/similar-photos.tsx:68-79,104-134`
+- Counterexample pattern: `apps/web/src/components/load-more.tsx:154-159`
+- Inadequate test: `apps/web/src/__tests__/similar-photos-abort-source.test.ts:19-27`
 
-Evidence:
-- `CLAUDE.md:710-714` claims the blocking touch-target audit enforces a 44x44 px floor for all interactive elements in the scanned roots.
-- The documented pattern list includes raw text-like inputs at `CLAUDE.md:716-724`.
-- The scanner only matches raw inputs when an explicit `type="text"`, `type="search"`, `type="email"`, or `type="password"` appears: `apps/web/src/__tests__/touch-target-audit.test.ts:448-455`.
-- The fixture coverage only proves explicit `type="text"` and `type="file"` behavior: `apps/web/src/__tests__/touch-target-audit.test.ts:991-1000`.
+Claim under verification: `mountedRef.current` prevents late fetch state updates
+after unmount while allowing live requests to finish.
 
-Failure scenario:
-HTML defaults `<input>` with no `type` attribute to a text input. A future scanned component can introduce `<input className="h-8 ...">` or another sub-44 visible default text input and pass the audit because the regex requires an explicit matching `type`. That contradicts the "all interactive elements" and raw-input coverage claims.
+In a development Strict Effects mount, the component's effect is set up, its
+cleanup runs and sets the ref false, then the effect is set up again. The second
+setup does not set the ref true. A live request therefore fails the first term
+of `isCurrentOpenRequest()` and the `finally` condition, so neither results nor
+loading completion can commit. `LoadMore` shows the correct symmetric setup at
+`load-more.tsx:154-159`.
 
-Concrete fix:
-Update the raw-input scanner to treat missing `type` as text-like unless the tag is explicitly hidden, file, checkbox, radio, or otherwise documented as exempt. Add fixtures for `<input className="h-8" />`, `<input className="min-h-11" />`, hidden/file inputs, and a checkbox/radio case that remains owned by the wrapper-aware scan.
+Suggested fix and verification: reset the ref in setup and render the component
+inside `<StrictMode>` in a behavioral test; expand, resolve a successful mocked
+fetch, and assert results appear and loading clears. Then unmount during a
+pending fetch and assert no late commit.
 
-### VER-C38-03 - Legacy schema reconciliation tests are still source tripwires, not structural parity proof
+### VER-C1-03 — Navigation-setting copy does not describe verified consumers
 
-Severity: Medium
-Confidence: Medium
-Classification: Manual-validation risk / test-depth gap
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Confirmed documentation/UI contract mismatch
+- Regions: `apps/web/messages/en.json:790-792`,
+  `apps/web/messages/ko.json:790-792`,
+  `apps/web/src/components/nav-client.tsx:47-48`,
+  `apps/web/src/components/footer.tsx:47-56`,
+  `apps/web/src/app/sitemap.ts:28-33`
+- Behavioral proof: `apps/web/src/__tests__/sitemap-robots.test.ts:77-92`
 
-Evidence:
-- The migration runbook requires every new migration to be mirrored into `reconcileLegacySchema` so fresh or legacy-baselined DBs can reach the complete schema: `CLAUDE.md:483-489`.
-- `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19` explicitly says the coverage test is a source tripwire and cannot verify types or defaults.
-- Table coverage checks only that `migrate.js` contains `CREATE TABLE IF NOT EXISTS <table>`: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:86-93`.
-- Column coverage checks only that every column name appears somewhere in comment-stripped `migrate.js`: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:95-103`.
-- Index coverage similarly checks index-name presence and documents that it is not structural equivalence: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:107-123`.
-- The current test adds a narrow structural pin for `image_embeddings` only: `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:175-180`.
+The UI says “nav-bar links,” while code and a direct behavioral test prove the
+same values remove footer and sitemap entries. Direct routes remain enabled.
+This is not just terse wording: the copy obscures an SEO/discovery side effect
+and can imply access control that does not exist.
 
-Failure scenario:
-A migration can update a column type, default, nullability, index order, index uniqueness, or foreign-key action while `migrate.js` still mentions the same table/column/index names. The source tripwire passes, but a fresh DB or drift-reconciled DB can differ from a normally migrated DB and later fail at runtime.
+Suggested fix and verification: decide whether sitemap removal is intended,
+then align both locale strings and tests with that decision. Verify all four
+states (each toggle independently true/false) across nav, footer, sitemap, and
+direct route reachability.
 
-Concrete fix:
-Add a disposable MySQL parity test or script that creates two schemas: one via committed Drizzle migrations and one via the reconcile/baseline path. Compare `information_schema` for columns, types, nullability, defaults, indexes, and foreign keys. Keep the current source tripwire for fast feedback, but stop treating it as proof of full schema parity.
+### VER-C1-04 — Initial masonry priority does not satisfy the documented 2xl guarantee
 
-### VER-C38-04 - CLIP production-readiness proof is outside the normal blocking quality gates
+- Severity: **Low-Medium**
+- Confidence: **High**
+- Status: Confirmed pre-effect state mismatch
+- Regions: `apps/web/src/components/home-client.tsx:26-76,124-126`
 
-Severity: Medium
-Confidence: High
-Classification: Manual-validation risk
+The comments say the fifth 2xl first-row slot gets eager/high priority, but
+`count` is initially 2 and can become 5 only in a client effect. The guarantee
+is true after mount, not for the initial loading decision where it matters.
 
-Evidence:
-- `CLAUDE.md:618-626` states the two CLIP integration suites are permanently skipped in CI without model weights and are the only verification that the real encoder loads offline and ranks semantically before production activation.
-- `apps/web/src/__tests__/clip-offline-load.test.ts:32-42` uses `describe.skip` unless `CLIP_OFFLINE_LOAD=1` and `CLIP_MODELS_ROOT` points at seeded weights.
-- `apps/web/src/__tests__/clip-semantic-integration.test.ts:27-31` uses `describe.skip` unless `CLIP_INTEGRATION=1`.
-- `.github/workflows/clip-preflight.yml:1-46` runs the preflight only on `workflow_dispatch` or a weekly schedule.
-- The normal blocking workflow `.github/workflows/quality.yml:54-83` runs lint, typecheck, security lint gates, audit, unit tests, DB init, Playwright E2E, and build, but does not invoke the CLIP preflight.
+Suggested fix and verification: record a cold-cache 2xl trace and assert when
+requests for cards 3-5 begin relative to hydration. Adopt an initial priority
+policy based on the measurement and lock the pre-effect semantics in a test.
 
-Failure scenario:
-A CLIP-path change can merge and deploy with all normal gates green while the real production encoder path is broken. The scheduled/manual preflight may catch it later, but it is not tied to the change that introduced the regression and it is not a merge/deploy blocker.
+## Claims verified as true
 
-Concrete fix:
-Make the CLIP preflight required for CLIP-touching changes through a path-filtered required workflow, or require a generated activation artifact from the preflight before allowing `semantic_search_mode='production'`. If CI weight cost is the blocker, keep the default unit suite lightweight but add a merge-blocking job that restores/caches weights only when `clip-*`, embedding, semantic-search, or download-script paths change.
+- The latest GeoIP fix is complete across dependency declaration,
+  `serverExternalPackages`, Docker production dependency copy, runtime require,
+  and instrumentation prewarm. The `XX` fallback remains graceful.
+- The latest English/Korean prose edits preserve message-key parity and retain
+  the material restore, HDR/SDR, GPS, analytics/IP, PAT-expiry, semantic-search,
+  and force-reencode warnings.
+- Public data projections still omit privacy-sensitive fields except for the
+  explicit map-visible GPS projection.
+- Similar Photos callers key the component by image ID in both desktop sidebar
+  and bottom sheet, so cross-photo stale results are not a current defect.
+- Admin routes/actions retain origin/auth gates, and public expensive routes
+  retain pre-increment rate-limit calls.
+- Upload and restore paths retain their maintenance, advisory-lock, cleanup,
+  and post-commit response distinctions.
 
-## Final Sweep
+## Final missed-issue sweep
 
-- Commonly missed issue sweep:
-  - Focused tests: no `.only(` markers found under current source, scripts, or E2E tests.
-  - Custom enforcement gates: admin API auth, action origin/mutation barrier, and public route rate-limit scanners pass.
-  - Type surface: `npm run typecheck --workspace=apps/web` passes, including test files through the app typecheck config.
-  - Known env-gated suites: CLIP preflight remains intentionally skipped unless weights/env are supplied; admin local E2E still depends on local credentials/config by design.
-- Relevant files skipped:
-  - No current review-relevant source/test/script/config files were intentionally skipped.
-  - I did not line-review all historical `.context/reviews/**` and `.context/plans/**` archives, generated/cache artifacts, uploaded media, or binary fixtures because they do not define current runtime behavior. Current aggregate/deferred review files were used as provenance to guide regression checks.
-- Validation not run:
-  - I did not run the full `npm test`, `npm run build`, `npm run audit:prod`, or Playwright E2E suite in this verifier pass. The report relies on targeted enforcement gates, TypeScript, repository inspection, and exact source/test evidence above.
+I checked for counterexamples to the above findings, including React caller
+keys, DB retry behavior, source-test coverage, sitemap intent, recent commit
+diffs, and deployment ownership checks. I also swept stale comments, impossible
+branches, missing runtime pins, schema/journal mismatch indicators, and privacy
+field drift. No further high-confidence mismatch was found. Existing deferred
+items remain accurately represented by the current aggregate and plan ledger.
