@@ -1,81 +1,70 @@
-# Security Review — Cycle 2
+# Security Review — Cycle 3
 
 Date: 2026-07-18 KST
-Review HEAD: `ba4bc60a`
+Review HEAD: `afa11cf4`
 Role: security-reviewer
 Mode: review-only
 
-## Inventory and method
+## Inventory and validation
 
-I read `AGENTS.md` and the repository architecture/security/operations rules in
-`CLAUDE.md`, then inventoried 263 non-test TypeScript runtime files (80 app
-files, 61 components, 115 library files), 12 route handlers, 53 exported
-action functions, 31 migrations, 31 operational scripts, and 374 unit/e2e test
-files. The security pass traced authentication and session rotation, PAT scope
-checks, action origin and restore barriers, public rate limiting, upload and
-backup path containment, privacy projections, restore SQL scanning and child
-processes, CSP/proxy trust, secrets, migrations, and deploy ownership checks.
-The cycle-1-to-HEAD diff was reviewed separately so regressions in the auth and
-deploy fixes were not hidden by the broader inventory.
+I inventoried all 3,645 tracked files, then scoped the security review to the
+764 non-review/non-plan repository files: 265 non-test app source files (81 app,
+61 components, 115 libraries and supporting entry files), 53 exported server
+actions, 12 route handlers, 29 scripts, 31 SQL migrations plus journal/snapshots,
+368 Vitest files, 12 Playwright/support files, deployment/proxy/container files,
+CI, env examples, and the governing docs. The closing pass traced OWASP-relevant
+auth/session/PAT paths, authz and same-origin gates, rate limits, privacy
+projections, upload and backup path containment, SQL restore scanning and child
+processes, secrets, CSP/JSON-LD sinks, proxy trust, migrations, and deployment
+ownership. The Cycle-2-to-HEAD production diff was separately reviewed.
 
 Executed evidence:
 
-- `lint:api-auth`, `lint:action-origin`, and
-  `lint:public-route-rate-limit`: all passed.
-- `npm run audit:prod`: zero production vulnerabilities.
-- Live `https://gallery.atik.kr/en` response headers include a per-response
-  nonce CSP, HSTS, `nosniff`, `SAMEORIGIN`, restrictive permissions policy,
-  and strict referrer policy.
-- The targeted auth/deploy/analytics regression suite passed (106 tests across
-  eight files).
+- API-auth, action-origin/mutation-barrier, and public-route-rate-limit scanners passed.
+- ESLint, typecheck, build, full Vitest (3,410 passed, 4 skipped), and production
+  dependency audit (zero vulnerabilities) passed.
+- Secret-pattern and dangerous-sink sweeps found placeholders/historical
+  redactions only; no working-tree credential was confirmed.
+- The built sitemap is dynamic and absent from `.next/prerender-manifest.json`.
 
-## New findings
+## Genuinely new Cycle-3 findings
 
-No new security defect was confirmed at this HEAD.
-
-The cycle-1 fixes were specifically revalidated: both in-memory login budgets
-advance before the first durable await and durable increments are independent
-(`apps/web/src/app/actions/auth.ts:137-158`); deploy files are rejected unless
-owned by the caller or the repository owner and are still required to be
-private (`scripts/deploy-remote.sh:55-97`, `apps/web/deploy.sh:17-55`). Trusting
-the repository owner does not create an additional privilege boundary because
-that owner can already edit the executed deploy script itself.
+No new security defect was confirmed at this HEAD. The Cycle-2 changes affect a
+public sitemap cache, public image preload hints, combobox state, and operator
+wording; they introduce no new authentication, authorization, secret, private
+field, filesystem-write, SQL, or child-process boundary.
 
 ## Revalidated carry-forward security risk
 
-### SEC-C2-R1 — Multi-process safety remains warn-only
+### SEC-C3-R1 — Multi-process safety remains warn-only
 
 - Severity: **High**
 - Confidence: **High**
-- Status: Revalidated carry-forward; confirmed architecture constraint, not new
-- Regions: `apps/web/src/instrumentation.ts:18-27` and
-  `apps/web/src/lib/single-writer-guard.ts` (startup advisory-lock guard);
-  process-local coordinators in `apps/web/src/lib/admin-mutation-barrier.ts`,
+- Status: **Revalidated carry-forward; not new**
+- Regions: `apps/web/src/instrumentation.ts:18-27`;
+  `apps/web/src/lib/single-writer-guard.ts:6-16,218-235`; process-local
+  coordination in `apps/web/src/lib/admin-mutation-barrier.ts`,
   `apps/web/src/lib/rate-limit.ts`, and `apps/web/src/lib/image-queue.ts`
 
-The startup check intentionally warns and continues when another writer is
-present. A second app process therefore has independent in-memory mutation
-slots, request budgets, and queue state even though both processes use the same
-database and mutable file stores.
+The startup singleton probe explicitly continues after persistent contention.
+A second live process therefore has independent restore slots, abuse budgets,
+upload accounting, and queue state while sharing MySQL and mutable file stores.
 
-Concrete failure scenario: an operator temporarily starts a second replica
-during recovery. Both accept writes; a restore can drain only one process's
-in-memory slots, process-local public abuse budgets split, and duplicate image
-work competes against the shared DB/filesystem. The warning is easy to miss and
-does not make the topology fail closed.
+Concrete failure: a recovery or scale-out starts a second replica. Both accept
+writes; a restore drains only one process's foreground slots, process-local rate
+limits split, and duplicate background work competes on shared state despite the
+loud log message.
 
-Suggested fix: either enforce the documented single-writer topology by holding
-a required process-lifetime lease, or move every affected coordinator to a
-shared durable primitive before supporting replicas. Keep this explicitly
-listed as unsupported until that is complete.
+Suggested fix: either hold a required process-lifetime lease and fail closed on
+persistent contention, or move every affected coordinator to shared durable
+state before replicas are supported.
 
 ## Final missed-issue sweep
 
-The closing sweep rechecked every route/action export, auth and rate-limit
-ordering, dynamic SQL/child processes, filesystem opens and realpath checks,
-public field projections, `dangerouslySetInnerHTML` sites, proxy-derived IPs,
-cookie settings, backup permissions, environment sourcing, and security
-header construction. Current restore scanners, privacy type guards, upload
-serving, and authenticated backup download all retain their defenses. Apart
-from the documented single-writer constraint, no additional confirmed or
-likely security issue survived the final sweep.
+The final sweep rechecked every route/action export, auth and rate-limit ordering,
+public field projections and `_PrivacySensitiveKeys`, raw SQL/child processes,
+filesystem realpath/open ordering, proxy-derived origins/IPs, cookie defaults,
+backup/restore maintenance, deployment env ownership, CSP construction, JSON-LD
+sinks, and the changed sitemap/preload/search paths. Apart from the documented
+single-writer constraint and already-registered architecture/operator risks, no
+additional confirmed or likely security issue survived revalidation.

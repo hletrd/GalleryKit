@@ -1,53 +1,60 @@
-# Architect — cycle 2 provenance
+# Architect — cycle 3 provenance
 
-Review target: `ba4bc60acd4bc41b29ec02f509c3455d115ba083`, 2026-07-18 KST. Review only.
+Review target: `afa11cf4`, 2026-07-18 KST. Review only.
 
-## Relevant-file inventory
+## Architecture inventory
 
-Repository-wide architecture inventory covered all 939 files, with direct tracing across: App Router pages/routes/actions (81 files); data, auth, queue, processing, restore, rate-limit, semantic-search, storage, cache, and config libraries (115); DB schema/pool plus 31 migrations/reconcile; 61 UI components and their server/client boundaries; 369 unit tests and 9 browser specs; instrumentation/proxy; Docker/Compose/nginx/deploy scripts; CI and package/build configs; service-worker source/generated artifact; and all governing/operator docs. Boundaries examined were request→action→DB, upload→private original→derivatives, restore→writers/sidecars, build→runtime config, process-local→DB-shared coordination, and deploy→host traffic.
+I inventoried all 939 files, including 81 route/action/page files, 115 libraries, 61 components, DB/schema/migrations/reconcile, scripts and background jobs, 368 unit tests and 12 Playwright files, build/runtime/deploy/nginx/PWA assets, and governing/operator/review/deferred documentation. Boundaries traced end-to-end were request→action→auth/barrier→DB, upload→original→derivatives→embedding, delete→durable cleanup, restore→writers→migration→mutable stores, SSR→resource hints→CSS layout→hydration, CLIP inference→blob ranking, and deploy→health→promotion/cleanup.
 
-## Findings
+## Genuinely new cycle-3 findings
 
-### ARCH-2-01 — Queue and color backfill independently spend the same reserved DB capacity
-
-- Severity: **High**
-- Confidence: **High**
-- Status: **Confirmed; revalidated carry-forward**
-- Region: `apps/web/src/lib/image-queue.ts:120-141`; `apps/web/src/lib/admin-backfill-runner.ts:97-142`; `apps/web/src/db/index.ts:31-45`
-
-Failure scenario: at the shipped pool limit of 10, the upload queue independently permits two workers and the color backfill independently permits two workers. The backfill also pins its run lock. Their combined worst case is about nine connections, despite each resolver claiming to reserve five for live traffic. A photo request fan-out, topic mutation, or restore preparation then queues behind encode-duration holds and can exhaust the pool queue.
-
-Suggested fix: introduce one process-wide background DB/CPU budget leased by queue workers and backfills, or make the color backfill quiesce the upload queue. Test combined occupancy, not each resolver in isolation.
-
-### ARCH-2-02 — Sitemap freshness is owned by both build-time prerendering and runtime DB state
+### ARCH-C3-01 — Image scheduling assumes ownership of layout placement it cannot know
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed**
-- Region: `apps/web/src/app/sitemap.ts:4-12,36-82`; build output `.next/prerender-manifest.json` (`/sitemap.xml.initialRevalidateSeconds = 3600`)
+- Status: **Confirmed new cycle-3 architectural mismatch**
+- Regions: `apps/web/src/components/home-client.tsx:129-169,272-314,363-375`; `apps/web/src/components/masonry-card.tsx:21-33,121-145`; `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:187-196`
 
-Failure scenario: build time owns the initial sitemap even though build time intentionally has no DB. Runtime owns the authoritative topics, photos, freshness timestamps, and navigation-discovery flags, but cannot replace the build fallback until the route-cache TTL expires. This is split ownership of one SEO artifact, not merely graceful degradation.
+The scheduling layer declares DOM indices 0-N to be “above fold”/“first row,” but placement belongs to the CSS multi-column balancing algorithm. The server knows image dimensions and order but not the balanced column breaks for the actual viewport; the client helper knows only column count, not element geometry. A Chromium proof showed four-column top items at indices 0/5/10/15 while hints targeted 1/2/3. This is split ownership: scheduling asserts an invariant the layout architecture does not expose.
 
-Suggested fix: choose one owner. Prefer first-request runtime generation backed by a successful-result cache/revalidation policy; do not commit a known-incomplete build result to the same freshness window as an authoritative runtime result.
+Concrete failure: performance policy sends parser-time hints to below-fold objects while visible column leaders remain normal/lazy, making LCP depend on an accidental CSS balance result.
 
-### ARCH-2-03 — The deployment health check observes replacement rather than gates promotion
+Suggested fix: establish one owner. Either keep CSS columns and only prioritize the universally first item, or introduce deterministic column assignment/layout metadata that the scheduling layer can consume. Centralize the policy so home, shared group, timeline, and year pages cannot each recreate a different first-N heuristic.
 
-- Severity: **Medium**
+### ARCH-C3-02 — Browser evidence is recorded as complete but the test boundary remains source text
+
+- Severity: **Low-Medium**
 - Confidence: **High**
-- Status: **Confirmed; revalidated carry-forward**
-- Region: `apps/web/deploy.sh:63-89`; `apps/web/docker-compose.yml:12-17`
+- Status: **Confirmed new cycle-3 test-architecture finding**
+- Regions: `.context/plans/cycle-2-2026-07-18-plan.md:29-32,64-78`; `apps/web/src/__tests__/masonry-card-memo.test.ts:115-123`; `apps/web/e2e/public.spec.ts:4-49`
 
-Failure scenario: Compose replaces the only web instance before health is known. A bad release enters `restart: always`; the old healthy instance is gone; the subsequent 90-second loop can only report the outage. With no staging and mandatory per-iteration deploys, this failure domain is exercised frequently.
+The cycle ledger says request-timeline coverage exists, but the test boundary stops at string presence. No maintained browser test crosses resource hint → CSS placement → request initiation. This is why the invalid inter-layer assumption passed all gates.
 
-Suggested fix: blue/green the candidate on a second local port/container and atomically switch nginx/upstream after health, or implement captured-image rollback. Preserve the single-writer constraint by promoting only after the old writer is drained/stopped.
+Suggested fix: make a small browser contract the architecture boundary: for each responsive column count, collect card geometry and early derivative requests, and assert explicit priority belongs only to actually visible candidates. Update plan evidence to match what is committed.
 
-## Architecture defenses / accepted boundaries
+## Revalidated carry-forward architecture risks (not new)
 
-- Restore drains foreground mutations, image queue, maintenance, background DB writes, and buffered group counts; sidecars use durable maintenance/advisory locks. No new missing writer was confirmed.
-- Local-filesystem storage only, build-time JSON semantics, SQL-only backup scope, same-origin public image caching, and single-instance topology are accurately called out in `CLAUDE.md`.
-- The single-writer guard remains warn-only by explicit product policy; I did not relabel that accepted tradeoff as a new defect.
-- Public/admin projection separation and compile-time privacy guards remain layered correctly.
+### ARCH-C3-R1 — Background DB capacity has module-local, non-composable owners
 
-## Final missed-issues sweep
+- Severity/Confidence: **High / High**
+- Regions: `apps/web/src/db/index.ts:21-45`; `apps/web/src/lib/image-queue.ts:120-152`; `apps/web/src/lib/admin-backfill-runner.ts:97-142`
 
-I swept circular/shared-state ownership, async shutdown, restore ordering, lock namespace and connection lifetime, schema/reconcile dual ownership, cache invalidation, build/runtime env freezing, CDN/service-worker boundaries, multi-instance assumptions, and deploy/host ownership. No additional architectural issue was confirmed beyond the three recorded items.
+Queue and backfill each reserve half the same pool as though the other did not exist. Their locks differ, so they can overlap. Replace independent arithmetic with a process-wide weighted admission controller or explicit mutual exclusion.
+
+### ARCH-C3-R2 — SQL restore and mutable photo stores have no shared generation
+
+- Severity/Confidence: **Medium / High**
+- Regions: `apps/web/src/app/[locale]/admin/db-actions.ts:789-1046`; `apps/web/docker-compose.yml:24-32`
+
+Restore locks make DB import internally safe but do not pair the SQL generation with original/derivative/resource bind mounts. Restoring old rows can reference deleted files and leave newer files orphaned. This remains a documented operational boundary; add a manifest/generation and reconciliation report if full-stack rollback becomes a product requirement.
+
+### ARCH-C3-R3 — Single-instance correctness remains warn-only
+
+- Severity/Confidence: **Medium / Medium**
+- Regions: `apps/web/src/lib/single-writer-guard.ts:6-16,218-235`; process-local state in `apps/web/src/lib/rate-limit.ts`, `upload-tracker-state.ts`, and queue/backfill status modules
+
+The shipped topology is explicitly single-instance, and the guard only logs contention. No repository evidence shows topology change, so this remains carry-forward under the documented operator contract rather than a new cycle-3 defect.
+
+## Final coverage sweep
+
+The final architecture sweep covered server/client boundaries, runtime/build-time config, persistence mounts, schema/reconcile/journal, every writer against restore barriers/locks, auth/rate-limit ownership, file lifecycle durability, process-local versus DB-shared coordination, cache invalidation, and deploy promotion. Sitemap runtime ownership and combobox/listbox ownership now align. No other new architecture break survived cross-file validation; known scale/topology/restore/deploy risks remain explicitly carry-forward.

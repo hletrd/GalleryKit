@@ -1,46 +1,65 @@
-# Test engineer — cycle 2 provenance
+# Test Engineer — Cycle 3 provenance
 
-Target: `ba4bc60acd4bc41b29ec02f509c3455d115ba083`, 2026-07-18 KST. Review only.
+Target: `afa11cf4`, 2026-07-18 KST. Review only.
 
-## Relevant-file inventory
+## Test inventory and execution
 
-Test inventory: 369 `src/__tests__` files; 9 Playwright specs / 48 discovered browser tests; three custom security scanners and their fixtures; typecheck/build hooks; CI workflows; CLIP env-gated suites; migration/reconcile fixtures; deploy-script tests; generated service-worker contracts; touch-target/i18n/privacy/source-contract suites. I traced tests to all changed production files and inspected uncovered deploy/build-runtime branches across the 939-file repository inventory.
+I inventoried 368 tracked Vitest files, 9 Playwright specs plus helpers (48
+discovered browser tests), three custom security scanners and their fixtures,
+typecheck/build hooks, CI workflows, CLIP env-gated suites, migration/reconcile
+fixtures, deploy shell tests, generated service-worker contracts, and all tests
+mapped to the Cycle-2 source diff. Full Vitest passed 3,410 tests with 4 CLIP
+tests skipped; lint/typecheck/build/scanners/audit passed. Playwright discovery
+passed. Live Chromium was used for the missing responsive network proof, but
+that ad-hoc validation is not a committed regression test.
 
-## Findings
+## Genuinely new Cycle-3 findings
 
-### TEST-2-01 — Deploy ownership tests lock in the vulnerable expression instead of testing trust behavior
-
-- Severity: **Medium**
-- Confidence: **High**
-- Status: **Confirmed**
-- Region: `apps/web/src/__tests__/deploy-script-contract.test.ts:94-108,127-175`; deploy scripts’ owner checks
-
-Failure scenario: the suite passes because the exact `repo_owner_uid` exception string exists. Subprocess tests cover unsafe mode only, so current UID root + repository UID unprivileged + env UID repository-owner is never exercised.
-
-Suggested fix: containerized/user-namespace cross-UID matrix with sentinels for source, `bash -lc`, git, and Docker execution.
-
-### TEST-2-02 — Sitemap tests bypass the cache layer where the defect exists
+### TEST-C3-01 — Responsive preload coverage stops at source text
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed**
-- Region: `apps/web/src/__tests__/sitemap-robots.test.ts:28-107`; `apps/web/src/app/sitemap.ts:4-12`
+- Status: **Confirmed new gap**
+- Regions: `apps/web/src/components/home-client.tsx:133-169,190-192`;
+  `apps/web/src/__tests__/masonry-card-memo.test.ts:115-123,200-205`;
+  `apps/web/e2e/public.spec.ts:21-50`;
+  `.context/plans/cycle-2-2026-07-18-plan.md:29-32,64-78`
 
-Failure scenario: direct mocked calls prove fallback content and successful DB content separately, but never build the route or inspect initial ISR freshness. All 3,408 tests pass while the built fallback is cached for 3,600 seconds.
+The unit test checks that selected strings appear and that the unmeasured eager
+count is one. It never renders the server response, inspects the actual preload
+links, or observes requests at a viewport. The E2E change tests only search
+combobox states. Nevertheless, the plan says 320 px and desktop request-timeline
+coverage was added.
 
-Suggested fix: post-build manifest/body assertion plus a server integration test: build without DB, start with DB, request sitemap immediately, and require authoritative topic/photo rows.
+Concrete failure: these tests pass if the intermediate 768/1280 media mappings
+are reordered, React/Next drops or changes the emitted link attributes, or the
+browser starts the same offscreen mobile requests through another scheduling
+path. The original Medium bandwidth defect can recur with an all-green suite.
 
-### TEST-2-03 — Deploy health tests verify ordering but not recovery
+Suggested fix: add a Playwright test with deterministic image dimensions and a
+cold browser context; record image requests before/through hydration at 320 px
+and representative 2/3/4/5-column widths, inspect emitted `media`,
+`imagesrcset`, and `imagesizes`, and assert only the viewport-eligible preload
+hints activate. Avoid a final-DOM-only assertion.
+
+### TEST-C3-02 — No automated test exercises failed-deploy recovery
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed; revalidated carry-forward gap**
-- Region: `apps/web/src/__tests__/deploy-script-contract.test.ts:27-56`; `apps/web/deploy.sh:63-89`
+- Status: **Revalidated carry-forward gap; not new**
+- Regions: `apps/web/src/__tests__/deploy-script-contract.test.ts:27-56`;
+  `apps/web/deploy.sh:63-89`
 
-Failure scenario: the test only requires health failure before prune. It does not require rollback, candidate cleanup, or continued availability, so the broken release is correctly detected but left serving/restarting.
+The suite proves health-before-prune ordering but accepts exit-with-broken-
+replacement behavior. Add a fake Docker state machine asserting automatic
+prior-image restoration and health, or candidate-slot cleanup and no promotion.
 
-Suggested fix: fake Docker state machine test asserting the previous image/container is restored and healthy after candidate failure, or test blue/green promotion semantics.
+## Coverage and flakiness sweep
 
-## Execution and final sweep
-
-Vitest, lint, typecheck, build, security scanners, and audit passed; Playwright discovery listed 48 tests. Browser E2E, real CLIP, and live proxy topology remain manual-validation because this workspace lacked MySQL/model weights/target URL. I swept skipped tests, source-only assertions, false-positive/negative scanner fixtures, race/concurrency tests, generated artifacts, and recent-change coverage; no additional high-confidence test gap was confirmed.
+The closing sweep checked skip conditions, fake-timer cleanup, source-only
+contracts, scanner false-positive/negative fixtures, concurrency/race tests,
+generated artifacts, E2E serialization, credential gates, and recent-change
+coverage. The current live preload and search behavior passed manual Chromium
+validation; real CLIP, credentialed admin E2E, proxy topology, multi-process
+coordination, and failed-deploy recovery remain explicit non-default proofs. No
+additional new high-confidence test gap survived the sweep.
