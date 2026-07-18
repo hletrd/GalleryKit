@@ -68,6 +68,35 @@ test('search matches canonical topic labels and aliases', async ({ page }) => {
   await expect(dialog.getByText('E2E Landscape')).toBeVisible();
 });
 
+test('search results do not prefetch dynamic photo pages before activation', async ({ page }) => {
+  await ensureEnglishLocale(page);
+  await page.goto('/');
+  await expectNoNextError(page);
+
+  const photoRscRequests: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (/\/en\/p\/\d+$/.test(url.pathname) && url.searchParams.has('_rsc')) {
+      photoRscRequests.push(url.toString());
+    }
+  });
+
+  await page.getByRole('button', { name: 'Search photos' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Search photos' });
+  await dialog.locator('#search-input').fill('E2E Smoke');
+  const firstResult = dialog.getByRole('option').first();
+  await expect(firstResult).toBeVisible();
+
+  // Default Next Link prefetch starts shortly after result rows enter the
+  // viewport. Give it a bounded observation window: result presentation must
+  // perform no dynamic photo-detail work before the visitor chooses a row.
+  await page.waitForTimeout(750);
+  expect(photoRscRequests).toEqual([]);
+
+  await firstResult.click();
+  await expect(page).toHaveURL(/\/en\/p\/\d+$/);
+});
+
 test('photo page lightbox opens and closes from the first visible photo', async ({ page }) => {
   await ensureEnglishLocale(page);
   await page.goto('/');
