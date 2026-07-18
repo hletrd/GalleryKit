@@ -73,13 +73,13 @@ describe('cycle 11 source contracts', () => {
         expect(nav).toContain('showDesktopLabel');
     });
 
-    it('timeline and year archive cards eager-load initial images and guard invalid geometry', () => {
+    it('timeline and year archive cards prioritize only the universal first CSS-column item', () => {
         for (const path of [
             'app/[locale]/(public)/timeline/page.tsx',
             'app/[locale]/(public)/year/[year]/page.tsx',
         ]) {
             const code = src(path);
-            expect(code).toContain('const eagerArchiveImageIds = new Set(galleryPhotos.slice(0, 6).map((photo) => photo.id))');
+            expect(code).toContain('const eagerArchiveImageIds = new Set(galleryPhotos.slice(0, 1).map((photo) => photo.id))');
             expect(code).toContain('const shouldEagerLoad = eagerArchiveImageIds.has(photo.id)');
             expect(code).toContain("loading={shouldEagerLoad ? 'eager' : 'lazy'}");
             expect(code).toContain("fetchPriority={shouldEagerLoad ? 'high' : undefined}");

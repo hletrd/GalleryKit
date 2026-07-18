@@ -189,11 +189,9 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                     const altText = getPhotoDisplayTitle(image, t('photo'));
                     const aspectWidth = image.width > 0 ? image.width : 1;
                     const aspectHeight = image.height > 0 ? image.height : 1;
-                    // Above-the-fold detection: in a CSS `columns` masonry layout,
-                    // images flow top-to-bottom then left-to-right. The max column
-                    // count is 4 (xl: breakpoint). Mark the first 4 images as eager
-                    // so they load immediately for the best LCP on any viewport.
-                    const isAboveFold = index < 4;
+                    // CSS columns balance top-to-bottom, so only the first DOM
+                    // item is invariantly a visual column leader.
+                    const isAboveFold = index === 0;
 
                     return (
                         <Link

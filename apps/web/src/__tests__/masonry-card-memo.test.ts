@@ -112,14 +112,12 @@ describe('C2-19 MasonryCard memoization contract', () => {
         expect(mapCall).toContain('onLinkClick={saveScrollPosition}');
     });
 
-    it('uses media-qualified preloads instead of a viewport-agnostic SSR eager row', () => {
+    it('does not preload DOM-first cards as visual CSS-column leaders', () => {
         const src = readSrc('components/home-client.tsx');
-        expect(src).toContain("import { preload } from 'react-dom'");
         expect(src).toContain("const [count, setCount] = useState(1)");
-        expect(src).toContain("'(min-width: 640px)'");
-        expect(src).toContain("'(min-width: 1536px)'");
-        expect(src).toContain('media: DESKTOP_FIRST_ROW_MEDIA[index - 1]');
-        expect(src).toContain('preloadResponsiveFirstRow(images, imageSizes)');
+        expect(src).not.toContain("import { preload } from 'react-dom'");
+        expect(src).not.toContain('DESKTOP_FIRST_ROW_MEDIA');
+        expect(src).not.toContain('preloadResponsiveFirstRow');
     });
 
     it('handleLoadMore appends via array spread, preserving existing entry identity', () => {
@@ -172,36 +170,35 @@ describe('C2-19 MasonryCard memoization contract', () => {
         expect(shallowEqual(atWidth300, atWidth420)).toBe(false);
     });
 
-    it('an above-fold transition (column count shrink) changes props so memo does NOT bail out', () => {
+    it('a column-count change does not invent new explicit-priority cards', () => {
         const imgA: FixtureImage = { id: 1, topic: 'travel' };
         const topicsMap = { travel: 'Travel' };
         const imageSizes = [640, 1536, 2048];
         const onLinkClick = () => {};
 
-        // index 2 is above-fold at columnCount=3 but not at columnCount=2.
         const atColumns3 = buildCardProps(imgA, 2, 3, 5, 300, topicsMap, imageSizes, onLinkClick);
         const atColumns2 = buildCardProps(imgA, 2, 2, 5, 300, topicsMap, imageSizes, onLinkClick);
-        expect(atColumns3.isAboveFold).toBe(true);
+        expect(atColumns3.isAboveFold).toBe(false);
         expect(atColumns2.isAboveFold).toBe(false);
-        expect(shallowEqual(atColumns3, atColumns2)).toBe(false);
+        expect(shallowEqual(atColumns3, atColumns2)).toBe(true);
     });
 });
 
 describe('C2-19 computeIsAboveFold / resolveTopicLabel pure helpers', () => {
-    it('computeIsAboveFold flags exactly the first min(columnCount, itemCount) indices', () => {
+    it('computeIsAboveFold flags only the universal first CSS-column item', () => {
         expect(computeIsAboveFold(0, 3, 5)).toBe(true);
-        expect(computeIsAboveFold(2, 3, 5)).toBe(true);
+        expect(computeIsAboveFold(2, 3, 5)).toBe(false);
         expect(computeIsAboveFold(3, 3, 5)).toBe(false);
-        // itemCount smaller than columnCount clamps the above-fold window.
-        expect(computeIsAboveFold(1, 5, 2)).toBe(true);
+        expect(computeIsAboveFold(1, 5, 2)).toBe(false);
         expect(computeIsAboveFold(2, 5, 2)).toBe(false);
+        expect(computeIsAboveFold(0, 5, 0)).toBe(false);
     });
 
     it('keeps the unmeasured SSR eager set mobile-safe', () => {
         expect(computeShouldEagerLoad(0, 1, 10, false)).toBe(true);
         expect(computeShouldEagerLoad(1, 1, 10, false)).toBe(false);
         expect(computeShouldEagerLoad(4, 5, 10, false)).toBe(false);
-        expect(computeShouldEagerLoad(1, 2, 10, true)).toBe(true);
+        expect(computeShouldEagerLoad(1, 2, 10, true)).toBe(false);
         expect(computeShouldEagerLoad(2, 2, 10, true)).toBe(false);
     });
 

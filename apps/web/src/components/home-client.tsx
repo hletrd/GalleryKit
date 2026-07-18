@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
-import { preload } from 'react-dom';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
@@ -12,10 +11,9 @@ import { MasonryCard } from '@/components/masonry-card';
 import { cn } from '@/lib/utils';
 import { localizePath } from '@/lib/locale-path';
 import type { ImageListCursorInput } from '@/lib/data';
-import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { humanizeTagLabel } from '@/lib/photo-title';
 import { useDisplayCapability } from '@/lib/use-display-capability';
-import { imageUrl } from '@/lib/image-url';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
 
@@ -127,7 +125,11 @@ function getClientImageListCursor(image: Pick<ImageListCursorInput, 'capture_dat
 // without a DOM renderer, and so the values passed as props are computed
 // once per card rather than inline in JSX.
 export function computeIsAboveFold(index: number, columnCount: number, itemCount: number): boolean {
-    return index < Math.min(columnCount, itemCount);
+    // CSS multi-column layout balances items top-to-bottom, so DOM indices
+    // 1..columnCount are not the visual leaders of columns 2..N. Only the
+    // first item is invariantly above the fold before browser layout.
+    void columnCount;
+    return itemCount > 0 && index === 0;
 }
 
 export function computeShouldEagerLoad(
@@ -136,37 +138,11 @@ export function computeShouldEagerLoad(
     itemCount: number,
     hasMeasuredViewport: boolean,
 ): boolean {
-    // Before measurement, only the universally above-fold first card is eager.
-    // Desktop cards enter the initial queue through media-qualified preloads,
-    // whose media predicates the browser can evaluate before hydration.
-    const eagerCount = hasMeasuredViewport ? columnCount : 1;
-    return index < Math.min(eagerCount, itemCount);
-}
-
-const DESKTOP_FIRST_ROW_MEDIA = [
-    '(min-width: 640px)',
-    '(min-width: 768px)',
-    '(min-width: 1280px)',
-    '(min-width: 1536px)',
-] as const;
-
-export function preloadResponsiveFirstRow(images: GalleryImage[], imageSizes: number[]) {
-    const smallSize = imageSizes.length >= 2 ? imageSizes[0] : findNearestImageSize(imageSizes, 640);
-    const mediumSize = imageSizes.length >= 2 ? imageSizes[1] : findNearestImageSize(imageSizes, 1536);
-
-    for (let index = 1; index < Math.min(images.length, 5); index++) {
-        const baseAvif = images[index].filename_avif?.replace(/\.avif$/i, '');
-        if (!baseAvif) continue;
-        const smallUrl = imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`);
-        preload(smallUrl, {
-            as: 'image',
-            type: 'image/avif',
-            imageSrcSet: `${smallUrl} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
-            imageSizes: '(max-width: 639px) 100vw, (max-width: 767px) 50vw, (max-width: 1279px) 33vw, (max-width: 1535px) 25vw, 20vw',
-            media: DESKTOP_FIRST_ROW_MEDIA[index - 1],
-            fetchPriority: 'auto',
-        });
-    }
+    // Viewport measurement reveals only the column count, not CSS column
+    // breaks. Keep explicit eager ownership to the universal first card.
+    void columnCount;
+    void hasMeasuredViewport;
+    return itemCount > 0 && index === 0;
 }
 
 export function resolveTopicLabel(topic: string | undefined, topicsMap: Record<string, string>): string | undefined {
@@ -188,7 +164,6 @@ interface HomeClientProps {
 }
 
 export function HomeClient({ images, tags, topics, currentTags, topicSlug, smartCollectionSlug, heading, hasMore = false, totalCount, imageSizes = DEFAULT_IMAGE_SIZES, forceShowColorChips = false }: HomeClientProps) {
-    preloadResponsiveFirstRow(images, imageSizes);
     const { t, locale } = useTranslation();
     const pathname = usePathname();
     const [allImages, setAllImages] = useState(images);

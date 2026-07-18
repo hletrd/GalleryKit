@@ -135,7 +135,9 @@ export default async function TimelinePage({
         })),
     } : null;
     const galleryLdJson = galleryLd ? safeJsonLd(galleryLd) : null;
-    const eagerArchiveImageIds = new Set(galleryPhotos.slice(0, 6).map((photo) => photo.id));
+    // CSS column breaks are browser-owned and data-dependent. Only the first
+    // DOM photo is guaranteed to be a visual column leader.
+    const eagerArchiveImageIds = new Set(galleryPhotos.slice(0, 1).map((photo) => photo.id));
 
     return (
         <div className="space-y-6">
