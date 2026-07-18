@@ -17,6 +17,7 @@ import { PublicRestoreMaintenance } from '@/components/public-restore-maintenanc
 import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 import { parseMySqlDateTimeParts } from '@/lib/mysql-datetime';
 import { ARCHIVE_MASONRY_SIZES } from '@/lib/responsive-masonry';
+import { parseArchiveYear } from '@/lib/archive-year';
 
 export const revalidate = 0;
 
@@ -71,9 +72,7 @@ export default async function TimelinePage({
         return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
     }
 
-    const requestedYear = yearParam && /^\d{4}$/.test(yearParam)
-        ? Number(yearParam)
-        : null;
+    const requestedYear = parseArchiveYear(yearParam);
     const requestedTimelinePromise = requestedYear !== null
         ? getTimelineImages(requestedYear)
         : Promise.resolve(null);
@@ -90,12 +89,12 @@ export default async function TimelinePage({
         requestedTimelinePromise,
     ]);
 
-    // Validate year param
-    const selectedYear = requestedYear ?? years[0] ?? null;
+    const requestedYearIsAvailable = requestedYear !== null && years.includes(requestedYear);
+    const selectedYear = requestedYearIsAvailable ? requestedYear : years[0] ?? null;
 
     // R4C6 COR-R4C6-02: getTimelineImages now reports truncation so the
     // page can surface it instead of silently dropping early months.
-    const { images: photos, truncated } = requestedTimeline
+    const { images: photos, truncated } = (requestedYearIsAvailable ? requestedTimeline : null)
         ?? (selectedYear !== null
             ? await getTimelineImages(selectedYear)
             : { images: [], truncated: false });

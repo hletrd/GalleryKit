@@ -102,6 +102,8 @@ describe('data-timeline.ts — timeline year index', () => {
         const body = extractFunctionBody(readSource(), 'getTimelineYears');
         expect(body).toContain('year: images.capture_year');
         expect(body).toContain('desc(images.capture_year)');
+        expect(body).toContain('isNotNull(images.capture_year)');
+        expect(body).not.toContain('isNotNull(images.capture_date)');
         expect(body).not.toMatch(/YEAR\(/);
     });
 });
@@ -112,6 +114,7 @@ describe('data-timeline.ts — getTimelineImages', () => {
         expect(body).toContain('archiveRange(year, month)');
         expect(body).toContain('gte(images.capture_date, start)');
         expect(body).toContain('lt(images.capture_date, end)');
+        expect(body).toContain('if (end !== null)');
         expect(body).not.toMatch(/YEAR\(\$\{images\.capture_date\}\)/);
         expect(body).not.toMatch(/MONTH\(\$\{images\.capture_date\}\)/);
     });

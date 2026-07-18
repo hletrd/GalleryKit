@@ -55,6 +55,28 @@ vi.mock('@/db', () => ({
 }));
 
 import { archiveRange, getYearInReviewImages } from '@/lib/data-timeline';
+import { parseArchiveYear } from '@/lib/archive-year';
+
+describe('archive year domain', () => {
+    it.each([
+        ['0000', null],
+        ['0001', null],
+        ['0999', null],
+        ['1000', 1000],
+        ['9998', 9998],
+        ['9999', 9999],
+        ['10000', null],
+        ['2e3', null],
+    ] as const)('parses %s as %s', (input, expected) => {
+        expect(parseArchiveYear(input)).toBe(expected);
+    });
+
+    it('rejects noncanonical and missing route values', () => {
+        expect(parseArchiveYear(undefined)).toBeNull();
+        expect(parseArchiveYear(' 2025')).toBeNull();
+        expect(parseArchiveYear('+2025')).toBeNull();
+    });
+});
 
 describe('data-timeline.ts — archiveRange month boundary', () => {
     // Cycle 10b AGG-C10b-06 (code-reviewer F1): the December (month === 12) wrap
@@ -88,6 +110,32 @@ describe('data-timeline.ts — archiveRange month boundary', () => {
             start: '2025-01-01 00:00:00',
             end: '2025-02-01 00:00:00',
         });
+    });
+
+    it('omits the unrepresentable upper bound at the maximum MySQL year', () => {
+        expect(archiveRange(9999)).toEqual({
+            start: '9999-01-01 00:00:00',
+            end: null,
+        });
+        expect(archiveRange(9999, 12)).toEqual({
+            start: '9999-12-01 00:00:00',
+            end: null,
+        });
+    });
+
+    it('keeps the last representable ordinary half-open year range', () => {
+        expect(archiveRange(9998)).toEqual({
+            start: '9998-01-01 00:00:00',
+            end: '9999-01-01 00:00:00',
+        });
+    });
+
+    it.each([0, 1, 999, 10000, 2025.5])('rejects out-of-domain year %s', (year) => {
+        expect(() => archiveRange(year)).toThrow(RangeError);
+    });
+
+    it.each([0, 13, 1.5])('rejects invalid month %s', (month) => {
+        expect(() => archiveRange(2025, month)).toThrow(RangeError);
     });
 });
 

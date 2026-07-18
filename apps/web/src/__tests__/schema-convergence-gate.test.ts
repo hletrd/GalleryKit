@@ -34,6 +34,9 @@ describe('schema convergence CI gate', () => {
         expect(scriptSource).toContain('INVISIBLE');
         expect(scriptSource).toContain('verifyCaptureDateSemantics');
         expect(scriptSource).toContain('2024-02-29 12:00:00');
+        expect(scriptSource).toContain('9999-12-31 23:59:59');
+        expect(scriptSource).toContain('capture_year IS NOT NULL');
+        expect(scriptSource).toContain(`includes('"using_index": true')`);
         expect(scriptSource).toContain('LIMIT 6');
     });
 
@@ -55,6 +58,7 @@ describe('schema convergence CI gate', () => {
     it('starts an explicit-year photo query with the other request-time work', () => {
         expect(timelinePageSource).toContain('const requestedTimelinePromise = requestedYear !== null');
         expect(timelinePageSource).toContain('requestedTimelinePromise,');
-        expect(timelinePageSource).toContain('const { images: photos, truncated } = requestedTimeline');
+        expect(timelinePageSource).toContain('years.includes(requestedYear)');
+        expect(timelinePageSource).toContain('(requestedYearIsAvailable ? requestedTimeline : null)');
     });
 });

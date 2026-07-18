@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { parseArchiveYear } from '@/lib/archive-year';
 
 /**
  * C2-04 (UX-03, run-10 c2) — status-bearing validity check.
@@ -16,8 +17,7 @@ export default async function YearLayout({
     params: Promise<{ year: string }>;
 }) {
     const { year } = await params;
-    const yearNum = Number(year);
-    if (!Number.isInteger(yearNum) || yearNum < 1 || yearNum > 9999) {
+    if (parseArchiveYear(year) === null) {
         notFound();
     }
     return children;

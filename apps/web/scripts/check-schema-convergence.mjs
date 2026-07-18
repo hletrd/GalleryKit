@@ -165,6 +165,7 @@ async function verifyCaptureDateSemantics(connection) {
             ['2012', '2012-02-29 12:00:00', '2012-03-01 00:00:00'],
             ['2008', '2008-02-29 12:00:00', '2008-03-01 00:00:00'],
             ['2004', '2004-02-29 12:00:00', '2004-03-01 00:00:00'],
+            ['max', '9999-12-31 23:59:59', '2024-03-01 00:00:00'],
             ['nonmatch', '2024-02-28 12:00:00', '2024-02-28 13:00:00'],
             ['null', null, '2024-02-28 13:00:00'],
         ];
@@ -188,12 +189,52 @@ async function verifyCaptureDateSemantics(connection) {
             [`${prefix}%`],
         );
         const leap = generated.find((row) => row.user_filename === `${prefix}2020`);
+        const maxDate = generated.find((row) => row.user_filename === `${prefix}max`);
         const nullDate = generated.find((row) => row.user_filename === `${prefix}null`);
         if (!leap || Number(leap.capture_year) !== 2020 || Number(leap.capture_month) !== 2 || Number(leap.capture_day) !== 29) {
             throw new Error('MySQL generated capture year/month/day values are incorrect for February 29.');
         }
         if (!nullDate || nullDate.capture_year !== null || nullDate.capture_month !== null || nullDate.capture_day !== null) {
             throw new Error('MySQL generated capture date keys must remain null for a null capture_date.');
+        }
+        if (!maxDate || Number(maxDate.capture_year) !== 9999 || Number(maxDate.capture_month) !== 12 || Number(maxDate.capture_day) !== 31) {
+            throw new Error('MySQL generated capture date keys are incorrect at the DATETIME maximum year.');
+        }
+
+        const [maxYearRows] = await connection.query(
+            `SELECT user_filename FROM images
+             WHERE processed = true AND capture_date >= '9999-01-01 00:00:00'
+               AND user_filename LIKE ?
+             ORDER BY capture_date DESC, created_at DESC, id DESC`,
+            [`${prefix}%`],
+        );
+        if (maxYearRows.length !== 1 || maxYearRows[0].user_filename !== `${prefix}max`) {
+            throw new Error('Maximum-year archive query must not require an out-of-domain exclusive bound.');
+        }
+
+        const [yearRows] = await connection.query(
+            `SELECT DISTINCT capture_year FROM images FORCE INDEX (idx_images_processed_capture_year)
+             WHERE processed = true AND capture_year IS NOT NULL
+             ORDER BY capture_year DESC`,
+        );
+        const years = yearRows.map((row) => Number(row.capture_year));
+        if (!years.includes(9999) || !years.includes(2024) || years.some((year) => !Number.isFinite(year))) {
+            throw new Error(`Timeline year discovery semantics mismatch: ${JSON.stringify(years)}.`);
+        }
+
+        const [yearExplainRows] = await connection.query(
+            `EXPLAIN FORMAT=JSON SELECT DISTINCT capture_year
+             FROM images FORCE INDEX (idx_images_processed_capture_year)
+             WHERE processed = true AND capture_year IS NOT NULL
+             ORDER BY capture_year DESC`,
+        );
+        const yearPlan = typeof yearExplainRows[0]?.EXPLAIN === 'string'
+            ? yearExplainRows[0].EXPLAIN
+            : JSON.stringify(yearExplainRows);
+        if (!yearPlan.includes('idx_images_processed_capture_year')
+            || !yearPlan.includes('capture_year')
+            || !yearPlan.includes('"using_index": true')) {
+            throw new Error(`Timeline year discovery is not covered by its generated-year index: ${yearPlan}.`);
         }
 
         const [matched] = await connection.query(

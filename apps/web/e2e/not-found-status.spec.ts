@@ -42,6 +42,16 @@ test.describe('not-found routes return HTTP 404', () => {
         expect(res.status()).toBe(404);
     });
 
+    test('year below the MySQL DATETIME domain returns 404', async ({ request }) => {
+        const res = await request.get('/en/year/0999');
+        expect(res.status()).toBe(404);
+    });
+
+    test('maximum MySQL DATETIME year remains a valid empty archive', async ({ request }) => {
+        const res = await request.get('/en/year/9999');
+        expect(res.status()).toBe(200);
+    });
+
     test('control: the home page still returns 200', async ({ request }) => {
         const res = await request.get('/en');
         expect(res.status()).toBe(200);

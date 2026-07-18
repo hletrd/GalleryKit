@@ -4,8 +4,10 @@
  * Composes queries using the same tagNamesAgg + publicSelectFields shape
  * as the masonry listing in data.ts. Does NOT modify data.ts.
  *
- * All queries target the existing composite index:
- *   (processed, capture_date, created_at) — idx_images_processed_capture_date
+ * Query/index map:
+ * - On This Day: idx_images_processed_capture_month_day
+ * - Timeline year discovery: idx_images_processed_capture_year
+ * - Archive photos: idx_images_processed_capture_date
  */
 
 import { db, images, imageTags, tags } from '@/db';
@@ -13,6 +15,9 @@ import { eq, and, desc, gte, isNotNull, lt } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import type { PrivacySensitiveKeys } from '@/lib/data';
 import { parseMySqlDateTimeParts } from '@/lib/mysql-datetime';
+import { archiveRange } from '@/lib/archive-year';
+
+export { archiveRange } from '@/lib/archive-year';
 
 // ---------------------------------------------------------------------------
 // Field sets (mirrors publicSelectFields from data.ts — privacy-safe subset)
@@ -90,23 +95,6 @@ const tagNamesAgg = sql<string | null>`GROUP_CONCAT(DISTINCT ${tags.name} ORDER 
 /** Max photos returned by the On This Day widget. */
 const ON_THIS_DAY_LIMIT = 6;
 
-function padDatePart(value: number): string {
-    return String(value).padStart(2, '0');
-}
-
-export function archiveRange(year: number, month?: number): { start: string; end: string } {
-    const startMonth = month ?? 1;
-    const endYear = month === undefined || month === 12 ? year + 1 : year;
-    // December (month === 12) must wrap to January of the next year — endYear
-    // already advances above, so endMonth must reset to 1 too (otherwise a
-    // per-month December range would emit an invalid `YYYY-13-01` DATETIME).
-    const endMonth = month === undefined || month === 12 ? 1 : month + 1;
-    return {
-        start: `${year}-${padDatePart(startMonth)}-01 00:00:00`,
-        end: `${endYear}-${padDatePart(endMonth)}-01 00:00:00`,
-    };
-}
-
 /**
  * Return up to 6 processed photos whose capture_date matches today's
  * MM-DD across any year. Photos with NULL capture_date are excluded.
@@ -156,7 +144,7 @@ export async function getTimelineYears(): Promise<number[]> {
         .where(
             and(
                 eq(images.processed, true),
-                isNotNull(images.capture_date),
+                isNotNull(images.capture_year),
             ),
         )
         .orderBy(desc(images.capture_year));
@@ -205,8 +193,8 @@ export async function getTimelineImages(year: number, month?: number): Promise<T
         eq(images.processed, true),
         isNotNull(images.capture_date),
         gte(images.capture_date, start),
-        lt(images.capture_date, end),
     ];
+    if (end !== null) conditions.push(lt(images.capture_date, end));
 
     const rows = await db
         .select({

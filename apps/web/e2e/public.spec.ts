@@ -190,6 +190,12 @@ test('timeline and year archive routes expose seeded 2025 photos', async ({ page
   await expect(page.getByRole('link', { name: '2025 in Review' })).toBeVisible();
   await expect(page.getByText('E2E Landscape')).toBeVisible();
 
+  await page.goto('/en/timeline?year=2222');
+  await expectNoNextError(page);
+  await expect(page.getByRole('link', { name: '2025 in Review' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '2222 in Review' })).toHaveCount(0);
+  await expect(page.getByText('E2E Landscape')).toBeVisible();
+
   await page.goto('/en/year/2025');
   await expectNoNextError(page);
   await expect(page.getByRole('heading', { level: 1, name: '2025 in Review' })).toBeVisible();

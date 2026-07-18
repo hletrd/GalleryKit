@@ -17,6 +17,7 @@ import { isRestoreMaintenanceActive } from '@/lib/restore-maintenance';
 import { PublicRestoreMaintenance } from '@/components/public-restore-maintenance';
 import { getPublicRestoreMaintenanceMetadata } from '@/lib/public-restore-maintenance-metadata';
 import { ARCHIVE_MASONRY_SIZES } from '@/lib/responsive-masonry';
+import { parseArchiveYear } from '@/lib/archive-year';
 
 export const revalidate = 0;
 
@@ -34,8 +35,8 @@ export async function generateMetadata({
         getTranslations('timeline'),
         getSeoSettings(),
     ]);
-    const yearNum = Number(yearParam);
-    if (!Number.isInteger(yearNum) || yearNum < 1 || yearNum > 9999) {
+    const yearNum = parseArchiveYear(yearParam);
+    if (yearNum === null) {
         // C2-04 (UX-03, run-10 c2): notFound() here yields a real HTTP 404 —
         // the page body's notFound() fires after the streamed 200 shell
         // (see the p/[id] generateMetadata note for the full mechanism).
@@ -80,9 +81,9 @@ export default async function YearInReviewPage({
     params: Promise<{ year: string }>;
 }) {
     const { year: yearParam } = await params;
-    const yearNum = Number(yearParam);
+    const yearNum = parseArchiveYear(yearParam);
 
-    if (!Number.isInteger(yearNum) || yearNum < 1 || yearNum > 9999) {
+    if (yearNum === null) {
         return notFound();
     }
     if (isRestoreMaintenanceActive()) {
