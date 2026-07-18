@@ -11,31 +11,42 @@ import {
 describe('responsive masonry source-size policy', () => {
     it('aligns the full archive policy with inclusive Tailwind breakpoints', () => {
         expect(ARCHIVE_MASONRY_SIZES).toBe(
-            '(min-width: 1536px) 20vw, (min-width: 1280px) 25vw, '
-            + '(min-width: 768px) 33vw, (min-width: 640px) 50vw, 100vw',
+            '(min-width: 1536px) 288px, (min-width: 1280px) 300px, '
+            + '(min-width: 1024px) 320px, (min-width: 768px) 234px, '
+            + '(min-width: 640px) 296px, calc(100vw - 32px)',
         );
     });
 
-    it('aligns shared groups with their md/lg/xl 2/3/4-column transitions', () => {
+    it('aligns shared groups with nested padding and md/lg/xl 2/3/4-column transitions', () => {
         expect(SHARED_GROUP_MASONRY_SIZES).toBe(
-            '(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, '
-            + '(min-width: 768px) 50vw, 100vw',
+            '(min-width: 1536px) 356px, (min-width: 1280px) 292px, '
+            + '(min-width: 1024px) 309px, (min-width: 768px) 344px, '
+            + '(min-width: 640px) 576px, calc(100vw - 64px)',
         );
     });
 
     it('keeps a one-photo gallery full width at every breakpoint', () => {
         expect(getMainMasonrySizes(1)).toBe(
-            '(min-width: 1536px) 100vw, (min-width: 1280px) 100vw, '
-            + '(min-width: 768px) 100vw, (min-width: 640px) 100vw, 100vw',
+            '(min-width: 1536px) 1504px, (min-width: 1280px) 1248px, '
+            + '(min-width: 1024px) 992px, (min-width: 768px) 736px, '
+            + '(min-width: 640px) 608px, calc(100vw - 32px)',
         );
     });
 
     it('never advertises more columns than sparse galleries render', () => {
-        expect(getMainMasonrySizes(2)).toContain('(min-width: 1536px) 50vw');
-        expect(getMainMasonrySizes(3)).toContain('(min-width: 1536px) 33vw');
-        expect(getMainMasonrySizes(4)).toContain('(min-width: 1536px) 25vw');
+        expect(getMainMasonrySizes(2)).toContain('(min-width: 1536px) 744px');
+        expect(getMainMasonrySizes(3)).toContain('(min-width: 1536px) 490px');
+        expect(getMainMasonrySizes(4)).toContain('(min-width: 1536px) 364px');
         expect(getMainMasonrySizes(5)).toBe(ARCHIVE_MASONRY_SIZES);
         expect(getMainMasonrySizes(50)).toBe(ARCHIVE_MASONRY_SIZES);
+    });
+
+    it('tracks container-width transitions even when the column count stays constant', () => {
+        expect(getMainMasonrySizes(3)).toBe(
+            '(min-width: 1536px) 490px, (min-width: 1280px) 405px, '
+            + '(min-width: 1024px) 320px, (min-width: 768px) 234px, '
+            + '(min-width: 640px) 296px, calc(100vw - 32px)',
+        );
     });
 
     it('uses the one-column safe floor for empty or invalid counts', () => {

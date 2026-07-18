@@ -1,16 +1,10 @@
-const SLOT_SIZE_BY_COLUMNS = {
-    1: '100vw',
-    2: '50vw',
-    3: '33vw',
-    4: '25vw',
-    5: '20vw',
-} as const;
-
 export const MASONRY_WIDTH_BUCKET_PX = 48;
 export const MASONRY_COLUMN_GAP_PX = 16;
 export const MASONRY_CARD_WIDTH_FALLBACK_PX = 300;
+const PUBLIC_CONTAINER_HORIZONTAL_PADDING_PX = 32;
+const SHARED_GROUP_TOTAL_HORIZONTAL_PADDING_PX = 64;
 
-export type MasonryColumnCount = keyof typeof SLOT_SIZE_BY_COLUMNS;
+export type MasonryColumnCount = 1 | 2 | 3 | 4 | 5;
 
 function normalizeItemCount(itemCount: number): number {
     if (!Number.isFinite(itemCount)) return 1;
@@ -34,32 +28,47 @@ export function estimateMasonryCardWidth(containerWidth: number, columns: number
     return width > 0 ? width : MASONRY_CARD_WIDTH_FALLBACK_PX;
 }
 
-function slotSize(itemCount: number, maximumColumns: MasonryColumnCount): string {
+function cappedSlotSize(
+    itemCount: number,
+    maximumColumns: MasonryColumnCount,
+    containerMaxWidth: number,
+    horizontalPadding: number,
+): string {
     const columns = getEffectiveMasonryColumns(itemCount, maximumColumns);
-    return SLOT_SIZE_BY_COLUMNS[columns];
+    return `${estimateMasonryCardWidth(containerMaxWidth - horizontalPadding, columns)}px`;
 }
 
 /**
  * Mirrors `columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5`.
  * The item-count cap matches HomeClient's dynamic class policy, so a sparse
- * gallery never advertises more columns than it actually renders.
+ * gallery never advertises more columns than it actually renders. Tailwind's
+ * default `.container` gains a fixed max-width at every breakpoint, including
+ * `lg` where the column count stays at three. Encode those capped, padded,
+ * gapped slot widths during SSR so an ultrawide browser does not start a 1536w
+ * request before the client can observe the real masonry width.
  */
 export function getMainMasonrySizes(itemCount: number): string {
     return [
-        `(min-width: 1536px) ${slotSize(itemCount, 5)}`,
-        `(min-width: 1280px) ${slotSize(itemCount, 4)}`,
-        `(min-width: 768px) ${slotSize(itemCount, 3)}`,
-        `(min-width: 640px) ${slotSize(itemCount, 2)}`,
-        slotSize(itemCount, 1),
+        `(min-width: 1536px) ${cappedSlotSize(itemCount, 5, 1536, PUBLIC_CONTAINER_HORIZONTAL_PADDING_PX)}`,
+        `(min-width: 1280px) ${cappedSlotSize(itemCount, 4, 1280, PUBLIC_CONTAINER_HORIZONTAL_PADDING_PX)}`,
+        `(min-width: 1024px) ${cappedSlotSize(itemCount, 3, 1024, PUBLIC_CONTAINER_HORIZONTAL_PADDING_PX)}`,
+        `(min-width: 768px) ${cappedSlotSize(itemCount, 3, 768, PUBLIC_CONTAINER_HORIZONTAL_PADDING_PX)}`,
+        `(min-width: 640px) ${cappedSlotSize(itemCount, 2, 640, PUBLIC_CONTAINER_HORIZONTAL_PADDING_PX)}`,
+        `calc(100vw - ${PUBLIC_CONTAINER_HORIZONTAL_PADDING_PX}px)`,
     ].join(', ');
 }
 
 export const ARCHIVE_MASONRY_SIZES = getMainMasonrySizes(5);
 
-/** Mirrors `columns-1 md:columns-2 lg:columns-3 xl:columns-4`. */
+/**
+ * Mirrors `columns-1 md:columns-2 lg:columns-3 xl:columns-4` inside the shared
+ * page's second `container px-4`, nested under the public layout container.
+ */
 export const SHARED_GROUP_MASONRY_SIZES = [
-    '(min-width: 1280px) 25vw',
-    '(min-width: 1024px) 33vw',
-    '(min-width: 768px) 50vw',
-    '100vw',
+    `(min-width: 1536px) ${cappedSlotSize(4, 4, 1536, SHARED_GROUP_TOTAL_HORIZONTAL_PADDING_PX)}`,
+    `(min-width: 1280px) ${cappedSlotSize(4, 4, 1280, SHARED_GROUP_TOTAL_HORIZONTAL_PADDING_PX)}`,
+    `(min-width: 1024px) ${cappedSlotSize(4, 3, 1024, SHARED_GROUP_TOTAL_HORIZONTAL_PADDING_PX)}`,
+    `(min-width: 768px) ${cappedSlotSize(4, 2, 768, SHARED_GROUP_TOTAL_HORIZONTAL_PADDING_PX)}`,
+    `(min-width: 640px) ${cappedSlotSize(4, 1, 640, SHARED_GROUP_TOTAL_HORIZONTAL_PADDING_PX)}`,
+    `calc(100vw - ${SHARED_GROUP_TOTAL_HORIZONTAL_PADDING_PX}px)`,
 ].join(', ');

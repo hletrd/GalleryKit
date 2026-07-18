@@ -16,12 +16,13 @@ import type { GalleryImage } from './home-client';
 // C2-19 (run-10 c2): extracted from home-client.tsx's inline orderedImages.map
 // so per-card work (title/alt derivation, isWideGamutPrimary, srcset strings)
 // only re-runs for cards whose OWN props changed, instead of for every loaded
-// card on every allImages append (infinite scroll), viewport-bucket change, or
-// unrelated parent state flip (e.g. showBackToTop).
+// card on every allImages append (infinite scroll), unchanged container-width
+// observation, or unrelated parent state flip (e.g. showBackToTop).
 interface MasonryCardProps {
     image: GalleryImage;
     // DES-R5C3-04-derived estimate of the rendered card width; changes when
-    // the viewport/column-count bucket changes (must force a re-render).
+    // the observed masonry-container bucket or effective column count changes
+    // (and must then force a re-render).
     estimatedCardWidth: number;
     // Only the first DOM card is a universal visual leader in balanced CSS
     // columns, so it alone owns explicit eager/high scheduling.
@@ -179,8 +180,11 @@ function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, im
 // existing entries), estimatedCardWidth/isPriority/topicLabel/imageSizes/
 // responsiveSizes are primitives or parent-stable references, and onLinkClick
 // is a useCallback keyed only on scrollKey. So an append beyond the five-column
-// cap, a viewport-bucket change that doesn't affect this card, or an unrelated
-// state flip (showBackToTop) all bail out here. An append crossing a 2/3/4/5
-// item threshold intentionally changes responsiveSizes and re-renders existing
-// cards so candidate selection follows the newly available columns.
+// cap, an observation within the current container-width bucket, or an
+// unrelated state flip (showBackToTop) all bail out here. An append crossing a
+// 2/3/4/5-item threshold intentionally changes responsiveSizes and re-renders
+// existing cards so candidate selection follows the newly available columns.
+// Unrelated parent state and observations that remain in the same
+// container-width bucket bail out; a changed estimatedCardWidth intentionally
+// re-renders every card.
 export const MasonryCard = memo(MasonryCardImpl);
