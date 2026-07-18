@@ -151,7 +151,7 @@ function TagFilterImpl({
                         </span>
                     )}
                 </summary>
-                <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label={t('home.tagFilter')}>
+                <div className="mt-2 hidden flex-wrap gap-2 group-open:flex" role="group" aria-label={t('home.tagFilter')}>
                     {chips}
                 </div>
             </details>
