@@ -125,6 +125,21 @@ export function computeIsAboveFold(index: number, columnCount: number, itemCount
     return index < Math.min(columnCount, itemCount);
 }
 
+const MAX_MASONRY_COLUMNS = 5;
+
+export function computeShouldEagerLoad(
+    index: number,
+    columnCount: number,
+    itemCount: number,
+    hasMeasuredViewport: boolean,
+): boolean {
+    // SSR cannot know the viewport. Eager-load one maximum-width row so cards
+    // 3-5 on desktop enter the browser's initial queue, while fetchPriority
+    // remains high only for the conservative initial two above-fold cards.
+    const eagerCount = hasMeasuredViewport ? columnCount : MAX_MASONRY_COLUMNS;
+    return index < Math.min(eagerCount, itemCount);
+}
+
 export function resolveTopicLabel(topic: string | undefined, topicsMap: Record<string, string>): string | undefined {
     return (topic && topicsMap[topic]) || topic;
 }
@@ -322,6 +337,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                         image={image}
                         estimatedCardWidth={estimatedCardWidth}
                         isAboveFold={computeIsAboveFold(index, columnCount, itemCount)}
+                        shouldEagerLoad={computeShouldEagerLoad(index, columnCount, itemCount, viewportWidth > 0)}
                         topicLabel={resolveTopicLabel(image.topic, topicsMap)}
                         imageSizes={imageSizes}
                         onLinkClick={saveScrollPosition}

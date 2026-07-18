@@ -28,6 +28,9 @@ interface MasonryCardProps {
     // First N cards for the current column count; must force a re-render
     // when the column count or item count changes.
     isAboveFold: boolean;
+    // The SSR-safe initial eager window can be wider than isAboveFold so a
+    // five-column desktop's first row starts loading before hydration.
+    shouldEagerLoad: boolean;
     // Pre-resolved (image.topic && topicsMap[image.topic]) || image.topic so
     // the card doesn't need the whole topicsMap object as a prop.
     topicLabel?: string;
@@ -37,7 +40,7 @@ interface MasonryCardProps {
     onLinkClick: () => void;
 }
 
-function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, topicLabel, imageSizes, onLinkClick }: MasonryCardProps) {
+function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, shouldEagerLoad, topicLabel, imageSizes, onLinkClick }: MasonryCardProps) {
     const { t, locale } = useTranslation();
 
     // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is now baked into
@@ -115,7 +118,7 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, topicLabel, i
                                         width={image.width}
                                         height={image.height}
                                         className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                        loading={isAboveFold ? "eager" : "lazy"}
+                                        loading={shouldEagerLoad ? "eager" : "lazy"}
                                         decoding="async"
                                         fetchPriority={isAboveFold ? "high" : "auto"}
                                     />
@@ -137,6 +140,8 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, topicLabel, i
                                     // thread during masonry scroll. next/image forwards the
                                     // attribute through to the underlying <img>.
                                     decoding="async"
+                                    loading={shouldEagerLoad ? "eager" : "lazy"}
+                                    fetchPriority={isAboveFold ? "high" : "auto"}
                                 />
                             );
                         })()}

@@ -35,7 +35,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { computeIsAboveFold, resolveTopicLabel } from '@/components/home-client';
+import { computeIsAboveFold, computeShouldEagerLoad, resolveTopicLabel } from '@/components/home-client';
 
 const readSrc = (rel: string) => readFileSync(resolve(__dirname, '..', rel), 'utf8');
 
@@ -75,6 +75,7 @@ function buildCardProps(
         image,
         estimatedCardWidth,
         isAboveFold: computeIsAboveFold(index, columnCount, itemCount),
+        shouldEagerLoad: computeShouldEagerLoad(index, columnCount, itemCount, true),
         topicLabel: resolveTopicLabel(image.topic, topicsMap),
         imageSizes,
         onLinkClick,
@@ -104,6 +105,7 @@ describe('C2-19 MasonryCard memoization contract', () => {
         expect(mapCall).toContain('image={image}');
         expect(mapCall).toContain('estimatedCardWidth={estimatedCardWidth}');
         expect(mapCall).toContain('isAboveFold={computeIsAboveFold(index, columnCount, itemCount)}');
+        expect(mapCall).toContain('shouldEagerLoad={computeShouldEagerLoad(index, columnCount, itemCount, viewportWidth > 0)}');
         expect(mapCall).toContain('topicLabel={resolveTopicLabel(image.topic, topicsMap)}');
         // imageSizes is passed by reference, not spread into a new array.
         expect(mapCall).toContain('imageSizes={imageSizes}');
@@ -183,6 +185,13 @@ describe('C2-19 computeIsAboveFold / resolveTopicLabel pure helpers', () => {
         // itemCount smaller than columnCount clamps the above-fold window.
         expect(computeIsAboveFold(1, 5, 2)).toBe(true);
         expect(computeIsAboveFold(2, 5, 2)).toBe(false);
+    });
+
+    it('eager-loads a maximum first row before viewport measurement', () => {
+        expect(computeShouldEagerLoad(4, 2, 10, false)).toBe(true);
+        expect(computeShouldEagerLoad(5, 2, 10, false)).toBe(false);
+        expect(computeShouldEagerLoad(1, 2, 10, true)).toBe(true);
+        expect(computeShouldEagerLoad(2, 2, 10, true)).toBe(false);
     });
 
     it('resolveTopicLabel prefers the resolved label, falling back to the raw slug', () => {
