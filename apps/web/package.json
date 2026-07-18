@@ -17,6 +17,7 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed-admin.ts",
     "init": "tsx scripts/init-db.ts",
+    "check:schema-convergence": "node scripts/check-schema-convergence.mjs",
     "restore:maintenance": "node scripts/restore-maintenance-recovery.mjs",
     "test:e2e": "env -u NO_COLOR npx playwright test",
     "test:e2e:admin": "env -u NO_COLOR E2E_ADMIN_ENABLED=true npx playwright test e2e/admin.spec.ts e2e/origin-guard.spec.ts",

@@ -253,9 +253,10 @@ operator-enabled rather than assumed live in production.
 ## Database Indexes
 
 The `images` table has composite indexes optimized for query patterns:
-- `(processed, capture_date, created_at)` — homepage and gallery listing sort
+- `(processed, capture_date, created_at, id)` — homepage and gallery listing sort, including the canonical final tie-breaker (migration 0032)
+- `(processed, capture_month, capture_day, capture_date, created_at, id)` — cross-year On This Day lookup through stored generated month/day fields, without applying `MONTH()`/`DAY()` to every row (migration 0032)
 - `(processed, created_at)` — prev/next navigation
-- `(topic, processed, capture_date, created_at)` — topic-filtered listings
+- `(topic, processed, capture_date, created_at, id)` — topic-filtered listings, including the canonical final tie-breaker (migration 0032)
 - `(processed, updated_at, created_at, id)` and `(topic, processed, updated_at, created_at, id)` — `updated_at`-ordered feed/sitemap listings so admin edits advance the entry's freshness instant (`idx_images_processed_updated_at` / `idx_images_topic_updated_at`, migration 0029)
 - `(user_filename)` — upload deduplication
 - `(uploaded_by)` — admin upload-attribution queries
@@ -488,6 +489,13 @@ It only checks `MAX(created_at)` — not per-entry hashes — across `__drizzle_
 3. Update `reconcileLegacySchema` in `migrate.js` to mirror the new schema state (idempotent CREATE/ALTER) so a fresh DB without `__drizzle_migrations` rows can baseline cleanly.
 4. Update `apps/web/src/db/schema.ts`.
 5. If the new column is admin-only, add it to the `_omit*` block in `apps/web/src/lib/data.ts` AND to the `_PrivacySensitiveKeys` type guard AND to the `SENSITIVE_KEYS` fixture in `apps/web/src/__tests__/privacy-fields.test.ts`.
+
+CI also runs `npm run check:schema-convergence --workspace=apps/web` after
+initializing its disposable MySQL database. The probe is pinned to the latest
+migration tag, refuses non-local or non-test/CI/e2e database targets, removes
+the latest schema artifacts, and requires `reconcileLegacySchema` to recover
+the full structured schema exactly and remain unchanged on a second run. Every
+schema migration must advance that pin and the simulated drift it exercises.
 
 **Historical-comment errata:** older migration comments may mention prior product surfaces such as the Lightroom plugin or Florence-2 planning language. Treat migration SQL files as historical schema records, not current operator runbooks or current feature-state evidence. Use this file, `apps/web/README.md`, and current source/tests for live behavior.
 

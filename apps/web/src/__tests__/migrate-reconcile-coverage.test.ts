@@ -15,8 +15,9 @@
  * name. It is a SOURCE tripwire, not a structural validator — it cannot
  * verify types or defaults — but it catches the real failure class: a new
  * column landing in schema.ts + drizzle/*.sql without the reconcile mirror.
- * The authoritative end-to-end check remains a fresh-DB `npm run init`
- * followed by a drizzle-vs-information_schema diff (performed in R4C1).
+ * The authoritative end-to-end check is the disposable-MySQL
+ * `check:schema-convergence` CI gate, which degrades latest artifacts and
+ * compares the recovered structured INFORMATION_SCHEMA snapshot exactly.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -118,8 +119,8 @@ describe('reconcileLegacySchema mirrors the full Drizzle schema (COR-R4C1-13)', 
  * the drizzle SQL is named somewhere in migrate.js (inline `INDEX <name>` in a
  * CREATE TABLE body OR a standalone `ensureIndex(..., '<name>', ...)`). It is a
  * SOURCE tripwire (name presence, not structural equivalence) — the
- * authoritative end-to-end check remains a fresh-DB init + information_schema
- * diff — but it catches the real failure class.
+ * authoritative end-to-end check remains the disposable-MySQL convergence
+ * gate — but it catches the real failure class locally without a DB.
  */
 describe('reconcileLegacySchema mirrors every drizzle SQL index (AGG-R8-10 / TRC-1)', () => {
     const drizzleDir = path.resolve(__dirname, '..', '..', 'drizzle');

@@ -316,6 +316,33 @@ async function ensureIndex(connection, dbName, tableName, indexName, createSql) 
     return false;
 }
 
+async function indexColumns(connection, dbName, tableName, indexName) {
+    const [rows] = await connection.query(
+        `SELECT COLUMN_NAME
+         FROM INFORMATION_SCHEMA.STATISTICS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?
+         ORDER BY SEQ_IN_INDEX`,
+        [dbName, tableName, indexName]
+    );
+    return rows.map((row) => row.COLUMN_NAME);
+}
+
+// Existing legacy indexes can have the right name but an obsolete column
+// shape. Converge both absence and shape drift; identifiers are passed through
+// mysql2's identifier placeholders instead of string interpolation.
+async function ensureIndexColumns(connection, dbName, tableName, indexName, expectedColumns, createSql) {
+    const actualColumns = await indexColumns(connection, dbName, tableName, indexName);
+    if (actualColumns.length === expectedColumns.length
+        && actualColumns.every((column, index) => column === expectedColumns[index])) {
+        return false;
+    }
+    if (actualColumns.length > 0) {
+        await connection.query('DROP INDEX ?? ON ??', [indexName, tableName]);
+    }
+    await connection.query(createSql);
+    return true;
+}
+
 async function ensureForeignKey(connection, dbName, tableName, constraintName, createSql) {
     if (!(await foreignKeyExists(connection, dbName, tableName, constraintName))) {
         await connection.query(createSql);
@@ -411,6 +438,8 @@ async function reconcileLegacySchema(connection, dbName) {
             share_key varchar(255) DEFAULT NULL,
             topic varchar(255) NOT NULL,
             capture_date datetime DEFAULT NULL,
+            capture_month tinyint unsigned GENERATED ALWAYS AS (MONTH(capture_date)) STORED,
+            capture_day tinyint unsigned GENERATED ALWAYS AS (DAY(capture_date)) STORED,
             camera_model varchar(255) DEFAULT NULL,
             lens_model varchar(255) DEFAULT NULL,
             iso int DEFAULT NULL,
@@ -473,6 +502,8 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'pipeline_version', 'ALTER TABLE images ADD COLUMN pipeline_version int DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'was_downscaled', 'ALTER TABLE images ADD COLUMN was_downscaled boolean NOT NULL DEFAULT false');
     await ensureColumn(connection, dbName, 'images', 'derivative_max_width', 'ALTER TABLE images ADD COLUMN derivative_max_width int DEFAULT NULL');
+    await ensureColumn(connection, dbName, 'images', 'capture_month', 'ALTER TABLE images ADD COLUMN capture_month tinyint unsigned GENERATED ALWAYS AS (MONTH(capture_date)) STORED AFTER capture_date');
+    await ensureColumn(connection, dbName, 'images', 'capture_day', 'ALTER TABLE images ADD COLUMN capture_day tinyint unsigned GENERATED ALWAYS AS (DAY(capture_date)) STORED AFTER capture_month');
     // R17-L2: admin user that performed the upload (admin-only PII).
     // Nullable so legacy rows keep working; ON DELETE SET NULL keeps the
     // photo when the admin is removed but drops the authorship link.
@@ -720,11 +751,18 @@ async function reconcileLegacySchema(connection, dbName) {
     // reconciled here so a baselined legacy DB matches the post-0023 schema.
 
     await ensureIndex(connection, dbName, 'image_tags', 'idx_image_tags_tag_id', 'CREATE INDEX idx_image_tags_tag_id ON image_tags (tag_id)');
-    await ensureIndex(connection, dbName, 'images', 'idx_images_processed_capture_date', 'CREATE INDEX idx_images_processed_capture_date ON images (processed, capture_date, created_at)');
+    await ensureIndexColumns(connection, dbName, 'images', 'idx_images_processed_capture_date',
+        ['processed', 'capture_date', 'created_at', 'id'],
+        'CREATE INDEX idx_images_processed_capture_date ON images (processed, capture_date, created_at, id)');
+    await ensureIndexColumns(connection, dbName, 'images', 'idx_images_processed_capture_month_day',
+        ['processed', 'capture_month', 'capture_day', 'capture_date', 'created_at', 'id'],
+        'CREATE INDEX idx_images_processed_capture_month_day ON images (processed, capture_month, capture_day, capture_date, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_created_at', 'CREATE INDEX idx_images_processed_created_at ON images (processed, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_updated_at', 'CREATE INDEX idx_images_processed_updated_at ON images (processed, updated_at, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_pipeline_version', 'CREATE INDEX idx_images_processed_pipeline_version ON images (processed, pipeline_version, id)');
-    await ensureIndex(connection, dbName, 'images', 'idx_images_topic', 'CREATE INDEX idx_images_topic ON images (topic, processed, capture_date, created_at)');
+    await ensureIndexColumns(connection, dbName, 'images', 'idx_images_topic',
+        ['topic', 'processed', 'capture_date', 'created_at', 'id'],
+        'CREATE INDEX idx_images_topic ON images (topic, processed, capture_date, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_topic_updated_at', 'CREATE INDEX idx_images_topic_updated_at ON images (topic, processed, updated_at, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_user_filename', 'CREATE INDEX idx_images_user_filename ON images (user_filename)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_uploaded_by', 'CREATE INDEX idx_images_uploaded_by ON images (uploaded_by)');
@@ -1066,6 +1104,7 @@ module.exports = {
     main,
     migrateLegacyOriginalUploads,
     prepareLegacyDatabaseIfNeeded,
+    reconcileLegacySchema,
     resolveUploadRoots,
     runMigrations,
 };

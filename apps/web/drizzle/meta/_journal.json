@@ -225,6 +225,13 @@
       "when": 1784373902000,
       "tag": "0031_derivative_max_width",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1784376151000,
+      "tag": "0032_capture_date_indexes",
+      "breakpoints": true
     }
   ]
 }

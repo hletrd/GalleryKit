@@ -72,6 +72,11 @@ jobs:
       - name: Initialize database
         run: npm run init --workspace=apps/web
 
+      - name: Verify schema convergence
+        run: npm run check:schema-convergence --workspace=apps/web
+        env:
+          SCHEMA_CONVERGENCE_ALLOW_MUTATION: "true"
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
         working-directory: apps/web

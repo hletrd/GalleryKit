@@ -6,7 +6,7 @@ import * as path from 'path';
  * US-P22 — Timeline / On-this-day / Year-in-review
  *
  * Covers:
- *  1. On-this-day predicate: MONTH() + DAY() + isNotNull(capture_date)
+ *  1. On-this-day predicate: generated month/day + isNotNull(capture_date)
  *     so NULL capture_date rows are NEVER matched.
  *  2. Cross-year MM-DD match: the query does NOT filter by YEAR(),
  *     so the same MM-DD appears across multiple years.
@@ -47,10 +47,12 @@ function extractFunctionBody(source: string, fnName: string): string {
 }
 
 describe('data-timeline.ts — on-this-day predicate', () => {
-    it('getOnThisDayImages uses MONTH() and DAY() predicates', () => {
+    it('getOnThisDayImages uses the indexed generated month/day columns', () => {
         const body = extractFunctionBody(readSource(), 'getOnThisDayImages');
-        expect(body).toMatch(/MONTH\(\$\{images\.capture_date\}\)\s*=\s*\$\{month\}/);
-        expect(body).toMatch(/DAY\(\$\{images\.capture_date\}\)\s*=\s*\$\{day\}/);
+        expect(body).toContain('eq(images.capture_month, month)');
+        expect(body).toContain('eq(images.capture_day, day)');
+        expect(body).not.toMatch(/MONTH\(\$\{images\.capture_date\}\)/);
+        expect(body).not.toMatch(/DAY\(\$\{images\.capture_date\}\)/);
     });
 
     it('getOnThisDayImages requires capture_date to be NOT NULL (excludes null rows)', () => {
@@ -180,7 +182,8 @@ describe('data-timeline.ts — getYearInReviewImages grouping logic', () => {
     });
 
     it('cross-year MM-DD: two photos on Jan-15 in different years both appear in on-this-day results', () => {
-        // The on-this-day query uses MONTH() + DAY() only — both photos match.
+        // The generated lookup columns preserve month/day-only semantics —
+        // both photos match regardless of capture year.
         // We verify by checking the predicate directly (no DB needed).
         const photos = [
             { capture_date: '2022-01-15 10:00:00', id: 1 },

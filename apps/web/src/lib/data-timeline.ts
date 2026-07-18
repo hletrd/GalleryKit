@@ -111,10 +111,8 @@ export function archiveRange(year: number, month?: number): { start: string; end
  * Return up to 6 processed photos whose capture_date matches today's
  * MM-DD across any year. Photos with NULL capture_date are excluded.
  *
- * Uses MONTH() + DAY() for straightforward MM-DD matching. Those predicates
- * are not sargable on capture_date; this is acceptable at the current
- * personal-gallery scale, but large installs should add generated month/day
- * columns or a range/index strategy before relying on this widget heavily.
+ * Uses stored generated month/day columns so the cross-year match remains
+ * sargable through idx_images_processed_capture_month_day.
  */
 export async function getOnThisDayImages(month: number, day: number) {
     const rows = await db
@@ -129,8 +127,8 @@ export async function getOnThisDayImages(month: number, day: number) {
             and(
                 eq(images.processed, true),
                 isNotNull(images.capture_date),
-                sql`MONTH(${images.capture_date}) = ${month}`,
-                sql`DAY(${images.capture_date}) = ${day}`,
+                eq(images.capture_month, month),
+                eq(images.capture_day, day),
             ),
         )
         .groupBy(images.id)

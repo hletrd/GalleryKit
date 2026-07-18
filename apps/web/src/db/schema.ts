@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, primaryKey, bigint, customType } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, tinyint, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, primaryKey, bigint, customType } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
 const mediumblob = customType<{ data: Buffer; driverData: Buffer }>({
@@ -40,6 +40,10 @@ export const images = mysqlTable("images", {
 
     // EXIF Data
     capture_date: datetime("capture_date", { mode: 'string' }),
+    // C11: stored generated columns keep the cross-year MM-DD lookup sargable.
+    // They are internal query accelerators, never public metadata.
+    capture_month: tinyint("capture_month", { unsigned: true }).generatedAlwaysAs(sql`MONTH(capture_date)`, { mode: 'stored' }),
+    capture_day: tinyint("capture_day", { unsigned: true }).generatedAlwaysAs(sql`DAY(capture_date)`, { mode: 'stored' }),
     camera_model: varchar("camera_model", { length: 255 }),
     lens_model: varchar("lens_model", { length: 255 }),
     iso: int("iso"),
@@ -125,11 +129,12 @@ export const images = mysqlTable("images", {
     // and per-image encode fallback.
     avif_10bit: boolean('avif_10bit'),
 }, (table) => ({
-    idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date, table.created_at),
+    idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date, table.created_at, table.id),
+    idxImagesProcessedCaptureMonthDay: index('idx_images_processed_capture_month_day').on(table.processed, table.capture_month, table.capture_day, table.capture_date, table.created_at, table.id),
     idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),
     idxImagesProcessedUpdatedAt: index('idx_images_processed_updated_at').on(table.processed, table.updated_at, table.created_at, table.id),
     idxImagesProcessedPipelineVersion: index('idx_images_processed_pipeline_version').on(table.processed, table.pipeline_version, table.id),
-    idxImagesTopic: index('idx_images_topic').on(table.topic, table.processed, table.capture_date, table.created_at),
+    idxImagesTopic: index('idx_images_topic').on(table.topic, table.processed, table.capture_date, table.created_at, table.id),
     idxImagesTopicUpdatedAt: index('idx_images_topic_updated_at').on(table.topic, table.processed, table.updated_at, table.created_at, table.id),
     idxImagesUserFilename: index('idx_images_user_filename').on(table.user_filename),
     idxImagesUploadedBy: index('idx_images_uploaded_by').on(table.uploaded_by),

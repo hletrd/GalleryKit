@@ -268,6 +268,10 @@ const adminSelectFields = {
     user_filename: images.user_filename,
     topic: images.topic,
     capture_date: images.capture_date,
+    // Internal generated lookup keys. Admin-visible for schema symmetry, but
+    // explicitly omitted from every public/listing projection below.
+    capture_month: images.capture_month,
+    capture_day: images.capture_day,
     created_at: images.created_at,
     // R17-M2: expose updated_at to the Atom feed and any future
     // freshness-aware consumer. Already on the schema and onUpdateNow(),
@@ -344,6 +348,8 @@ const adminSelectFields = {
 // to maintain the derivation relationship with adminSelectFields.
 const {
     camera_model: _omitCameraModel,
+    capture_month: _omitCaptureMonthAdminList,
+    capture_day: _omitCaptureDayAdminList,
     lens_model: _omitLensModel,
     iso: _omitIso,
     f_number: _omitFNumber,
@@ -382,6 +388,8 @@ const adminListSelectFields = {
 // intentional review whenever this public contract changes.
 const {
     latitude: _omitLatitude,
+    capture_month: _omitCaptureMonth,
+    capture_day: _omitCaptureDay,
     longitude: _omitLongitude,
     filename_original: _omitFilenameOriginal,
     user_filename: _omitUserFilename,
@@ -424,6 +432,8 @@ const publicSelectFields = {
 // DO NOT use this field set without the map_visible topic filter.
 const {
     filename_original: _omitFilenameOriginalMap,
+    capture_month: _omitCaptureMonthMap,
+    capture_day: _omitCaptureDayMap,
     user_filename: _omitUserFilenameMap,
     original_format: _omitOriginalFormatMap,
     original_file_size: _omitOriginalFileSizeMap,
@@ -478,7 +488,7 @@ export const publicMapSelectFieldKeys = Object.freeze(
 // R4C9 TEST-R4C9-04: exported so sibling public-select mirrors (e.g.
 // lib/data-timeline.ts) can reuse the SAME union for their own
 // compile-time guards instead of hand-copying a comment that drifts.
-export type PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at' | 'processing_settings_json' | 'color_space' | 'icc_profile_name' | 'pipeline_version';
+export type PrivacySensitiveKeys = 'latitude' | 'longitude' | 'filename_original' | 'user_filename' | 'processed' | 'original_format' | 'original_file_size' | 'color_pipeline_decision' | 'is_hdr' | 'has_gain_map' | 'was_downscaled' | 'transfer_function' | 'matrix_coefficients' | 'bit_depth' | 'uploaded_by' | 'processing_error' | 'failed_at' | 'processing_settings_json' | 'color_space' | 'icc_profile_name' | 'pipeline_version' | 'capture_month' | 'capture_day';
 type _PrivacySensitiveKeys = PrivacySensitiveKeys;
 type _SensitiveKeysInPublic = Extract<keyof typeof publicSelectFields, _PrivacySensitiveKeys>;
 const _privacyGuard: _SensitiveKeysInPublic extends never ? true : [_SensitiveKeysInPublic, 'ERROR: privacy-sensitive field found in publicSelectFields — see PRIVACY comment above'] = true;
