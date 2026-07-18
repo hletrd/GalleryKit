@@ -33,11 +33,19 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
+- Cycle 12/100 (2026-07-18) Implementation Plan - real prior-cursor migration
+  convergence, generated-column/index definition repair, indexed timeline-year
+  discovery, executable MySQL date semantics, release-ledger reconciliation,
+  full gates, signed push, and per-cycle deploy
+  (`cycle-12-2026-07-18-plan.md`)
+- Cycle 12/100 Deferred Reconciliation - no new deferrals; every Cycle 12
+  finding is scheduled (`cycle-12-2026-07-18-deferred.md`)
 - Cycle 11/100 (2026-07-18) Implementation Plan - cap persisted derivative
   maxima to delivered files, add disposable-MySQL reconcile convergence,
   disable search-result RSC prefetch, close schema-triggered index work, run
   full gates, signed push, and per-cycle deploy
-  (`cycle-11-2026-07-18-plan.md`)
+  (`cycle-11-2026-07-18-plan.md`; source publication verified through signed
+  `ff6532f4`, original deploy result unknown and not inferred)
 - Cycle 11/100 Deferred Reconciliation - no new deferrals; records fired
   schema-cycle carry-forward items, stale-row retirements, and the aged
   multi-model embedding re-justification
