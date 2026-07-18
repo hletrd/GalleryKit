@@ -456,14 +456,17 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
         const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
         const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
         const jpegFallbackTargetSize = imageSizes.length >= 3 ? imageSizes[imageSizes.length - 2] : findNearestImageSize(imageSizes, 1536);
-        const jpegSrc = sizedImageUrl('/uploads/jpeg', image.filename_jpeg, jpegFallbackTargetSize, imageSizes);
-        const jpegSrcSet = sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, imageSizes);
+        const jpegBaseSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
+        const hasTruthfulSizedSources = Boolean(image.derivative_max_width && image.derivative_max_width > 0);
+        const jpegSrc = hasTruthfulSizedSources
+            ? sizedImageUrl('/uploads/jpeg', image.filename_jpeg, jpegFallbackTargetSize, imageSizes)
+            : jpegBaseSrc ?? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`);
+        const jpegSrcSet = sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, image.derivative_max_width, imageSizes);
         // R22-M1: base-filename JPEG URL used as the onError fallback when
         // the sized derivative 404s (legacy photos that pre-date the
         // sized-derivative encoder, or rows caught mid-backfill after an
         // IMAGE_PIPELINE_VERSION bump). The encoder atomic-rename contract
         // guarantees the base filename is always present on disk.
-        const jpegBaseSrc = image.filename_jpeg ? imageUrl(`/uploads/jpeg/${image.filename_jpeg}`) : undefined;
         const handleJpegError: ReactEventHandler<HTMLImageElement> = (e) => {
             if (jpegFallbackTriedRef.current) return;
             jpegFallbackTriedRef.current = true;
@@ -475,7 +478,7 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             }
         };
 
-        if (!baseWebp || !baseAvif) {
+        if (!baseWebp || !baseAvif || !hasTruthfulSizedSources) {
             return (
                 <Image
                     src={jpegSrc}
@@ -522,12 +525,12 @@ export default function PhotoViewer({ images, initialImageId, prevId, nextId, ca
             <picture className="w-full h-full flex items-center justify-center">
                 <source
                     type="image/avif"
-                    srcSet={imageSizes.map(w => `${imageUrl(`/uploads/avif/${baseAvif}_${w}.avif`)} ${w}w`).join(', ')}
+                    srcSet={sizedImageSrcSet('/uploads/avif', image.filename_avif, image.derivative_max_width, imageSizes)}
                     sizes={photoViewerSizes}
                 />
                 <source
                     type="image/webp"
-                    srcSet={imageSizes.map(w => `${imageUrl(`/uploads/webp/${baseWebp}_${w}.webp`)} ${w}w`).join(', ')}
+                    srcSet={sizedImageSrcSet('/uploads/webp', image.filename_webp, image.derivative_max_width, imageSizes)}
                     sizes={photoViewerSizes}
                 />
                 <img

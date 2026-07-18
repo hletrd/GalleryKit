@@ -38,7 +38,7 @@ const {
         releaseMock,
         lockConnection: { query: queryMock, release: releaseMock },
         executeMock: vi.fn(),
-        processImageFormatsMock: vi.fn(async () => ({ wasDownscaled: false, avif10bit: true })),
+        processImageFormatsMock: vi.fn(async () => ({ wasDownscaled: false, avif10bit: true, derivativeMaxWidth: 1200 })),
         deleteImageVariantsMock: vi.fn(
             async (_dir: string, _baseFilename: string, _sizes?: number[]) => undefined,
         ),

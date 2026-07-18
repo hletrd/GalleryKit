@@ -1459,7 +1459,11 @@ export async function processImageFormats(
         }
     }
 
-    return { wasDownscaled: processingInputPath !== inputPath, avif10bit };
+    return {
+        wasDownscaled: processingInputPath !== inputPath,
+        avif10bit,
+        derivativeMaxWidth: processingBaseWidth,
+    };
 }
 
 function cleanString(val: unknown): string | null {

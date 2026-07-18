@@ -158,7 +158,7 @@ describe('CR-R9C6-01: upload-path processing settings reach processImageFormats'
     beforeEach(() => {
         queueAddMock.mockReset();
         processImageFormatsMock.mockReset();
-        processImageFormatsMock.mockResolvedValue({ wasDownscaled: false, avif10bit: false });
+        processImageFormatsMock.mockResolvedValue({ wasDownscaled: false, avif10bit: false, derivativeMaxWidth: 1200 });
         embedImageRealMock.mockReset();
         embedImageRealMock.mockResolvedValue(new Float32Array([1, 0]));
         embedImageStubMock.mockReset();

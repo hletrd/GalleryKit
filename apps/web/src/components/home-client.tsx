@@ -114,6 +114,7 @@ export interface GalleryImage {
     filename_jpeg: string;
     width: number;
     height: number;
+    derivative_max_width?: number | null;
     title: string | null;
     description: string | null;
     tag_names?: string | null;

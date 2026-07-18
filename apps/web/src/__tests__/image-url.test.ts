@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { imageUrl, sizedImageFilename, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageCandidates, sizedImageFilename, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 
 /**
  * COR-R4C16-03 / TEST-R4C16-03: the image base resolves per-runtime —
@@ -109,7 +109,7 @@ describe('sizedImageUrl', () => {
 
 describe('sizedImageSrcSet', () => {
     it('builds a srcSet from the configured derivative sizes', () => {
-        expect(sizedImageSrcSet('/uploads/jpeg', 'sample.jpg', [640, 1536, 2048])).toBe(
+        expect(sizedImageSrcSet('/uploads/jpeg', 'sample.jpg', 3000, [640, 1536, 2048])).toBe(
             [
                 `${imageUrl('/uploads/jpeg/sample_640.jpg')} 640w`,
                 `${imageUrl('/uploads/jpeg/sample_1536.jpg')} 1536w`,
@@ -119,7 +119,7 @@ describe('sizedImageSrcSet', () => {
     });
 
     it('keeps every normalized configured width in the responsive ladder', () => {
-        expect(sizedImageSrcSet('/uploads/avif', 'sample.avif', [128, 256, 640, 1536])).toBe(
+        expect(sizedImageSrcSet('/uploads/avif', 'sample.avif', 2000, [128, 256, 640, 1536])).toBe(
             [
                 `${imageUrl('/uploads/avif/sample_128.avif')} 128w`,
                 `${imageUrl('/uploads/avif/sample_256.avif')} 256w`,
@@ -127,11 +127,34 @@ describe('sizedImageSrcSet', () => {
                 `${imageUrl('/uploads/avif/sample_1536.avif')} 1536w`,
             ].join(', ')
         );
-        expect(sizedImageSrcSet('/uploads/webp', 'sample.webp', [640])).toBe(
+        expect(sizedImageSrcSet('/uploads/webp', 'sample.webp', 2000, [640])).toBe(
             `${imageUrl('/uploads/webp/sample_640.webp')} 640w`
         );
-        expect(sizedImageSrcSet('/uploads/jpeg', 'sample.jpg', [640, 1536])).toBe(
+        expect(sizedImageSrcSet('/uploads/jpeg', 'sample.jpg', 2000, [640, 1536])).toBe(
             `${imageUrl('/uploads/jpeg/sample_640.jpg')} 640w, ${imageUrl('/uploads/jpeg/sample_1536.jpg')} 1536w`
         );
+    });
+
+    it('labels and deduplicates source-limited aliases by delivered pixels', () => {
+        expect(sizedImageCandidates('/uploads/jpeg', 'sample.jpg', 1200, [640, 1536, 2048, 4096])).toEqual([
+            { url: imageUrl('/uploads/jpeg/sample_640.jpg'), width: 640 },
+            { url: imageUrl('/uploads/jpeg/sample_1536.jpg'), width: 1200 },
+        ]);
+        expect(sizedImageSrcSet('/uploads/jpeg', 'sample.jpg', 1200, [640, 1536, 2048, 4096])).toBe(
+            `${imageUrl('/uploads/jpeg/sample_640.jpg')} 640w, ${imageUrl('/uploads/jpeg/sample_1536.jpg')} 1200w`
+        );
+    });
+
+    it('uses the first alias for sources below the smallest configured width', () => {
+        expect(sizedImageSrcSet('/uploads/webp', 'sample.webp', 96, [640, 1536])).toBe(
+            `${imageUrl('/uploads/webp/sample_640.webp')} 96w`
+        );
+    });
+
+    it('normalizes alias order and returns no guessed ladder without a delivered maximum', () => {
+        expect(sizedImageSrcSet('/uploads/avif', 'sample.avif', 1000, [1536, 640, 640])).toBe(
+            `${imageUrl('/uploads/avif/sample_640.avif')} 640w, ${imageUrl('/uploads/avif/sample_1536.avif')} 1000w`
+        );
+        expect(sizedImageSrcSet('/uploads/avif', 'sample.avif', null, [640, 1536])).toBe('');
     });
 });

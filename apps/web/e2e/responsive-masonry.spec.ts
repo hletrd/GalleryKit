@@ -105,7 +105,7 @@ test.describe('one-item main-gallery complete candidate ladder', () => {
     deviceScaleFactor: 2,
   });
 
-  test('selects an existing high-DPR derivative above the old 1536w truncation', async ({ page }) => {
+  test('advertises and decodes the source-limited width truthfully', async ({ page }) => {
     await page.goto('/en/e2e-smoke?tags=square');
     await expectNoNextError(page);
 
@@ -118,6 +118,10 @@ test.describe('one-item main-gallery complete candidate ladder', () => {
       const source = node.querySelector<HTMLSourceElement>('source');
       if (!grid || !card || !image || !source) throw new Error('Missing one-item main masonry structure');
       await image.decode();
+      const response = await fetch(image.currentSrc);
+      const bitmap = await createImageBitmap(await response.blob());
+      const decodedWidth = bitmap.width;
+      bitmap.close();
       return {
         columns: getComputedStyle(grid).columnCount,
         gridWidth: grid.getBoundingClientRect().width,
@@ -125,6 +129,7 @@ test.describe('one-item main-gallery complete candidate ladder', () => {
         sizes: source.sizes,
         srcset: source.srcset,
         currentSrc: image.currentSrc,
+        decodedWidth,
       };
     });
 
@@ -132,9 +137,12 @@ test.describe('one-item main-gallery complete candidate ladder', () => {
     expect(state.gridWidth).toBeCloseTo(1504, 0);
     expect(state.cardWidth).toBeCloseTo(1504, 0);
     expect(state.sizes).toBe(ONE_ITEM_MAIN_SIZES);
-    expect(state.srcset).toContain('_2048.');
-    expect(state.srcset).toContain('_4096.');
-    expect(state.currentSrc).toMatch(/_4096\.(?:avif|webp|jpg)$/);
+    expect(state.srcset).toContain('_640.');
+    expect(state.srcset).toContain('_1536.');
+    expect(state.srcset).toContain(' 1200w');
+    expect(state.srcset).not.toMatch(/_(?:2048|4096|5120|7680)\./);
+    expect(state.currentSrc).toMatch(/_1536\.(?:avif|webp|jpg)$/);
+    expect(state.decodedWidth).toBe(1200);
   });
 });
 

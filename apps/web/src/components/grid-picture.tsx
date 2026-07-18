@@ -31,7 +31,7 @@ export function GridPicture({
 }: GridPictureProps) {
     return (
         <picture data-grid-picture data-fallback-src={fallbackSrc ?? src}>
-            {sources.map((source) => (
+            {sources.filter((source) => source.srcSet.length > 0).map((source) => (
                 <source
                     key={`${source.type}:${source.srcSet}`}
                     type={source.type}

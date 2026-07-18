@@ -85,24 +85,24 @@ function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, im
             >
                 <div className="relative w-full">
                         {(() => {
-                            if (image.filename_webp && image.filename_avif) {
+                            if (image.filename_webp && image.filename_avif && image.derivative_max_width) {
                                 const fallbackSize = findGridCardImageSize(imageSizes);
                                 return (
                                     <GridPicture
                                         sources={[
                                             {
                                                 type: 'image/avif',
-                                                srcSet: sizedImageSrcSet('/uploads/avif', image.filename_avif, imageSizes),
+                                                srcSet: sizedImageSrcSet('/uploads/avif', image.filename_avif, image.derivative_max_width, imageSizes),
                                                 sizes: responsiveSizes,
                                             },
                                             {
                                                 type: 'image/webp',
-                                                srcSet: sizedImageSrcSet('/uploads/webp', image.filename_webp, imageSizes),
+                                                srcSet: sizedImageSrcSet('/uploads/webp', image.filename_webp, image.derivative_max_width, imageSizes),
                                                 sizes: responsiveSizes,
                                             },
                                             {
                                                 type: 'image/jpeg',
-                                                srcSet: sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, imageSizes),
+                                                srcSet: sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, image.derivative_max_width, imageSizes),
                                                 sizes: responsiveSizes,
                                             },
                                         ]}

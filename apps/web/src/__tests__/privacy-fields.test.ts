@@ -85,6 +85,7 @@ const PUBLIC_SAFE_KEYS = [
     'capture_date',
     'color_primaries',
     'created_at',
+    'derivative_max_width',
     'description',
     'exposure_compensation',
     'exposure_program',

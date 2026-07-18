@@ -27,7 +27,7 @@ const { queryMock, releaseMock, lockConnection, executeMock, processImageFormats
         releaseMock,
         lockConnection: { query: queryMock, release: releaseMock },
         executeMock: vi.fn(),
-        processImageFormatsMock: vi.fn(async () => ({ wasDownscaled: false, avif10bit: true })),
+        processImageFormatsMock: vi.fn(async () => ({ wasDownscaled: false, avif10bit: true, derivativeMaxWidth: 1200 })),
     };
 });
 
@@ -199,6 +199,7 @@ describe('AGG-01: runner does NOT advance pipeline_version when detection fails'
             expect(text).not.toContain('pipeline_version');
             // The freshly-encoded derivative flags ARE still persisted.
             expect(text).toContain('was_downscaled');
+            expect(text).toContain('derivative_max_width');
             expect(text).toContain('avif_10bit');
         }
 

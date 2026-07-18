@@ -182,6 +182,7 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
                 'avif_10bit',
                 'color_pipeline_decision',
                 'color_primaries',
+                'derivative_max_width',
                 'has_gain_map',
                 'icc_profile_name',
                 'is_hdr',
@@ -193,6 +194,7 @@ describe('backfill-color-pipeline reprocessRow (CM-HIGH-6, A2)', () => {
         // avif_10bit is a boolean (sRGB 8-bit source → false), never undefined.
         expect(typeof signals.avif_10bit).toBe('boolean');
         expect(signals.avif_10bit).toBe(false);
+        expect(signals.derivative_max_width).toBeGreaterThan(0);
     });
 
     it('R9-M4: refreshes color_pipeline_decision during backfill', async () => {

@@ -552,6 +552,7 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
     try {
         let wasDownscaled = false;
         let avif10bit = false;
+        let derivativeMaxWidth = 0;
         try {
             const result = await processImageFormats(
                 originalPath,
@@ -571,6 +572,7 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
             );
             wasDownscaled = result.wasDownscaled;
             avif10bit = result.avif10bit;
+            derivativeMaxWidth = result.derivativeMaxWidth;
         } catch (err) {
             console.error(`[admin-backfill] id=${row.id} encode failed:`, err);
             const stillExists = await imageRowStillExists(row.id).catch((existsErr) => {
@@ -630,6 +632,7 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
                     has_gain_map = ${signals.has_gain_map},
                     color_pipeline_decision = ${signals.color_pipeline_decision ?? null},
                     was_downscaled = ${wasDownscaled},
+                    derivative_max_width = ${derivativeMaxWidth},
                     avif_10bit = ${avif10bit},
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ${row.id}
@@ -659,6 +662,7 @@ async function reprocessOne(row: CandidateRow, settings: RunnerSettings): Promis
         const [updateResult] = await db.execute(sql`
             UPDATE images SET
                 was_downscaled = ${wasDownscaled},
+                derivative_max_width = ${derivativeMaxWidth},
                 avif_10bit = ${avif10bit},
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ${row.id}

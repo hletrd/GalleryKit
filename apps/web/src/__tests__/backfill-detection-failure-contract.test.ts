@@ -11,7 +11,7 @@
  * DB state across the two backfill paths.
  *
  * This test mocks `detectColorSignals` to reject after a successful encode and
- * asserts `reprocessRow` returns `derivativeOnly` (the two derivative columns,
+ * asserts `reprocessRow` returns `derivativeOnly` (the derivative columns,
  * no color `signals`) so `flushBatch` persists them WITHOUT advancing
  * pipeline_version. It is the MED-enabling test that would have caught AGG2-01.
  *
@@ -66,7 +66,7 @@ afterAll(async () => {
 });
 
 describe('backfill detection-failure contract (AGG2-01)', () => {
-    it('returns derivativeOnly (was_downscaled + avif_10bit) and NO color signals when detection throws after a successful encode', async () => {
+    it('returns truthful derivative-only metadata and NO color signals when detection throws after a successful encode', async () => {
         const id = 'backfill-detfail-fixture';
         generatedIds.push(id);
 
@@ -102,9 +102,10 @@ describe('backfill detection-failure contract (AGG2-01)', () => {
         // that diverged before AGG2-01.
         expect(result.derivativeOnly).toBeDefined();
         const derivativeColumns = Object.keys(result.derivativeOnly!).sort();
-        expect(derivativeColumns).toEqual(['avif_10bit', 'was_downscaled']);
+        expect(derivativeColumns).toEqual(['avif_10bit', 'derivative_max_width', 'was_downscaled']);
         expect(typeof result.derivativeOnly!.avif_10bit).toBe('boolean');
         expect(typeof result.derivativeOnly!.was_downscaled).toBe('boolean');
+        expect(result.derivativeOnly!.derivative_max_width).toBeGreaterThan(0);
         // sRGB 8-bit source → 8-bit AVIF.
         expect(result.derivativeOnly!.avif_10bit).toBe(false);
 

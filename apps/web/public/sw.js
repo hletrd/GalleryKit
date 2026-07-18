@@ -25,7 +25,7 @@
  * US-P24 PWA story.
  */
 
-const SW_VERSION = '8018bf39-p7';
+const SW_VERSION = 'ae648ca1-p8';
 const IMAGE_CACHE = 'gk-images-' + SW_VERSION;
 const HTML_CACHE = 'gk-html-' + SW_VERSION;
 const META_CACHE = 'gk-meta-' + SW_VERSION;

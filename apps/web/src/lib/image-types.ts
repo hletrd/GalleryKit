@@ -7,6 +7,7 @@ export interface ImageDetail {
     filename_jpeg: string;
     width: number;
     height: number;
+    derivative_max_width?: number | null;
     original_width?: number | null;
     original_height?: number | null;
     title: string | null;

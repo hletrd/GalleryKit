@@ -255,21 +255,23 @@ export default async function TimelinePage({
                                                             sources={[
                                                                 {
                                                                     type: 'image/avif',
-                                                                    srcSet: sizedImageSrcSet('/uploads/avif', photo.filename_avif, imageSizes),
+                                                                    srcSet: sizedImageSrcSet('/uploads/avif', photo.filename_avif, photo.derivative_max_width, imageSizes),
                                                                     sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                                 {
                                                                     type: 'image/webp',
-                                                                    srcSet: sizedImageSrcSet('/uploads/webp', photo.filename_webp, imageSizes),
+                                                                    srcSet: sizedImageSrcSet('/uploads/webp', photo.filename_webp, photo.derivative_max_width, imageSizes),
                                                                     sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                                 {
                                                                     type: 'image/jpeg',
-                                                                    srcSet: sizedImageSrcSet('/uploads/jpeg', photo.filename_jpeg, imageSizes),
+                                                                    srcSet: sizedImageSrcSet('/uploads/jpeg', photo.filename_jpeg, photo.derivative_max_width, imageSizes),
                                                                     sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                             ]}
-                                                            src={sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, smallSize, imageSizes)}
+                                                            src={photo.derivative_max_width
+                                                                ? sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, smallSize, imageSizes)
+                                                                : imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
                                                             fallbackSrc={imageUrl(`/uploads/jpeg/${photo.filename_jpeg}`)}
                                                             alt={altText}
                                                             width={photo.width}

@@ -40,6 +40,10 @@ const timelineSelectFields = {
     filename_jpeg: images.filename_jpeg,
     width: images.width,
     height: images.height,
+    derivative_max_width: sql<number | null>`COALESCE(
+        ${images.derivative_max_width},
+        CASE WHEN ${images.was_downscaled} = FALSE THEN ${images.width} ELSE NULL END
+    )`,
     original_width: images.original_width,
     original_height: images.original_height,
     title: images.title,

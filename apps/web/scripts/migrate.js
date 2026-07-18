@@ -433,6 +433,7 @@ async function reconcileLegacySchema(connection, dbName) {
             updated_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             processed boolean DEFAULT false,
             was_downscaled boolean NOT NULL DEFAULT false,
+            derivative_max_width int DEFAULT NULL,
             PRIMARY KEY (id),
             UNIQUE KEY images_share_key_unique (share_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -471,6 +472,7 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'has_gain_map', 'ALTER TABLE images ADD COLUMN has_gain_map boolean NOT NULL DEFAULT FALSE');
     await ensureColumn(connection, dbName, 'images', 'pipeline_version', 'ALTER TABLE images ADD COLUMN pipeline_version int DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'was_downscaled', 'ALTER TABLE images ADD COLUMN was_downscaled boolean NOT NULL DEFAULT false');
+    await ensureColumn(connection, dbName, 'images', 'derivative_max_width', 'ALTER TABLE images ADD COLUMN derivative_max_width int DEFAULT NULL');
     // R17-L2: admin user that performed the upload (admin-only PII).
     // Nullable so legacy rows keep working; ON DELETE SET NULL keeps the
     // photo when the admin is removed but drops the authorship link.

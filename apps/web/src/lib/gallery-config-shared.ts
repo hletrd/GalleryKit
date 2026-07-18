@@ -18,8 +18,11 @@
  *   mandatory GPS stripping for retained originals when the privacy setting is
  *   enabled. The encoder changes alter byte output for affected sources, so the
  *   ETag must change once backfill re-encodes affected images.
+ * - v8 (C10-01, 2026-07-18): persist the actual derivative processing width so
+ *   responsive candidates describe decoded pixels rather than configured
+ *   filename aliases. Existing WI-15 rows become explicit re-encode candidates.
  */
-export const IMAGE_PIPELINE_VERSION = 7;
+export const IMAGE_PIPELINE_VERSION = 8;
 
 // ── Setting Keys ──────────────────────────────────────────────────────────────
 

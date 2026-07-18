@@ -88,9 +88,58 @@ export function sizedImageUrl(directory: string, filename: string, targetSize: n
     return imageUrl(`${normalizedDirectory}/${sizedImageFilename(filename, targetSize, imageSizes)}`);
 }
 
-/** Build a responsive srcSet from the configured derivatives in the given directory. */
-export function sizedImageSrcSet(directory: string, filename: string, imageSizes: number[] = DEFAULT_IMAGE_SIZES): string {
-    return imageSizes
-        .map((size) => `${sizedImageUrl(directory, filename, size, imageSizes)} ${size}w`)
+export type SizedImageCandidate = {
+    url: string;
+    width: number;
+};
+
+/**
+ * Resolve configured filename aliases into truthful delivered-width candidates.
+ *
+ * The encoder never enlarges a source: aliases above `derivativeMaxWidth`
+ * hard-link/copy the last capped render. HTML `w` descriptors describe actual
+ * resource pixels, not alias names, so repeated capped aliases collapse to the
+ * first URL that owns that render. A missing maximum deliberately yields no
+ * candidates; legacy WI-15 rows then use the base JPEG instead of guessed
+ * metadata until pipeline-v8 re-encoding persists the real value.
+ */
+export function sizedImageCandidates(
+    directory: string,
+    filename: string,
+    derivativeMaxWidth: number | null | undefined,
+    imageSizes: number[] = DEFAULT_IMAGE_SIZES,
+): SizedImageCandidate[] {
+    if (typeof derivativeMaxWidth !== 'number' || !Number.isInteger(derivativeMaxWidth) || derivativeMaxWidth <= 0) {
+        return [];
+    }
+
+    const aliases = Array.from(new Set(imageSizes))
+        .filter((size) => Number.isInteger(size) && size > 0)
+        .sort((a, b) => a - b);
+    const candidates: SizedImageCandidate[] = [];
+    const seenWidths = new Set<number>();
+
+    for (const alias of aliases) {
+        const width = Math.min(alias, derivativeMaxWidth);
+        if (seenWidths.has(width)) continue;
+        seenWidths.add(width);
+        candidates.push({
+            url: sizedImageUrl(directory, filename, alias, aliases),
+            width,
+        });
+    }
+
+    return candidates;
+}
+
+/** Build a responsive srcSet whose descriptors equal delivered pixel widths. */
+export function sizedImageSrcSet(
+    directory: string,
+    filename: string,
+    derivativeMaxWidth: number | null | undefined,
+    imageSizes: number[] = DEFAULT_IMAGE_SIZES,
+): string {
+    return sizedImageCandidates(directory, filename, derivativeMaxWidth, imageSizes)
+        .map(({ url, width }) => `${url} ${width}w`)
         .join(', ');
 }

@@ -218,21 +218,23 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 sources={[
                                     ...(image.filename_avif ? [{
                                         type: 'image/avif',
-                                        srcSet: sizedImageSrcSet('/uploads/avif', image.filename_avif, gridImageSizes),
+                                        srcSet: sizedImageSrcSet('/uploads/avif', image.filename_avif, image.derivative_max_width, gridImageSizes),
                                         sizes: SHARED_GROUP_MASONRY_SIZES,
                                     }] : []),
                                     ...(image.filename_webp ? [{
                                         type: 'image/webp',
-                                        srcSet: sizedImageSrcSet('/uploads/webp', image.filename_webp, gridImageSizes),
+                                        srcSet: sizedImageSrcSet('/uploads/webp', image.filename_webp, image.derivative_max_width, gridImageSizes),
                                         sizes: SHARED_GROUP_MASONRY_SIZES,
                                     }] : []),
                                     {
                                         type: 'image/jpeg',
-                                        srcSet: sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, gridImageSizes),
+                                        srcSet: sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, image.derivative_max_width, gridImageSizes),
                                         sizes: SHARED_GROUP_MASONRY_SIZES,
                                     },
                                 ]}
-                                src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, gridImageSize, gridImageSizes)}
+                                src={image.derivative_max_width
+                                    ? sizedImageUrl('/uploads/jpeg', image.filename_jpeg, gridImageSize, gridImageSizes)
+                                    : imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                 fallbackSrc={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                 alt={altText}
                                 width={image.width}

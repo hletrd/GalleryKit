@@ -8,7 +8,7 @@
  * What it does
  * ────────────
  * Re-processes existing images that were encoded with a pipeline version
- * older than IMAGE_PIPELINE_VERSION (currently 7). For each candidate:
+ * older than IMAGE_PIPELINE_VERSION (currently 8). For each candidate:
  *   - fetches the stored original,
  *   - re-runs processImageFormats() with the current encoder settings
  *     (P3-from-wide mapping, toColorspace + withIccProfile, autoOrient),
@@ -17,7 +17,7 @@
  *
  * Idempotency
  * ───────────
- * Images with pipeline_version >= 7 are skipped by default. Re-running after
+ * Images with pipeline_version >= 8 are skipped by default. Re-running after
  * a successful pass is a no-op (all rows already at version 7).
  *
  * The serve-upload route emits an ETag containing IMAGE_PIPELINE_VERSION
@@ -84,6 +84,7 @@ interface ReprocessSignals {
     has_gain_map: boolean;
     color_pipeline_decision: string | null;
     was_downscaled: boolean;
+    derivative_max_width: number;
     // Run-2 Cycle 1 AGG-02: the re-encode can flip the delivered AVIF bit
     // depth (10-bit vs 8-bit) when libheif/effort/settings change. avif_10bit
     // is a PUBLIC field (delivered-bit-depth chip), and both the normal
@@ -105,6 +106,7 @@ interface ReprocessSignals {
  */
 interface ReprocessDerivativeOnly {
     was_downscaled: boolean;
+    derivative_max_width: number;
     avif_10bit: boolean;
 }
 
@@ -234,6 +236,7 @@ export async function reprocessRow(
 
     let wasDownscaled = false;
     let avif10bit = false;
+    let derivativeMaxWidth = 0;
     try {
         const result = await processImageFormats(
             originalPath,
@@ -253,6 +256,7 @@ export async function reprocessRow(
             { assertWritable: () => assertNoDurableRestoreMaintenanceForScript(SCRIPT_NAME) },
         );
         wasDownscaled = result.wasDownscaled;
+        derivativeMaxWidth = result.derivativeMaxWidth;
         // AGG-02: capture the delivered AVIF bit depth so the UPDATE below
         // refreshes the public avif_10bit column to match the new bytes.
         avif10bit = result.avif10bit;
@@ -293,6 +297,7 @@ export async function reprocessRow(
                 has_gain_map: signals.hasGainMap,
                 color_pipeline_decision: colorPipelineDecision,
                 was_downscaled: wasDownscaled,
+                derivative_max_width: derivativeMaxWidth,
                 avif_10bit: avif10bit,
             },
         };
@@ -305,7 +310,11 @@ export async function reprocessRow(
         console.warn(`  [warn] id=${row.id}: detection failed after re-encode: ${err}`);
         return {
             outcome: 'processed',
-            derivativeOnly: { was_downscaled: wasDownscaled, avif_10bit: avif10bit },
+            derivativeOnly: {
+                was_downscaled: wasDownscaled,
+                derivative_max_width: derivativeMaxWidth,
+                avif_10bit: avif10bit,
+            },
         };
     }
 }
@@ -507,6 +516,7 @@ async function main() {
                         has_gain_map = ${item.signals.has_gain_map},
                         color_pipeline_decision = ${item.signals.color_pipeline_decision ?? null},
                         was_downscaled = ${item.signals.was_downscaled},
+                        derivative_max_width = ${item.signals.derivative_max_width},
                         avif_10bit = ${item.signals.avif_10bit},
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ${item.id}
@@ -517,6 +527,7 @@ async function main() {
                 const [res] = await tx.execute(sql`
                     UPDATE images SET
                         was_downscaled = ${item.derivative.was_downscaled},
+                        derivative_max_width = ${item.derivative.derivative_max_width},
                         avif_10bit = ${item.derivative.avif_10bit},
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ${item.id}

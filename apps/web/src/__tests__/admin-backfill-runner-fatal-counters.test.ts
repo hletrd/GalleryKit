@@ -30,7 +30,7 @@ const { queryMock, releaseMock, lockConnection, executeMock, processImageFormats
         releaseMock,
         lockConnection: { query: queryMock, release: releaseMock },
         executeMock: vi.fn(),
-        processImageFormatsMock: vi.fn(async () => ({ wasDownscaled: false, avif10bit: true })),
+        processImageFormatsMock: vi.fn(async () => ({ wasDownscaled: false, avif10bit: true, derivativeMaxWidth: 1200 })),
     };
 });
 

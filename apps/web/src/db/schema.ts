@@ -79,6 +79,10 @@ export const images = mysqlTable("images", {
     // WI-15: true when the wide-gamut rgb16 pipeline downscaled the source
     // to stay within the wide_gamut_max_source_pixels cap.
     was_downscaled: boolean('was_downscaled').notNull().default(false),
+    // C10-01: actual maximum pixel width delivered by the derivative encoder.
+    // Public-safe: responsive `w` descriptors need this value because a
+    // configured filename suffix can exceed the source/WI-15-capped width.
+    derivative_max_width: int('derivative_max_width'),
     // US-CM11: pipeline version marker for idempotent backfill.
     pipeline_version: int('pipeline_version'),
     original_format: varchar('original_format', { length: 10 }),

@@ -82,7 +82,7 @@ vi.mock('@/lib/process-image', async (importOriginal) => {
     const actual = (await importOriginal()) as Record<string, unknown>;
     return {
         ...actual,
-        processImageFormats: vi.fn(async () => ({ wasDownscaled: false, avif10bit: false })),
+        processImageFormats: vi.fn(async () => ({ wasDownscaled: false, avif10bit: false, derivativeMaxWidth: 1200 })),
         resolveColorPipelineDecision: vi.fn(() => null),
         IMAGE_PIPELINE_VERSION: 7,
     };

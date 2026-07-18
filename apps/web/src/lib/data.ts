@@ -291,6 +291,15 @@ const adminSelectFields = {
     is_hdr: images.is_hdr,
     has_gain_map: images.has_gain_map,
     was_downscaled: images.was_downscaled,
+    // C10-01: legacy non-WI-15 rows did not persist the delivered maximum,
+    // but their derivative encoder width equals the stored source width.
+    // Historical WI-15 rows remain null because their prior cap cannot be
+    // reconstructed safely; renderers then use the base JPEG without a
+    // guessed width-descriptor ladder until pipeline-v8 re-encode fills it.
+    derivative_max_width: sql<number | null>`COALESCE(
+        ${images.derivative_max_width},
+        CASE WHEN ${images.was_downscaled} = FALSE THEN ${images.width} ELSE NULL END
+    )`,
     white_balance: images.white_balance,
     metering_mode: images.metering_mode,
     exposure_compensation: images.exposure_compensation,

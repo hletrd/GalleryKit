@@ -880,7 +880,7 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
                     // DB unavailable during processing — use Sharp defaults (90/85/90)
                 }
             }
-            const { wasDownscaled, avif10bit } = await processImageFormats(
+            const { wasDownscaled, avif10bit, derivativeMaxWidth } = await processImageFormats(
                 originalPath,
                 job.filenameWebp,
                 job.filenameAvif,
@@ -914,7 +914,16 @@ export function enqueueImageProcessing(job: ImageProcessingJob): boolean {
             // US-001: Conditional update — only mark processed if still unprocessed (not deleted)
             // R10-H2: clear any prior processing_error / failed_at on success.
             const [updateResult] = await db.update(images)
-                .set({ processed: true, pipeline_version: IMAGE_PIPELINE_VERSION, was_downscaled: wasDownscaled, avif_10bit: avif10bit, processing_error: null, failed_at: null, processing_settings_json: null })
+                .set({
+                    processed: true,
+                    pipeline_version: IMAGE_PIPELINE_VERSION,
+                    was_downscaled: wasDownscaled,
+                    derivative_max_width: derivativeMaxWidth,
+                    avif_10bit: avif10bit,
+                    processing_error: null,
+                    failed_at: null,
+                    processing_settings_json: null,
+                })
                 .where(and(eq(images.id, job.id), eq(images.processed, false)));
 
             if (updateResult.affectedRows === 0) {
