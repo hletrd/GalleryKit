@@ -9,15 +9,11 @@ export async function register() {
         const { bootstrapImageProcessingQueue } = await import('@/lib/image-queue');
         await bootstrapImageProcessingQueue();
 
-        // AGG-R11C11-L13: Pre-warm geoip-lite at startup so the first analytics
-        // lookup does not pay the 50-100 ms module-load penalty on the hot path.
-        // The module is optional (dev environments may not have the data files).
-        try {
-            await import('geoip-lite');
-        } catch {
-            // geoip-lite data files not present — lookups will gracefully fall
-            // back to 'unknown' country code in analytics.ts
-        }
+        // Pre-warm and probe the packaged GeoIP database. Failure remains
+        // non-fatal, but initializeGeoIp emits one actionable process-level
+        // diagnostic instead of silently turning every country into `XX`.
+        const { initializeGeoIp } = await import('@/lib/analytics');
+        initializeGeoIp();
 
         // C2-03 (run-10 c2): WARN-ONLY single-writer boot guard. Fire-and-forget
         // — never awaited in a way that would delay boot. startSingleWriterGuard

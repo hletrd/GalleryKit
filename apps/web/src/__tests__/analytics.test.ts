@@ -34,7 +34,13 @@ vi.mock('@/site-config.json', () => ({
     },
 }));
 
-import { sanitizeReferrerHost, extractTldPlusOne, isBot, lookupCountry } from '@/lib/analytics';
+import { sanitizeReferrerHost, extractTldPlusOne, initializeGeoIp, isBot, lookupCountry } from '@/lib/analytics';
+
+describe('GeoIP startup diagnostic', () => {
+    it('validates the packaged database with a known public IP', () => {
+        expect(initializeGeoIp()).toBe(true);
+    });
+});
 
 // ---------------------------------------------------------------------------
 // extractTldPlusOne

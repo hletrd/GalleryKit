@@ -32,6 +32,14 @@ export function isBot(userAgent: string | null | undefined): boolean {
 // Fallback: 'XX' for any lookup failure.
 // ---------------------------------------------------------------------------
 let geoLookup: ((ip: string) => { country?: string } | null) | null = null;
+let geoFailureReported = false;
+
+function reportGeoFailure(error: unknown) {
+    if (geoFailureReported) return;
+    geoFailureReported = true;
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`[Analytics] GeoIP unavailable; country analytics will use XX. ${detail}`);
+}
 
 function getGeoLookup() {
     if (geoLookup !== null) return geoLookup;
@@ -40,8 +48,8 @@ function getGeoLookup() {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const geoip = require('geoip-lite') as { lookup: (ip: string) => { country?: string } | null };
         geoLookup = geoip.lookup.bind(geoip);
-    } catch {
-        // geoip-lite not available (e.g. unit test environment without native bindings)
+    } catch (error) {
+        reportGeoFailure(error);
         geoLookup = () => null;
     }
     return geoLookup;
@@ -55,10 +63,23 @@ export function lookupCountry(ip: string | null | undefined): string {
         if (typeof code === 'string' && /^[A-Z]{2}$/.test(code)) {
             return code;
         }
-    } catch {
-        // ignore
+    } catch (error) {
+        reportGeoFailure(error);
     }
     return 'XX';
+}
+
+export function initializeGeoIp(): boolean {
+    try {
+        const probe = getGeoLookup()('8.8.8.8');
+        if (typeof probe?.country === 'string' && /^[A-Z]{2}$/.test(probe.country)) {
+            return true;
+        }
+        reportGeoFailure(new Error('known public-IP probe returned no ISO country code'));
+    } catch (error) {
+        reportGeoFailure(error);
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
