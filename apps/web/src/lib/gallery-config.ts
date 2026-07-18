@@ -204,7 +204,8 @@ export const getGalleryConfigDetachedStrict: typeof getGalleryConfigStrict = asy
 /**
  * Detached-context gallery config accessor (renamed from
  * `getGalleryConfigUncached`, C4-07/ARCH4-02 run-10 c4 — the old name lied
- * once the micro-cache below landed; a deprecated alias is kept for one cycle).
+ * once the micro-cache below landed. The temporary compatibility alias was
+ * removed after its documented one-cycle window (MAINT-C10-03).
  *
  * React's `cache()` (used by `getGalleryConfig` below) de-dupes lookups
  * within the AsyncLocalStorage store React maintains for the lifetime of a
@@ -280,9 +281,6 @@ export function invalidateDetachedGalleryConfigCache(): void {
     uncachedConfigCache = null;
     uncachedConfigInFlight = null;
 }
-
-/** @deprecated C4-07 (run-10 c4): use `getGalleryConfigDetached` — kept one cycle for call-site compatibility. */
-export const getGalleryConfigUncached = getGalleryConfigDetached;
 
 /** Cached gallery config — deduped within a single SSR request via React cache(). */
 export const getGalleryConfig = cache(_getGalleryConfig);

@@ -28,7 +28,6 @@ vi.mock('@/db', () => ({
 import {
     DETACHED_CONFIG_TTL_MS,
     getGalleryConfigDetached,
-    getGalleryConfigUncached,
     invalidateDetachedGalleryConfigCache,
 } from '@/lib/gallery-config';
 
@@ -186,12 +185,11 @@ describe('getGalleryConfigDetached micro-cache (C3-16)', () => {
         expect(selectMock).toHaveBeenCalledTimes(2);
     });
 
-    it('bounds the TTL at 2s and keeps the deprecated alias pointing at the same accessor (CRIT4-01)', () => {
+    it('bounds the detached accessor TTL at 2s (CRIT4-01)', () => {
         // The safety argument for the micro-cache ("far below any human
         // flip-setting-then-act latency") was previously protected by
         // NOTHING — a future bump to 60s/5min would silently defeat the
         // C3-04 detached-freshness fix. Bound it here.
         expect(DETACHED_CONFIG_TTL_MS).toBeLessThanOrEqual(2_000);
-        expect(getGalleryConfigUncached).toBe(getGalleryConfigDetached);
     });
 });
