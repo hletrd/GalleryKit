@@ -117,12 +117,17 @@ describe('auth.ts — login DB-backed rate limits include the current request', 
 
     it('increments login IP and account buckets before checking DB counts', () => {
         const body = loginMatch![0];
+        const ipLocalIncrement = body.indexOf('loginRateLimit.set(ip, limitData)');
+        const accountLocalIncrement = body.indexOf('accountLoginRateLimit.set(accountRateLimitKey, accountLimitData)');
         const ipIncrement = body.indexOf("incrementRateLimit(ip, 'login'");
         const accountIncrement = body.indexOf("incrementRateLimit(accountRateLimitKey, 'login_account'");
         const ipCheck = body.indexOf("checkRateLimit(ip, 'login'");
         const accountCheck = body.indexOf("checkRateLimit(accountRateLimitKey, 'login_account'");
         expect(ipIncrement).toBeGreaterThanOrEqual(0);
         expect(accountIncrement).toBeGreaterThanOrEqual(0);
+        expect(ipLocalIncrement).toBeLessThan(ipIncrement);
+        expect(accountLocalIncrement).toBeLessThan(ipIncrement);
+        expect(body).toContain('await Promise.allSettled([');
         expect(ipCheck).toBeGreaterThanOrEqual(0);
         expect(accountCheck).toBeGreaterThanOrEqual(0);
         expect(ipIncrement).toBeLessThan(ipCheck);

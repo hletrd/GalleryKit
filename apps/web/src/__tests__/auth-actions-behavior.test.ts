@@ -26,6 +26,8 @@ const {
     getRestoreMaintenanceMessageMock,
     acquireAdminMutationSlotMock,
     enqueuePendingSessionRevocationMock,
+    loginRateLimitMap,
+    accountLoginRateLimitMap,
 } = vi.hoisted(() => ({
     argonVerifyMock: vi.fn(),
     argonHashMock: vi.fn(),
@@ -52,6 +54,8 @@ const {
     getRestoreMaintenanceMessageMock: vi.fn(),
     acquireAdminMutationSlotMock: vi.fn(),
     enqueuePendingSessionRevocationMock: vi.fn(),
+    loginRateLimitMap: new Map<string, { count: number; lastAttempt: number }>(),
+    accountLoginRateLimitMap: new Map<string, { count: number; lastAttempt: number }>(),
 }));
 
 vi.mock('argon2', () => ({
@@ -118,7 +122,7 @@ vi.mock('@/lib/rate-limit', () => ({
     LOGIN_WINDOW_MS: 900_000,
     checkRateLimit: checkRateLimitMock,
     incrementRateLimit: incrementRateLimitMock,
-    loginRateLimit: new Map(),
+    loginRateLimit: loginRateLimitMap,
     buildAccountRateLimitKey: (username: string) => `acct:${username}`,
     isRateLimitExceeded: (count: number, max: number, includesCurrent = false) => (
         includesCurrent ? count > max : count >= max
@@ -128,10 +132,10 @@ vi.mock('@/lib/rate-limit', () => ({
 
 vi.mock('@/lib/auth-rate-limit', () => ({
     clearSuccessfulLoginAttempts: vi.fn(async () => undefined),
-    getLoginRateLimitEntry: vi.fn(() => ({ count: 0, lastAttempt: 0 })),
-    getAccountLoginRateLimitEntry: vi.fn(() => ({ count: 0, lastAttempt: 0 })),
+    getLoginRateLimitEntry: vi.fn((key: string) => loginRateLimitMap.get(key) ?? { count: 0, lastAttempt: 0 }),
+    getAccountLoginRateLimitEntry: vi.fn((key: string) => accountLoginRateLimitMap.get(key) ?? { count: 0, lastAttempt: 0 }),
     clearSuccessfulAccountLoginAttempts: vi.fn(async () => undefined),
-    accountLoginRateLimit: new Map(),
+    accountLoginRateLimit: accountLoginRateLimitMap,
     rollbackLoginRateLimit: vi.fn(async () => undefined),
     rollbackAccountLoginRateLimit: vi.fn(async () => undefined),
     pruneAccountLoginRateLimit: vi.fn(),
@@ -177,6 +181,8 @@ function setupSelectQueue(...rows: unknown[][]) {
 describe('auth server-action behavior locks', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        loginRateLimitMap.clear();
+        accountLoginRateLimitMap.clear();
         selectRows = [];
         headersMock.mockResolvedValue(new Headers({
             origin: 'https://gallery.example',
@@ -337,5 +343,22 @@ describe('auth server-action behavior locks', () => {
             sameSite: 'lax',
             path: '/',
         }));
+    });
+
+    it('advances the account fallback when the durable IP increment rejects', async () => {
+        setupSelectQueue([{ id: 7, username: 'admin', password_hash: '$argon2id$real' }]);
+        argonVerifyMock.mockResolvedValue(false);
+        incrementRateLimitMock
+            .mockRejectedValueOnce(new Error('database unavailable'))
+            .mockResolvedValueOnce(undefined);
+
+        await expect(login(null, form({
+            username: 'admin',
+            password: 'wrong password value',
+            locale: 'en',
+        }))).resolves.toEqual({ error: 'invalidCredentials' });
+
+        expect(accountLoginRateLimitMap.get('acct:admin')?.count).toBe(1);
+        expect(incrementRateLimitMock).toHaveBeenCalledTimes(2);
     });
 });

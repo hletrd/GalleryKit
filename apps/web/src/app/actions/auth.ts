@@ -137,18 +137,24 @@ export async function login(prevState: { error?: string } | null, formData: Form
     // ── Increment rate limit BEFORE the expensive Argon2 verify (TOCTOU fix) ──
     // Without this, concurrent requests all pass the check before any of them
     // record the failed attempt, allowing burst brute-force attacks.
-    try {
-        limitData.count += 1;
-        limitData.lastAttempt = now;
-        loginRateLimit.set(ip, limitData);
-        await incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS, loginBucketStart);
-        // Also increment account-scoped bucket (both in-memory and DB)
-        accountLimitData.count += 1;
-        accountLimitData.lastAttempt = now;
-        accountLoginRateLimit.set(accountRateLimitKey, accountLimitData);
-        await incrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart);
-    } catch (err) {
-        console.debug('Failed to pre-increment login rate limit:', err);
+    // Advance BOTH process-local fallbacks before touching the DB. Keeping the
+    // two maps ahead of any await preserves the account-wide budget when the
+    // first durable increment fails during a DB outage.
+    limitData.count += 1;
+    limitData.lastAttempt = now;
+    loginRateLimit.set(ip, limitData);
+    accountLimitData.count += 1;
+    accountLimitData.lastAttempt = now;
+    accountLoginRateLimit.set(accountRateLimitKey, accountLimitData);
+
+    const durableIncrements = await Promise.allSettled([
+        incrementRateLimit(ip, 'login', LOGIN_WINDOW_MS, loginBucketStart),
+        incrementRateLimit(accountRateLimitKey, 'login_account', LOGIN_WINDOW_MS, loginBucketStart),
+    ]);
+    for (const result of durableIncrements) {
+        if (result.status === 'rejected') {
+            console.debug('Failed to pre-increment login rate limit:', result.reason);
+        }
     }
 
     // DB-backed check for accuracy across restarts. The DB counter already
