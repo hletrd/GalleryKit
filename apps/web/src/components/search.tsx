@@ -394,7 +394,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                 className={showSearchLabel ? "h-11 min-w-11 gap-2 px-3" : "h-11 w-11"}
             >
                 <SearchIcon className="h-4 w-4" />
-                {showSearchLabel && <span className={cn("text-sm", showDesktopLabel && semanticSearchMode !== 'production' ? "hidden lg:inline" : "inline")}>{t('aria.searchPhotos')}</span>}
+                {showSearchLabel && <span className={cn("text-sm", showDesktopLabel ? "hidden lg:inline" : "inline")}>{t('aria.searchPhotos')}</span>}
             </Button>
         );
     }

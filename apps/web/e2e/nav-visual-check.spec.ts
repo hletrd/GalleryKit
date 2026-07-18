@@ -58,6 +58,20 @@ test.describe('Nav visual checks', () => {
     await page.screenshot({ path: 'test-results/nav-collapsed-mobile.png', fullPage: false });
   });
 
+  test('minimum reflow width preserves the gallery home identity', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await ensureEnglishLocale(page);
+    await page.goto('/');
+    await expectNoNextError(page);
+
+    const nav = page.getByRole('navigation', { name: 'Main navigation' });
+    const home = nav.getByRole('link').first();
+    await expect(home).toBeVisible();
+    await expect.poll(async () => (await home.boundingBox())?.width ?? 0).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+    await expectVisibleNavTargetsAreStable(nav);
+  });
+
   test('mobile nav expanded screenshot', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await ensureEnglishLocale(page);
