@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ChevronUp, ChevronDown, Sun, Moon, Monitor, Circle } from "lucide-react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { useTheme } from "next-themes";
 
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
@@ -41,6 +41,9 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     const { theme, setTheme } = useTheme();
     const [isExpanded, setIsExpanded] = useState(false);
     const [mounted, setMounted] = useState(false);
+    const topicsPanelRef = useRef<HTMLDivElement>(null);
+    const menuToggleRef = useRef<HTMLButtonElement>(null);
+    const keyboardExpansionPendingRef = useRef(false);
     const currentTheme = (mounted ? (theme ?? 'system') : 'system') as StoredTheme;
     const nextThemeValue = nextTheme(currentTheme);
     const browseLinks = [
@@ -74,6 +77,15 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
         return () => cancelAnimationFrame(frame);
     }, [pathname]);
 
+    useEffect(() => {
+        if (!isExpanded || !keyboardExpansionPendingRef.current) return;
+        keyboardExpansionPendingRef.current = false;
+        const frame = requestAnimationFrame(() => {
+            topicsPanelRef.current?.querySelector<HTMLAnchorElement>('a')?.focus();
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [isExpanded]);
+
     const otherLocale = LOCALES.find((supportedLocale) => supportedLocale !== locale) ?? DEFAULT_LOCALE;
     const localizedHomeHref = siteConfig.home_link.startsWith('http')
         ? siteConfig.home_link
@@ -94,8 +106,21 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
         router.push(localeSwitchHref, { scroll: false });
     }, [otherLocale, localeSwitchHref, router]);
 
+    const handleMenuToggle = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+        const willExpand = !isExpanded;
+        keyboardExpansionPendingRef.current = willExpand && event.detail === 0;
+        setIsExpanded(willExpand);
+    }, [isExpanded]);
+
+    const handleNavKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+        if (event.key !== 'Escape' || !isExpanded) return;
+        event.preventDefault();
+        setIsExpanded(false);
+        menuToggleRef.current?.focus();
+    }, [isExpanded]);
+
     return (
-        <nav aria-label={t('aria.mainNav')} className="sticky top-0 z-50 w-full bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
+        <nav aria-label={t('aria.mainNav')} onKeyDown={handleNavKeyDown} className="sticky top-0 z-50 w-full bg-background/90 backdrop-blur-xl supports-[backdrop-filter]:bg-background/20 transition-all duration-300">
             <div className={cn(
                 "container mx-auto flex items-center px-4 transition-all duration-300",
                 isExpanded
@@ -110,7 +135,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                 </div>
 
                 {/* Topics */}
-                <div id="primary-nav-topics" className={cn(
+                <div ref={topicsPanelRef} id="primary-nav-topics" className={cn(
                     "flex items-center gap-2 text-sm font-medium min-w-0 transition-all duration-300",
                     isExpanded
                         ? "flex-wrap content-start w-full mt-1"
@@ -198,7 +223,8 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
                     order: search, theme, language, then menu. */}
                 {hasExpandableMobileContent && (
                     <button
-                        onClick={() => setIsExpanded(!isExpanded)}
+                        ref={menuToggleRef}
+                        onClick={handleMenuToggle}
                         className={cn(
                             "min-w-[44px] min-h-[44px] flex items-center justify-center hover:bg-accent rounded-full md:hidden shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                             isExpanded ? "ml-auto mt-2" : "ml-1"

@@ -68,6 +68,15 @@ describe('client component source contracts', () => {
     expect(code).not.toContain('order-last ml-1');
   });
 
+  it('moves keyboard focus into expanded mobile nav and restores it on Escape', () => {
+    const code = source('components/nav-client.tsx');
+    expect(code).toContain('keyboardExpansionPendingRef.current = willExpand && event.detail === 0');
+    expect(code).toContain("querySelector<HTMLAnchorElement>('a')?.focus()");
+    expect(code).toContain("if (event.key !== 'Escape' || !isExpanded) return");
+    expect(code).toContain('menuToggleRef.current?.focus()');
+    expect(code).toContain('onKeyDown={handleNavKeyDown}');
+  });
+
   it('keeps nav search copy desktop-only even when production semantic search is active', () => {
     const code = source('components/search.tsx');
     expect(code).toContain("const showSearchLabel = semanticSearchMode === 'production' || showDesktopLabel");
