@@ -117,4 +117,21 @@ describe('sizedImageSrcSet', () => {
             ].join(', ')
         );
     });
+
+    it('keeps every normalized configured width in the responsive ladder', () => {
+        expect(sizedImageSrcSet('/uploads/avif', 'sample.avif', [128, 256, 640, 1536])).toBe(
+            [
+                `${imageUrl('/uploads/avif/sample_128.avif')} 128w`,
+                `${imageUrl('/uploads/avif/sample_256.avif')} 256w`,
+                `${imageUrl('/uploads/avif/sample_640.avif')} 640w`,
+                `${imageUrl('/uploads/avif/sample_1536.avif')} 1536w`,
+            ].join(', ')
+        );
+        expect(sizedImageSrcSet('/uploads/webp', 'sample.webp', [640])).toBe(
+            `${imageUrl('/uploads/webp/sample_640.webp')} 640w`
+        );
+        expect(sizedImageSrcSet('/uploads/jpeg', 'sample.jpg', [640, 1536])).toBe(
+            `${imageUrl('/uploads/jpeg/sample_640.jpg')} 640w, ${imageUrl('/uploads/jpeg/sample_1536.jpg')} 1536w`
+        );
+    });
 });

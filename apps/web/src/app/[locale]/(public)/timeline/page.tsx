@@ -3,7 +3,7 @@ import { getTranslations, getLocale } from 'next-intl/server';
 import { getTimelineYears, getTimelineImages } from '@/lib/data-timeline';
 import { getSeoSettings } from '@/lib/data';
 import { localizePath, localizeUrl, buildHreflangAlternates, getAlternateOpenGraphLocales, getOpenGraphLocale } from '@/lib/locale-path';
-import { imageUrl, absoluteImageUrl, sizedImageUrl } from '@/lib/image-url';
+import { imageUrl, absoluteImageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { DEFAULT_IMAGE_SIZES, findNearestImageSize } from '@/lib/gallery-config-shared';
 import { getGalleryConfig } from '@/lib/gallery-config';
@@ -233,15 +233,9 @@ export default async function TimelinePage({
                                         const displayTitle = getPhotoDisplayTitleFromTagNames(photo, tCommon('untitled'));
                                         const accessibleTitle = `${displayTitle} #${photo.id}`;
                                         const altText = getConcisePhotoAltText(photo, tCommon('photo'));
-                                        const baseAvif = photo.filename_avif.replace(/\.avif$/i, '');
-                                        const baseWebp = photo.filename_webp.replace(/\.webp$/i, '');
                                         const aspectRatio = photo.width > 0 && photo.height > 0
                                             ? `${photo.width} / ${photo.height}`
                                             : '1 / 1';
-                                        const mediumSize = imageSizes.length >= 2
-                                            ? imageSizes[1]
-                                            : findNearestImageSize(imageSizes, 1536);
-
                                         return (
                                             <div
                                                 key={photo.id}
@@ -261,17 +255,17 @@ export default async function TimelinePage({
                                                             sources={[
                                                                 {
                                                                     type: 'image/avif',
-                                                                    srcSet: `${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
+                                                                    srcSet: sizedImageSrcSet('/uploads/avif', photo.filename_avif, imageSizes),
                                                                     sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                                 {
                                                                     type: 'image/webp',
-                                                                    srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
+                                                                    srcSet: sizedImageSrcSet('/uploads/webp', photo.filename_webp, imageSizes),
                                                                     sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                                 {
                                                                     type: 'image/jpeg',
-                                                                    srcSet: `${sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, smallSize, imageSizes)} ${smallSize}w, ${sizedImageUrl('/uploads/jpeg', photo.filename_jpeg, mediumSize, imageSizes)} ${mediumSize}w`,
+                                                                    srcSet: sizedImageSrcSet('/uploads/jpeg', photo.filename_jpeg, imageSizes),
                                                                     sizes: ARCHIVE_MASONRY_SIZES,
                                                                 },
                                                             ]}

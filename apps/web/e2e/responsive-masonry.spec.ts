@@ -13,6 +13,9 @@ const TWO_ITEM_MAIN_SIZES = '(min-width: 1536px) 744px, (min-width: 1280px) 616p
 const THREE_ITEM_MAIN_SIZES = '(min-width: 1536px) 490px, (min-width: 1280px) 405px, '
   + '(min-width: 1024px) 320px, (min-width: 768px) 234px, '
   + '(min-width: 640px) 296px, calc(100vw - 32px)';
+const ONE_ITEM_MAIN_SIZES = '(min-width: 1536px) 1504px, (min-width: 1280px) 1248px, '
+  + '(min-width: 1024px) 992px, (min-width: 768px) 736px, '
+  + '(min-width: 640px) 608px, calc(100vw - 32px)';
 
 for (const boundary of [
   { width: 320, columns: '1', candidate: 640 },
@@ -93,6 +96,45 @@ test.describe('normal main-gallery masonry above the container cap', () => {
     expect(state.cardWidth).toBeCloseTo(491, 0);
     expect(state.sizes).toBe(THREE_ITEM_MAIN_SIZES);
     expect(state.currentSrc).toMatch(/_640\.(?:avif|webp|jpg)$/);
+  });
+});
+
+test.describe('one-item main-gallery complete candidate ladder', () => {
+  test.use({
+    viewport: { width: 2560, height: 900 },
+    deviceScaleFactor: 2,
+  });
+
+  test('selects an existing high-DPR derivative above the old 1536w truncation', async ({ page }) => {
+    await page.goto('/en/e2e-smoke?tags=square');
+    await expectNoNextError(page);
+
+    const picture = page.locator('picture[data-grid-picture]').first();
+    await expect(picture).toBeVisible();
+    const state = await picture.evaluate(async (node) => {
+      const grid = node.closest<HTMLElement>('.columns-1');
+      const card = node.closest<HTMLElement>('.masonry-card');
+      const image = node.querySelector<HTMLImageElement>('img');
+      const source = node.querySelector<HTMLSourceElement>('source');
+      if (!grid || !card || !image || !source) throw new Error('Missing one-item main masonry structure');
+      await image.decode();
+      return {
+        columns: getComputedStyle(grid).columnCount,
+        gridWidth: grid.getBoundingClientRect().width,
+        cardWidth: card.getBoundingClientRect().width,
+        sizes: source.sizes,
+        srcset: source.srcset,
+        currentSrc: image.currentSrc,
+      };
+    });
+
+    expect(state.columns).toBe('1');
+    expect(state.gridWidth).toBeCloseTo(1504, 0);
+    expect(state.cardWidth).toBeCloseTo(1504, 0);
+    expect(state.sizes).toBe(ONE_ITEM_MAIN_SIZES);
+    expect(state.srcset).toContain('_2048.');
+    expect(state.srcset).toContain('_4096.');
+    expect(state.currentSrc).toMatch(/_4096\.(?:avif|webp|jpg)$/);
   });
 });
 

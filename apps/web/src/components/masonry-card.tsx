@@ -6,9 +6,9 @@ import { GridPicture } from '@/components/grid-picture';
 import { OptimisticImage } from './optimistic-image';
 import { useTranslation } from '@/components/i18n-provider';
 import { cn } from '@/lib/utils';
-import { imageUrl, sizedImageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { localizePath } from '@/lib/locale-path';
-import { findNearestImageSize } from '@/lib/gallery-config-shared';
+import { findGridCardImageSize } from '@/lib/gallery-config-shared';
 import { getConcisePhotoAltText, getPhotoDisplayTitleFromTagNames } from '@/lib/photo-title';
 import { isWideGamutPrimary } from '@/lib/color-primaries';
 import type { GalleryImage } from './home-client';
@@ -85,33 +85,28 @@ function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, im
             >
                 <div className="relative w-full">
                         {(() => {
-                            const baseWebp = image.filename_webp?.replace(/\.webp$/i, '');
-                            const baseAvif = image.filename_avif?.replace(/\.avif$/i, '');
-
-                            if (baseWebp && baseAvif) {
-                                // Use the two smallest configured sizes for masonry grid thumbnails
-                                const smallSize = imageSizes.length >= 2 ? imageSizes[0] : findNearestImageSize(imageSizes, 640);
-                                const mediumSize = imageSizes.length >= 2 ? imageSizes[1] : findNearestImageSize(imageSizes, 1536);
+                            if (image.filename_webp && image.filename_avif) {
+                                const fallbackSize = findGridCardImageSize(imageSizes);
                                 return (
                                     <GridPicture
                                         sources={[
                                             {
                                                 type: 'image/avif',
-                                                srcSet: `${imageUrl(`/uploads/avif/${baseAvif}_${smallSize}.avif`)} ${smallSize}w, ${imageUrl(`/uploads/avif/${baseAvif}_${mediumSize}.avif`)} ${mediumSize}w`,
+                                                srcSet: sizedImageSrcSet('/uploads/avif', image.filename_avif, imageSizes),
                                                 sizes: responsiveSizes,
                                             },
                                             {
                                                 type: 'image/webp',
-                                                srcSet: `${imageUrl(`/uploads/webp/${baseWebp}_${smallSize}.webp`)} ${smallSize}w, ${imageUrl(`/uploads/webp/${baseWebp}_${mediumSize}.webp`)} ${mediumSize}w`,
+                                                srcSet: sizedImageSrcSet('/uploads/webp', image.filename_webp, imageSizes),
                                                 sizes: responsiveSizes,
                                             },
                                             {
                                                 type: 'image/jpeg',
-                                                srcSet: `${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallSize, imageSizes)} ${smallSize}w, ${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, mediumSize, imageSizes)} ${mediumSize}w`,
+                                                srcSet: sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, imageSizes),
                                                 sizes: responsiveSizes,
                                             },
                                         ]}
-                                        src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallSize, imageSizes)}
+                                        src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, fallbackSize, imageSizes)}
                                         fallbackSrc={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                         alt={altText}
                                         width={image.width}

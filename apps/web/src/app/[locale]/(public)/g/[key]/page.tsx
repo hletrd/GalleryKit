@@ -6,13 +6,13 @@ import { Metadata } from 'next';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { headers } from 'next/headers';
 import { ArrowLeft } from 'lucide-react';
-import { imageUrl, sizedImageUrl } from '@/lib/image-url';
+import { imageUrl, sizedImageSrcSet, sizedImageUrl } from '@/lib/image-url';
 import { getAlternateOpenGraphLocales, getOpenGraphLocale, localizePath, localizeUrl } from '@/lib/locale-path';
 import PhotoViewer from '@/components/photo-viewer';
 import { GridPicture } from '@/components/grid-picture';
 import { GridPictureFallbackBoundary } from '@/components/grid-picture-fallback-boundary';
 import { getGalleryConfig } from '@/lib/gallery-config';
-import { findGridCardImageSize, findNearestImageSize } from '@/lib/gallery-config-shared';
+import { findGridCardImageSize } from '@/lib/gallery-config-shared';
 import { getPhotoDisplayTitle } from '@/lib/photo-title';
 import { getClientIp, preIncrementShareAttempt } from '@/lib/rate-limit';
 import { isBase56 } from '@/lib/base56';
@@ -123,8 +123,6 @@ export default async function SharedGroupPage({ params, searchParams }: { params
 
     const gridImageSize = findGridCardImageSize(config.imageSizes);
     const gridImageSizes = config.imageSizes;
-    const smallGridSize = gridImageSizes.length >= 2 ? gridImageSizes[0] : gridImageSize;
-    const mediumGridSize = gridImageSizes.length >= 2 ? gridImageSizes[1] : findNearestImageSize(gridImageSizes, 1536);
 
     let selectedImage = null;
 
@@ -220,21 +218,21 @@ export default async function SharedGroupPage({ params, searchParams }: { params
                                 sources={[
                                     ...(image.filename_avif ? [{
                                         type: 'image/avif',
-                                        srcSet: `${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${smallGridSize}.avif`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/avif/${image.filename_avif.replace(/\.avif$/i, `_${mediumGridSize}.avif`)}`)} ${mediumGridSize}w`,
+                                        srcSet: sizedImageSrcSet('/uploads/avif', image.filename_avif, gridImageSizes),
                                         sizes: SHARED_GROUP_MASONRY_SIZES,
                                     }] : []),
                                     ...(image.filename_webp ? [{
                                         type: 'image/webp',
-                                        srcSet: `${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${smallGridSize}.webp`)}`)} ${smallGridSize}w, ${imageUrl(`/uploads/webp/${image.filename_webp.replace(/\.webp$/i, `_${mediumGridSize}.webp`)}`)} ${mediumGridSize}w`,
+                                        srcSet: sizedImageSrcSet('/uploads/webp', image.filename_webp, gridImageSizes),
                                         sizes: SHARED_GROUP_MASONRY_SIZES,
                                     }] : []),
                                     {
                                         type: 'image/jpeg',
-                                        srcSet: `${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallGridSize, gridImageSizes)} ${smallGridSize}w, ${sizedImageUrl('/uploads/jpeg', image.filename_jpeg, mediumGridSize, gridImageSizes)} ${mediumGridSize}w`,
+                                        srcSet: sizedImageSrcSet('/uploads/jpeg', image.filename_jpeg, gridImageSizes),
                                         sizes: SHARED_GROUP_MASONRY_SIZES,
                                     },
                                 ]}
-                                src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, smallGridSize, gridImageSizes)}
+                                src={sizedImageUrl('/uploads/jpeg', image.filename_jpeg, gridImageSize, gridImageSizes)}
                                 fallbackSrc={imageUrl(`/uploads/jpeg/${image.filename_jpeg}`)}
                                 alt={altText}
                                 width={image.width}
