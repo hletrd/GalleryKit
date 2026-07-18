@@ -33,10 +33,10 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Cycle 6/100 (2026-07-18) Implementation Plan - item-count-capped intrinsic
-  geometry, effective-column ownership, main-gallery browser regression,
-  Cycle 5 release-ledger closure, full gates, signed push, and per-cycle deploy
-  (`cycle-6-2026-07-18-plan.md`)
+- Cycle 7/100 (2026-07-18) Implementation Plan - container-observed intrinsic
+  geometry, narrow/ultrawide main-gallery browser regressions, Cycle 6
+  release-ledger closure, full gates, signed push, and per-cycle deploy
+  (`cycle-7-2026-07-18-plan.md`)
 - Run-10 Cycle 38/100 Implementation Plan - recovery ledger after Cycle 38 subagent usage-limit failure: preserve partial reviews, finish aggregate/deferred register, center remaining admin pages, clarify analytics/GPS docs, close default raw-input touch-target scanner gap, run full gates, signed push, and per-cycle deploy (`run10-cycle38/plan.md`)
 - Run-10 Cycle 38/100 Deferred Findings - Cycle 38 deferred architecture/topology/performance/operator/test items with preserved severity/confidence and exit criteria (`run10-cycle38/deferred.md`)
 
@@ -49,6 +49,11 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Cycle 6/100 (2026-07-18) Implementation Plan - completed item-count-capped
+  intrinsic geometry, effective-column ownership, main-gallery browser
+  regression, Cycle 5 release-ledger closure, full gates, signed push, and
+  observable production release verification through `ec7fc46f`
+  (`archive/cycle-6-2026-07-18-plan.md`)
 - Cycle 5/100 (2026-07-18) Implementation Plan - completed responsive
   masonry-size ownership and breakpoint alignment, item-count-aware
   main-gallery hints, independent scheduling assertions, Cycle 4 release-

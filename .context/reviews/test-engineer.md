@@ -1,26 +1,42 @@
-# Test Engineer — Cycle 6 Provenance
+# Cycle 7 Test Engineer Review
 
-Review target: `6e4c25c8`. Test inventory covered 370 unit-test files, 14 Playwright files, custom auth/origin/rate-limit scanners, typecheck/build configuration, seed/server helpers, and prior gate evidence.
+Date: 2026-07-18 KST
+Review HEAD: `ec7fc46f`
 
-## NEW Cycle 6 finding
+## Inventory
 
-### TEST-C6-01 — Responsive E2E never executes `HomeClient`'s new item-count policy
+I inventoried all 370 maintained Vitest files and 14 Playwright files, mapped
+them to public/admin routes and core libraries, reviewed the configured gate
+scripts, and inspected the Cycle 6 responsive test additions plus their
+source boundary. I then performed live 320 px and 2,560 px counterexample
+checks.
 
-- Severity: **Medium**
-- Confidence: **High**
-- Status: **Confirmed coverage gap; current live source-size behavior correct**
-- Regions: `apps/web/e2e/responsive-masonry.spec.ts:4-85`; `apps/web/src/__tests__/responsive-masonry.test.ts:8-42`; `apps/web/src/__tests__/masonry-card-memo.test.ts:99-177`; changed integration at `home-client.tsx:231-234,323-334`
+## Finding
 
-The E2E covers timeline and shared-group constants, not the home route. Unit tests validate the pure helper and a literal replica/source substring; they do not prove React passes the actual live `itemCount`, the class policy agrees, or the intrinsic estimator is capped.
+### TEST-01 — Responsive masonry geometry coverage tests the estimator only where viewport and container nearly coincide
 
-Concrete failure: `const responsiveSizes = useMemo(() => getMainMasonrySizes(5), [])` still satisfies helper tests, archive/shared E2E, and the memo test's `responsiveSizes={responsiveSizes}` substring while reintroducing sparse-gallery softness. The current 196 px versus 496 px live intrinsic mismatch is another regression these tests cannot detect.
+- Severity / confidence / status: **Medium / High / Confirmed coverage gap**
+- Regions: `apps/web/e2e/responsive-masonry.spec.ts:11-49`;
+  `apps/web/src/__tests__/responsive-masonry.test.ts:9-53`;
+  `apps/web/src/components/home-client.tsx:22-79,231-249`
+- Problem: the focused E2E proves intrinsic geometry only at 1,536 px and
+  allows ±15%. The unit suite covers the effective column helper but exposes
+  no pure card-width estimator boundary. Nothing covers 320 px padding and
+  quantization together or a viewport above the container's 1,536 px cap.
+- Concrete failure: production at 320 px reports 224 px intrinsic versus 192
+  px rendered for 3:2 cards (16.7% high). At 2,560 px, two 744x496 cards
+  report 843 px intrinsic height (70% high); all current focused tests pass.
+- Fix: extract the container-width/column/gap arithmetic into a client-safe
+  helper with invalid-input and quantization cases, and add a 320 px seeded
+  browser tests at 320 and 2,560 px comparing the real card box and computed
+  intrinsic height. Retain the 1,536 px sparse case because it protects a
+  different item-count invariant.
 
-Fix: deterministic browser fixtures for 1/2/4/5 home items; assert computed columns, source `sizes`, selected candidate, card dimensions, and `contain-intrinsic-size`. Avoid another source replica. Candidate selection should be asserted only where the seeded ladder makes it deterministic.
+## Coverage sweep
 
-## Results and revalidated carry-forward
-
-All independently run gates listed in the verifier file passed. The strengthened priority E2E correctly separates eager and high states. The broad existing source-contract/behavior-harness backlog remains carry-forward; `TEST-C6-01` is the new concrete occurrence that provides its next actionable fixture.
-
-## Final test sweep and coverage
-
-I reviewed changed and sibling tests, fixture determinism, negative cases, route/action scanners, privacy/touch-target contracts, migrations, queue/restore concurrency coverage, browser matrix, PWA, admin, and CLIP preflight boundaries. No other new test defect survived.
+The suite otherwise has explicit coverage for action origin/mutation barrier,
+admin API auth, public route rate limiting, privacy projections, migrations,
+uploads/restores/deletes, PWA contracts, touch targets, focus rings, i18n
+parity, nav/search/lightbox browser flows, and the recently changed responsive
+source/scheduling behavior. No other new missing test was both concrete and
+unrepresented by the carry-forward register.

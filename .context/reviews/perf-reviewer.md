@@ -1,26 +1,30 @@
-# Performance Reviewer — Cycle 6 Provenance
+# Performance Reviewer — Cycle 7 Provenance
 
-Review target: `6e4c25c8`. I inventoried SSR/data queries, public/admin routes, components, image/Sharp/color/CLIP work, DB pool/indexes, background jobs, PWA caching, uploads/restores, and deploy/runtime assets. The recent masonry diff was traced into CSS containment and runtime candidate selection, not reviewed in isolation.
+Review target: `ec7fc46f`. Review only.
 
-## NEW Cycle 6 finding
+## Inventory and validation
 
-### PERF-C6-01 — Item-count-capped columns do not cap `contain-intrinsic-size`
+I inventoried SSR/data queries, route handlers, React components, image/Sharp/color/CLIP work, DB pool/indexes, background consumers, uploads/restores, service-worker caching, and runtime/deploy assets across the full maintained tree. I traced the Cycle 6 masonry change through the public layout container, Tailwind defaults, card containment, source policy, and browser coverage. Fresh ESLint, typecheck, audit, and full Vitest passed.
+
+## New Cycle 7 finding
+
+### PERF-C7-01 — Ultrawide sparse galleries over-reserve virtual card height
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed live hint mismatch; visible shift likely/manual-validation**
-- Regions: `apps/web/src/components/home-client.tsx:231-274`; `apps/web/src/components/masonry-card.tsx:52-77`; `apps/web/src/app/[locale]/globals.css:231-235`
+- Classification: **Confirmed performance/geometry mismatch; user-visible CLS/scroll effect needs browser validation**
+- Regions: `apps/web/src/components/home-client.tsx:21-79,231-249`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-19`; `apps/web/src/components/masonry-card.tsx:58-77`; `apps/web/src/app/[locale]/globals.css:231-235`; `apps/web/e2e/responsive-masonry.spec.ts:11-49`
 
-The actual classes cap columns to `itemCount`, but `estimatedCardWidth` uses the raw breakpoint count. Live production at 1,536 px with two filtered photos showed `column-count: 2`, 744×496 cards, correct `50vw` source hints, and `contain-intrinsic-size: auto 196px`. The hint is about 60% shorter than the rendered card because it assumes five columns.
+`estimatedCardWidth` now uses the correct sparse column count, but still divides quantized viewport width rather than the capped grid width. The public `.container` stops growing at Tailwind's default 1,536 px while `window.innerWidth` grows indefinitely.
 
-Concrete failure: if those cards start beyond the content-visibility relevance window, initial multicolumn/scroll extent is under-reserved and expands as the browser activates them. The normal tall-viewport sparse page renders the first row immediately, so CLS magnitude needs a deliberately short viewport or trace before being called universally user-visible.
+Concrete failure: at 2,560 px, a two-column sparse gallery estimates 1,264 px cards while rendering about 744 px cards after the container padding and 16 px gap. The intrinsic height is consequently about 70% too large for every aspect ratio. When `content-visibility:auto` skips one of those cards, the virtual scroll extent is over-reserved and contracts on activation; even when the card is immediately relevant, every viewport-width bucket change invalidates all `MasonryCard` props using a value disconnected from actual layout.
 
-Fix: compute width from `min(itemCount, breakpointMaximum)` or observe the grid/card container. Reuse the same effective-column policy for classes, source sizes, and containment hints.
+Suggested fix: observe and bucket the grid's content width, then derive card width from that single value and effective columns. Add an ultrawide sparse Playwright case; the current 1,536 px case sits exactly where the estimator accidentally agrees with the container and cannot catch the defect.
 
 ## Revalidated, not new
 
-The Cycle 5 `sizes` breakpoint issue is closed: fresh DPR-2 browser checks selected 640w at 768 px for a 234.66 px three-column home card; DPR-2 at 1,536 px selected 640w for a 288 px five-column card. The shared queue/backfill pool budget, large-map hydration, semantic scan cost, and SW/storage long-tail items remain existing carry-forward work.
+The prior raw-five-column sparse under-reservation is fixed at the tested 1,536 px boundary. Shared queue/backfill pool contention, large-map hydration, semantic-vector scanning, upload RSS, and service-worker long-tail items remain explicitly deferred with unchanged exit criteria; none was re-filed.
 
-## Evidence and final sweep
+## Final missed-issue sweep
 
-Full Vitest, typecheck, lint gates, and production audit passed. Browser evidence covered 393/768/1024/1536 plus the two-photo filtered state. I rechecked pagination/query/index alignment, Sharp/CLIP concurrency, pool overlap, image ladders, hydration/memo invalidation, service-worker accounting, timers/listeners, and cleanup paths. No second new performance finding survived.
+I rechecked pagination/query/index alignment, N+1/fan-out patterns, connection-hold times, queue overlap, Sharp and CLIP concurrency, image ladders, hydration/memo invalidation, cache accounting, abort/listener cleanup, and current responsive siblings. No second new performance defect survived validation.

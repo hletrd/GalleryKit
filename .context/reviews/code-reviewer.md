@@ -1,45 +1,43 @@
-# Code Reviewer — Cycle 6 Provenance
+# Code Reviewer — Cycle 7 Provenance
 
-Review target: `6e4c25c8` (`master == origin/master`), 2026-07-18 KST. Review only; no source, plan, aggregate, or Git-state edits.
+Review target: `ec7fc46f` (`master == origin/master`), 2026-07-18 KST. Review only; no source or plan edits.
 
 ## Inventory and validation
 
-I inventoried the maintained application before reviewing the Cycle 5 change surface: 629 TypeScript/JavaScript files under `apps/web/src`, 370 unit-test files, 14 Playwright files, 12 public route handlers, 12 server-action modules, 31 migration SQL files plus the journal/reconcile path, scripts, package/build/PWA/deploy assets, and the governing `AGENTS.md`, `CLAUDE.md`, READMEs, active plan, prior provenance, and deferred register. The `4926a3e4..6e4c25c8` diff was only an entry point; I traced responsive sizing through the home, timeline, year, and shared-group layouts, the picture fallback, memoization contract, browser scheduling, CSS containment, and release ledger.
+I inventoried all 671 maintained TypeScript/JavaScript files under `apps/web/src`, `apps/web/scripts`, and `apps/web/e2e` before reviewing: 629 application files, 364 unit-test files, 13 Playwright specs, 12 route handlers, 14 server-action modules, 31 migrations plus journal/reconcile, and the package/build/PWA/Docker/deploy surfaces. I also read `AGENTS.md`, `CLAUDE.md`, the current Cycle 6 plan, the consolidated carry-forward register, and the latest role reviews. The `6e4c25c8..ec7fc46f` diff was an entry point, not a scope boundary.
 
-Independent checks passed: ESLint; API-auth, action-origin/mutation-barrier, and public-route-rate-limit lints; typecheck; production audit; focused responsive/memo Vitest (16/16); full Vitest (362 passed, 2 skipped; 3,415 passed, 4 expected skips); `git diff --check`. Production browser checks at 393/768/1024/1536 CSS px confirmed current responsive source selection and the defect below.
+Fresh checks passed: ESLint; API-auth, action-origin/mutation-barrier, and public-route-rate-limit lints; typecheck; production dependency audit; full Vitest (362 files passed, 2 skipped; 3,421 tests passed, 4 expected skips); and `git diff --check` before the review files were replaced.
 
-## NEW Cycle 6 findings
+## New Cycle 7 findings
 
-### CR-C6-01 — Sparse-gallery intrinsic sizing still uses the uncapped viewport column count
-
-- Severity: **Medium**
-- Confidence: **High**
-- Status: **Confirmed live geometry mismatch; visible relayout is likely/manual-validation**
-- Regions: `apps/web/src/components/home-client.tsx:27-79,231-274`; `apps/web/src/components/masonry-card.tsx:52-77`; `apps/web/src/app/[locale]/globals.css:231-235`
-
-`responsiveSizes` and the CSS class policy now cap columns by `itemCount`, but `estimatedCardWidth` still divides the viewport by the raw `useColumnCount()` count. On the live two-photo filter at 1,536 px, the grid rendered two 744×496 cards and correctly advertised `50vw`; computed `contain-intrinsic-size` was only `auto 196px`, the height derived from a roughly 294 px five-column width. Thus the new source-size fix exposes a sibling geometry owner that is still unsynchronized.
-
-Concrete failure: when a sparse grid is outside the browser's content-visibility relevance region (for example a short-height desktop viewport with the filter/header above it), the document initially reserves about 196 px for a 496 px card. Approaching the grid can add roughly 300 px per card to the multicolumn layout and move scroll geometry. The common tall-viewport two-photo case renders immediately, so the user-visible shift itself needs a short-viewport/browser-matrix proof.
-
-Fix: calculate an effective column count from `itemCount` and the responsive maximum, and use it for both `estimatedCardWidth` and the class/size policy. Prefer one shared policy helper returning effective columns and sizes; derive width from the actual container via `ResizeObserver` if container sizing can diverge from the viewport.
-
-### CR-C6-02 — Browser coverage skips the changed main-gallery sizing path
+### CR-C7-01 — The sparse intrinsic-size fix mixes viewport width with a max-width container
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed test-design gap; current production sizing is correct**
-- Regions: `apps/web/e2e/responsive-masonry.spec.ts:4-85`; `apps/web/src/__tests__/responsive-masonry.test.ts:8-42`; `apps/web/src/__tests__/masonry-card-memo.test.ts:99-177`
+- Classification: **Confirmed code-path geometry mismatch; visible layout shift needs manual/browser validation**
+- Regions: `apps/web/src/components/home-client.tsx:21-79,231-249`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-19`; `apps/web/tailwind.config.ts:21-22`; `apps/web/src/components/masonry-card.tsx:58-77`; `apps/web/src/app/[locale]/globals.css:231-235`; `apps/web/e2e/responsive-masonry.spec.ts:11-49`
 
-The new E2E visits timeline and shared-group routes only. Pure helper tests validate returned strings, while the memo test source-pins only `responsiveSizes={responsiveSizes}` and reimplements prop construction. No behavior test mounts or visits `HomeClient` with one-to-four items.
+Cycle 6 correctly changed the divisor from the raw breakpoint count to the item-capped count, but the numerator remains quantized `window.innerWidth`. The masonry lives inside Tailwind's `.container`, and this repository does not override the default 2xl container cap (1,536 px), with another 32 px removed by `px-4`. Above 1,536 px the estimator therefore grows with the screen while the rendered grid does not.
 
-Concrete failure: changing the home initializer to `getMainMasonrySizes(5)` would break sparse galleries while the helper tests, archive/shared E2E, and current prop-presence source assertion all continue to pass.
+Concrete failure: at a 2,560 px viewport, the stored width is 2,544 px. A two-photo grid estimates `(2544 - 16) / 2 = 1264` px per card, while the capped/padded grid renders `(1504 - 16) / 2 = 744` px cards. Every valid aspect ratio therefore receives a `contain-intrinsic-size` height about 1.70x its rendered height. For the 3:2 production case used in Cycle 6, the hint is about 843 px for a 496 px card. If `content-visibility:auto` defers the card, activation collapses that excess reservation and changes scroll/layout geometry. The new E2E passes precisely at 1,536 px, where viewport and container widths nearly coincide, so it masks the wide-screen branch.
 
-Fix: seed or expose deterministic one-, two-, four-, and five-photo home fixtures and assert computed column count, emitted `sizes`, current candidate, and computed intrinsic-size hint at representative boundaries. This specific gap also satisfies the spirit of the existing broad source-contract test-hardening carry-forward; it is reported as a new concrete instance, not a renamed generic backlog item.
+Suggested fix: observe the actual masonry grid width (prefer a shared `ResizeObserver` hook), bucket that observed width if rerender control is still needed, and divide it by the effective column count. Extend the sparse browser case to at least one viewport above the container cap (for example 2,560 px) and compare the computed hint with the rendered card.
 
-## Revalidated, not new
+This is not a renamed historical item. Cycle 6 mentioned container observation only as an optional follow-up and explicitly scoped it out; the current item-count change makes the ultrawide over-reservation concrete and materially larger.
 
-Cycle 5's breakpoint and independent-priority defects are fixed. The prior architecture concern is only partially retired: sizes are centralized, but class breakpoints/effective columns remain separately encoded in `home-client.tsx`, archive/shared JSX, and `responsive-masonry.ts`. Existing pool-budget, single-writer, restore-generation, map/vector-scale, and rollback risks remain in `deferred-carry-forward.md`; no exit criterion was silently reclassified here.
+### CR-C7-02 — The Cycle 6 release ledger still describes already-pushed signed work as pending
+
+- Severity: **Low**
+- Confidence: **High**
+- Classification: **Confirmed signed-push/index mismatch; deployment identity remains manual-validation**
+- Regions: `.context/plans/cycle-6-2026-07-18-plan.md:3-5,43-45,65-73`; `.context/plans/README.md:34-41`; Git commits `fcbce386`, `03a96a3d`, `ec7fc46f`
+
+All three current-cycle commits have good GPG signatures and `master == origin/master == ec7fc46f`, but the authoritative plan says "signed release pending", leaves commit/push unchecked, and remains the active frontier. A recovery agent can therefore repeat publication work or reason from the wrong release boundary.
+
+Suggested fix: reconcile the observable signatures and remote equality, record deploy evidence separately without inventing an exact deployed SHA, archive Cycle 6, and advance the plan index.
+
+This is new state for the newly published Cycle 6 plan; the analogous Cycle 5 ledger defect is already fixed and historical.
 
 ## Final missed-issue sweep
 
-The closing sweep covered route/action exports and guard order, privacy projections, migrations/journal/reconcile, raw SQL/child processes, upload/delete/restore races, queue/cache/listener cleanup, image/color delivery, responsive siblings, PWA/build/runtime config, deploy scripts, tests, and ledgers. No additional new code defect survived validation.
+The closing sweep rechecked route/action exports and guard order, privacy projections, migration/journal/reconcile parity, raw SQL and child-process boundaries, upload/delete/restore races, queues and caches, image/color delivery, responsive siblings, timers/listeners, PWA/build/runtime configuration, tests, and release ledgers. No third fresh code finding survived validation; older topology, pool-budget, map/vector-scale, restore-generation, and operator items remain in the carry-forward register.

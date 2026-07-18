@@ -1,27 +1,31 @@
-# Tracer — Cycle 6 Provenance
+# Tracer — Cycle 7 Provenance
 
-Review target: `6e4c25c8`; review only.
+Review target: `ec7fc46f`; review only.
 
-## End-to-end traces
+## Inventory and causal traces
 
-### NEW TRC-C6-01 — Sparse home geometry splits at `itemCount`
+I inventoried the full maintained source/test/runtime surface and traced request admission, DB/file lifecycles, queue/restore interactions, responsive rendering, cache/PWA behavior, and release promotion across file boundaries. Fresh lint/security-lint/typecheck/audit/full-unit gates passed.
+
+### TRC-C7-01 — Sparse width trace crosses coordinate systems above 1,536 px
 
 - Severity / confidence: **Medium / High**
-- Status: **Confirmed live mismatch; visible relayout manual-validation**
-- Regions: `home-client.tsx:27-79,231-274` → `masonry-card.tsx:52-77` → `globals.css:231-235`
-- Trace: route loads two filtered rows → `allImages.length=2` → class policy emits two effective columns and `getMainMasonrySizes(2)` emits `50vw` → `useColumnCount(1536)` independently reports five → intrinsic estimate uses five-column width → live card computes `744×496` but `contain-intrinsic-size:auto 196px`.
-- Failure: a deferred/offscreen sparse grid initially contributes the undersized stand-in to document geometry and grows when activated.
-- Fix: carry one effective-column result through classes, sizes, and containment; optionally replace viewport math with grid `ResizeObserver` evidence.
+- Classification: **Confirmed causal mismatch; visible shift manual-validation**
+- Regions: `home-client.tsx:21-79,231-249` -> `app/[locale]/(public)/layout.tsx:17-19` -> `masonry-card.tsx:58-77` -> `globals.css:231-235`; coverage at `e2e/responsive-masonry.spec.ts:11-49`
+- Trace: viewport 2,560 -> width bucket 2,544 -> raw breakpoint count 5 -> two items cap effective count to 2 -> estimator computes 1,264 px -> public Tailwind container caps at 1,536 and `px-4` leaves 1,504 px -> real two-column card is about 744 px -> `MasonryCard` converts both widths through the same aspect ratio -> `contain-intrinsic-size` is about 1.70x real height -> `content-visibility:auto` uses the oversized stand-in when skipped.
+- Concrete failure: a deferred sparse card collapses its virtual height when activated, altering scroll/layout geometry. The 1,536 px E2E observes the one point where the two coordinate systems nearly match and therefore passes.
+- Suggested fix: feed observed grid content width, not viewport width, into the shared effective-column calculation; add an above-cap browser case.
 
-### NEW TRC-C6-02 — Cycle 5 terminal state stops before its pushed HEAD
+Cycle 6's optional `ResizeObserver` suggestion was not implemented or tracked as a confirmed finding. The item-capped divisor now makes the above-cap branch a concrete current regression rather than a duplicate of the fixed five-column under-reservation.
+
+### TRC-C7-02 — Cycle 6 terminal state stops before its published HEAD
 
 - Severity / confidence: **Low / High**
-- Status: **Confirmed signed push; exact deploy SHA manual-validation**
-- Regions: `.context/plans/cycle-5-2026-07-18-plan.md:3-5,47-49,70-78`; `.context/plans/README.md:34-40`; Git refs/commits `baec70b5`, `45a9417f`, `6e4c25c8`
-- Trace: implementation/test commits are signed → docs commit records “signed release pending” → `master == origin/master == 6e4c25c8` and all three signatures verify → production serves the new `sizes` string → plan/index still present Cycle 5 as active with push/deploy unchecked.
-- Failure: recovery treats already-published work as pending and may repeat release actions.
-- Fix: reconcile signed push after publication, record live verification separately from unavailable exact deploy identity, archive Cycle 5, and advance the active index.
+- Classification: **Confirmed signed-push mismatch; deploy SHA manual-validation**
+- Regions: `.context/plans/cycle-6-2026-07-18-plan.md:3-5,43-45,65-73`; `.context/plans/README.md:34-41`; commits `fcbce386`, `03a96a3d`, `ec7fc46f`
+- Trace: implementation/test/docs commits are all GPG-good -> `master == origin/master == ec7fc46f` -> plan still says signed release pending and leaves push/deploy unchecked -> index keeps Cycle 6 active.
+- Concrete failure: recovery can repeat publication/deploy work or start from an obsolete frontier.
+- Suggested fix: reconcile signatures and remote equality, record only observable deploy evidence, archive Cycle 6, and advance the index.
 
-## Revalidated traces and final coverage
+## Final missed-issue sweep
 
-Cycle 5 breakpoint flow now aligns at 640/768/1280/1536, and eager/high scheduling stays first-card-only. I traced public/admin request guards, DB/file upload-delete-restore lifecycles, queue/backfill concurrency, migration/journal/reconcile, cache/PWA/config, image fallback, and release promotion. Existing topology/restore/pool risks retain prior IDs; no additional new trace survived.
+I traced the competing explanations for the wide mismatch (breakpoint drift, source `sizes`, bad aspect ratio, stale deployment, and bucket rounding); none explains the deterministic container/viewport divergence. I also re-traced auth/rate-limit admission, upload-delete-restore ordering, background jobs, migration promotion, cache invalidation, and release state. No third new trace survived.

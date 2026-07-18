@@ -1,29 +1,59 @@
-# Designer — Cycle 6 Provenance
+# Cycle 7 Designer / UI-UX Review
 
-Review target: `6e4c25c8`. Web UI review used the required agent-browser core, interact, query, wait, network, visual, debug, state, and config instructions. No local server was running, so I inspected the live production app that exposes the Cycle 5 policy. Evidence came from accessibility snapshots, textual DOM, computed styles/boxes, currentSrc, console/errors, interactions, and ephemeral `/tmp` screenshots; no screenshot was committed.
+Date: 2026-07-18 KST
+Review HEAD: `ec7fc46f`
 
-## Browser coverage
+## Method and coverage
 
-- 393×852 DPR 3: one-column 361 px cards, `100vw`, 1536w selected; mobile tag disclosure closed; nav expanded/collapsed with 44×44 control and focus moved into the disclosure; search dialog occupied 393×852, input 285×44, close 44×44, focus on input, body scroll locked.
-- 768×900 DPR 2: three columns, 736 px grid, 234.66 px card, min-width `33vw` policy, 640w selected; only card 0 eager/high.
-- 1,024×900 DPR 2 timeline: three columns, 992 px grid, 320 px card, aligned archive sizes.
-- 1,536×900 DPR 2: five columns, 1,504 px grid, 288 px card, 640w selected. Accessibility tree preserved H1 → hidden H2 → card H3 hierarchy and disambiguated photo link names.
+This is a web UI, so I used the required agent-browser core, interaction,
+query, wait, network, visual/debug, state, and configuration workflows against
+`https://gallery.atik.kr`. I inspected accessibility snapshots, DOM order,
+computed styles, box geometry, ARIA/state, console/errors, network state, and
+responsive behavior at 320, 393, 1,536, and 2,560 CSS pixels in light/dark and
+reduced-motion modes. I exercised search open/Escape, mobile navigation
+expansion, pointer/keyboard focus behavior, tag disclosure, gallery/card
+navigation, source selection, and touch targets. I also reviewed public/admin
+source for loading/empty/error states, forms, focus traps, i18n, and responsive
+breakpoints. Korean/English are both LTR, so an RTL rendering claim is not
+applicable to the shipped locale set.
 
-## NEW Cycle 6 finding
+## Finding
 
-### DES-C6-01 — Sparse desktop cards reserve the wrong virtualized height
+### UX-01 — Virtualized masonry over-reserves cold card geometry by up to 70%
 
-- Severity: **Medium**
-- Confidence: **High**
-- Status: **Confirmed computed-style mismatch; visible jump likely/manual-validation**
-- Regions: `apps/web/src/components/home-client.tsx:231-274`; `apps/web/src/components/masonry-card.tsx:52-77`; `apps/web/src/app/[locale]/globals.css:231-235`
+- Severity / confidence / status: **Medium / High / Confirmed live UX defect**
+- Regions: `apps/web/src/components/home-client.tsx:22-79,231-249`;
+  `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`;
+  `apps/web/src/components/masonry-card.tsx:60-76`;
+  `apps/web/src/app/[locale]/globals.css:231-235`
+- Text evidence: at 320 px, the masonry grid box was exactly `x=16,
+  width=288`; landscape cards rendered at about `288x192`, but computed
+  `contain-intrinsic-size` was `auto 224px`. A portrait card rendered 431.75
+  px high but advertised 504 px. The estimator uses a 336 px rounded viewport
+  bucket and never subtracts the layout's 16 px padding on each side.
+- Ultrawide evidence: at 2,560 px, a two-photo filter rendered a centered
+  1,504 px grid and two
+  744x496 cards, but computed intrinsic height was 843 px (70% high) because
+  the estimator continued growing past the container's cap.
+- User impact: these values are the cold fallback for
+  `content-visibility:auto`; after a card has rendered, the `auto` keyword can
+  retain its actual size. First-time skipped cards still define too much
+  virtual scroll extent and contract when activated, shifting later scroll
+  targets. The error is material at both the narrow inset and ultrawide cap.
+- Fix: measure/bucket the actual masonry content box and base intrinsic height
+  on its effective column width. Add live 320 px and 2,560 px regressions.
 
-On a production filter with exactly two photos at 1,536 px, DOM/computed-style evidence showed two columns, a 1,504 px grid, 744×496 cards, correct `50vw` sources and 1536w candidates, but `content-visibility:auto` with `contain-intrinsic-size:auto 196px`. The visual card is correct once rendered; the virtualized stand-in is not.
+## Other UX results and final sweep
 
-Concrete failure: in a short-height viewport or a layout where the grid begins beyond the relevance region, the page can reserve around 300 px too little per 3:2 card and shift scroll geometry as the cards become relevant. The common 900 px viewport painted them immediately, so I did not claim an observed jump there.
-
-Fix: derive intrinsic width from the item-capped effective columns or observed grid width, and add short-viewport sparse browser coverage.
-
-## Revalidated and final UI sweep
-
-The Cycle 5 responsive download defect is visibly/runtime closed. Mobile navigation, search focus/scroll lock, touch targets, headings, link names, theme/language controls, tag disclosure containment, and first-card scheduling behaved correctly; page error buffers were empty. Prior mobile-admin/product redesign and browser-matrix items remain carry-forward. No second new designer finding survived.
+- Information architecture and landmarks were coherent; skip link, nav, main,
+  footer, H1/H2/H3 structure, and photo link names were present.
+- Mobile controls and visible tag/nav actions measured at least 44x44 px.
+- Keyboard activation of the mobile disclosure deliberately focuses the first
+  revealed link and Escape restores the toggle; pointer activation correctly
+  keeps pointer focus behavior stable.
+- Search opened as a modal dialog, focused its input, and closed on Escape.
+- No horizontal overflow, uncaught page error, or new console failure appeared
+  at tested breakpoints. Dark/light tokens remained legible in computed state.
+- Loading, empty, error, validation, focus-trap, reduced-motion, and i18n
+  source paths had dedicated handling and existing tests. No second new UX
+  issue survived the final missed-issue sweep.

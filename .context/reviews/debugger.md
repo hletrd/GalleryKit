@@ -1,22 +1,41 @@
-# Debugger — Cycle 6 Provenance
+# Debugger — Cycle 7 Provenance
 
-Review target: `6e4c25c8`. I debugged recent responsive changes through React state, Tailwind/CSS columns, browser source selection, content visibility, tests, and release state, while checking competing explanations in production.
+Review target: `ec7fc46f`. Review only.
 
-## NEW Cycle 6 finding
+## Inventory and validation
 
-### DBG-C6-01 — Sparse-card intrinsic height is derived from the wrong column-count branch
+I debugged the current responsive change through React state, width bucketing, Tailwind layout, CSS containment, aspect-ratio conversion, source selection, Playwright coverage, and release state. I also swept request guards, restore/queue failure paths, caches, listeners, and recent regression surfaces across the full inventory. Fresh lint/typecheck/audit/full Vitest passed.
+
+## New Cycle 7 findings
+
+### DBG-C7-01 — The fix is correct at the test width and wrong immediately above the container cap
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed cause and live computed-style mismatch; visible shift manual-validation**
-- Regions: `apps/web/src/components/home-client.tsx:27-79,231-274`; `apps/web/src/components/masonry-card.tsx:52-77`; `apps/web/src/app/[locale]/globals.css:231-235`
+- Classification: **Confirmed root cause; user-visible activation shift manual-validation**
+- Regions: `apps/web/src/components/home-client.tsx:21-79,231-249`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-19`; `apps/web/src/components/masonry-card.tsx:58-77`; `apps/web/src/app/[locale]/globals.css:231-235`; `apps/web/e2e/responsive-masonry.spec.ts:11-49`
 
-Causal chain: 1,536 px makes `useColumnCount()` return 5 → two loaded items make the CSS policy render 2 columns → `estimatedCardWidth` still computes `(1536 - 4×16) / 5 ≈ 294` → a 3:2 card gets `contain-intrinsic-size: auto 196px` → actual two-column width is 744 and rendered height is 496. The source-size helper independently uses two columns and correctly emits `50vw`, proving this is not stale deployment or a browser `sizes` interpretation issue.
+Root cause: Cycle 6 fixed the denominator but not the numerator. `effectiveColumnCount` belongs to the rendered grid, while `viewportWidth` belongs to the browser window. Tailwind's parent container stops at 1,536 px, so those values diverge on ultrawide displays.
 
-Concrete failure: when content visibility defers the sparse grid, activation replaces the 196 px stand-in with about 496 px, altering scroll/layout geometry. A normal-height viewport paints the first row immediately, so a visible jump was not claimed without the short-viewport case.
+Reproduction by deterministic source math: at 2,560 px, width buckets to 2,544; two items produce two columns; estimate is `(2544 - 16) / 2 = 1264`. The container content is about 1,504 px, so the real card is `(1504 - 16) / 2 = 744`. `MasonryCard` multiplies each by the same `height / width`, so the hint is 70% too tall. This is not breakpoint ordering, invalid dimensions, or stale memoization.
 
-Fix: cap the estimator with the same effective columns as the CSS and sizes, or measure the actual container/card.
+Concrete failure: `content-visibility:auto` can reserve the oversized height and collapse it when the card becomes relevant. The regression test uses 1,536 px, where its `±15%` assertion passes because the parent has not diverged from the viewport.
 
-## Negative hypotheses and final sweep
+Suggested fix: measure the grid with `ResizeObserver`, bucket the observed width, and add a 2,560 px sparse regression. A hard `Math.min(viewportWidth, 1536) - padding` clamp is less robust because it duplicates container configuration.
 
-The Cycle 5 one-pixel candidate flip is fixed: 768 px DPR-2 now renders three columns and selects 640w. Independent eager/high attributes are correct in production. I also traced stale requests, memo prop identity, image fallback, resize rAF cleanup, route/action guard failures, restore/queue shutdown, cache invalidation, and deploy state. No additional new debugger finding survived.
+### DBG-C7-02 — Release recovery flags are stale after successful signed publication
+
+- Severity: **Low**
+- Confidence: **High**
+- Classification: **Confirmed repository-state bug; deploy completion manual-validation**
+- Regions: `.context/plans/cycle-6-2026-07-18-plan.md:5,43-45,65-73`; `.context/plans/README.md:34-41`
+
+`git log --show-signature` reports good signatures for `fcbce386`, `03a96a3d`, and `ec7fc46f`, and both local and remote refs equal `ec7fc46f`. The plan nevertheless says signed release pending and leaves signed push/deploy unchecked.
+
+Concrete failure: a resumed agent follows the authoritative unchecked instructions and can rerun terminal actions that already occurred.
+
+Suggested fix: mark the proven signed push complete, keep deploy status qualified by actual evidence, archive the plan, and update the active index.
+
+## Negative hypotheses and final missed-issue sweep
+
+I ruled out the 48 px bucket alone (it contributes at most 24 px error), invalid image dimensions (guarded), source-candidate selection, and stale React memo props as causes of the 520 px width discrepancy. I also reviewed abort/cleanup paths, retry loops, queue shutdown, restore marker finalization, route/action error handling, and cache invalidation. No third new latent bug survived.
