@@ -6,6 +6,10 @@ const SLOT_SIZE_BY_COLUMNS = {
     5: '20vw',
 } as const;
 
+export const MASONRY_WIDTH_BUCKET_PX = 48;
+export const MASONRY_COLUMN_GAP_PX = 16;
+export const MASONRY_CARD_WIDTH_FALLBACK_PX = 300;
+
 export type MasonryColumnCount = keyof typeof SLOT_SIZE_BY_COLUMNS;
 
 function normalizeItemCount(itemCount: number): number {
@@ -15,6 +19,19 @@ function normalizeItemCount(itemCount: number): number {
 
 export function getEffectiveMasonryColumns(itemCount: number, maximumColumns: number): MasonryColumnCount {
     return Math.min(normalizeItemCount(itemCount), normalizeItemCount(maximumColumns)) as MasonryColumnCount;
+}
+
+export function quantizeMasonryContainerWidth(width: number): number {
+    if (!Number.isFinite(width) || width <= 0) return 0;
+    return Math.max(1, Math.round(width / MASONRY_WIDTH_BUCKET_PX) * MASONRY_WIDTH_BUCKET_PX);
+}
+
+export function estimateMasonryCardWidth(containerWidth: number, columns: number): number {
+    if (!Number.isFinite(containerWidth) || containerWidth <= 0) return MASONRY_CARD_WIDTH_FALLBACK_PX;
+    const normalizedColumns = normalizeItemCount(columns);
+    const usableWidth = containerWidth - MASONRY_COLUMN_GAP_PX * (normalizedColumns - 1);
+    const width = Math.floor(usableWidth / normalizedColumns);
+    return width > 0 ? width : MASONRY_CARD_WIDTH_FALLBACK_PX;
 }
 
 function slotSize(itemCount: number, maximumColumns: MasonryColumnCount): string {

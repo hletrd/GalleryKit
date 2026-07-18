@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
     ARCHIVE_MASONRY_SIZES,
     SHARED_GROUP_MASONRY_SIZES,
+    estimateMasonryCardWidth,
     getEffectiveMasonryColumns,
     getMainMasonrySizes,
+    quantizeMasonryContainerWidth,
 } from '@/lib/responsive-masonry';
 
 describe('responsive masonry source-size policy', () => {
@@ -50,5 +52,27 @@ describe('responsive masonry source-size policy', () => {
         { items: 2, maximum: Number.NaN, expected: 1 },
     ])('caps $items items at $maximum columns', ({ items, maximum, expected }) => {
         expect(getEffectiveMasonryColumns(items, maximum)).toBe(expected);
+    });
+
+    it.each([
+        { width: 0, expected: 0 },
+        { width: Number.NaN, expected: 0 },
+        { width: -100, expected: 0 },
+        { width: 288, expected: 288 },
+        { width: 361, expected: 384 },
+        { width: 1_504, expected: 1_488 },
+    ])('quantizes measured container width $width to $expected', ({ width, expected }) => {
+        expect(quantizeMasonryContainerWidth(width)).toBe(expected);
+    });
+
+    it.each([
+        { width: 0, columns: 1, expected: 300 },
+        { width: Number.NaN, columns: 2, expected: 300 },
+        { width: 288, columns: 1, expected: 288 },
+        { width: 1_488, columns: 2, expected: 736 },
+        { width: 1_488, columns: 5, expected: 284 },
+        { width: 10, columns: 5, expected: 300 },
+    ])('estimates $columns-column card width from $width as $expected', ({ width, columns, expected }) => {
+        expect(estimateMasonryCardWidth(width, columns)).toBe(expected);
     });
 });

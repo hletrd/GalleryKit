@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { TagFilter } from '@/components/tag-filter';
@@ -14,15 +14,14 @@ import type { ImageListCursorInput } from '@/lib/data';
 import { DEFAULT_IMAGE_SIZES } from '@/lib/gallery-config-shared';
 import { humanizeTagLabel } from '@/lib/photo-title';
 import { useDisplayCapability } from '@/lib/use-display-capability';
-import { getEffectiveMasonryColumns, getMainMasonrySizes } from '@/lib/responsive-masonry';
+import {
+    estimateMasonryCardWidth,
+    getEffectiveMasonryColumns,
+    getMainMasonrySizes,
+    quantizeMasonryContainerWidth,
+} from '@/lib/responsive-masonry';
 
 const SCROLL_STORAGE_PREFIX = 'gallery_scroll:';
-
-// C1-21 (PERF-02): bucket width for the stored viewportWidth so an interactive
-// resize/drag only updates state (and re-renders every masonry card) when the
-// estimated card width would actually shift by a visible amount, instead of
-// on every rAF'd resize frame.
-const VIEWPORT_WIDTH_BUCKET_PX = 48;
 
 function useColumnCount() {
     // SSR cannot know the viewport. Start at the mobile-safe one-column floor;
@@ -30,12 +29,6 @@ function useColumnCount() {
     // Explicit image priority belongs only to the universal first card because
     // browser-balanced CSS columns do not expose later visual leaders here.
     const [count, setCount] = useState(1);
-    // DES-R5C3-04 (plan-315 item 26): also track the viewport width so callers
-    // can derive a per-card width estimate (container width / column count) for
-    // containIntrinsicSize, instead of the fixed 300 px constant. 0 means "not
-    // measured yet" (SSR / first paint) → callers fall back to 300.
-    const [viewportWidth, setViewportWidth] = useState(0);
-
     useEffect(() => {
         let rafId: number | null = null;
         const mountedRef = { current: true };
@@ -48,12 +41,6 @@ function useColumnCount() {
         const update = () => {
             if (!mountedRef.current) return;
             const w = window.innerWidth;
-            // C1-21 (PERF-02): column count is still derived from the RAW width
-            // (unchanged breakpoint behavior) — only the width stored for
-            // estimatedCardWidth is quantized, so re-renders during a drag only
-            // happen when the estimate would meaningfully change.
-            const quantizedWidth = Math.round(w / VIEWPORT_WIDTH_BUCKET_PX) * VIEWPORT_WIDTH_BUCKET_PX;
-            setViewportWidth(prev => prev === quantizedWidth ? prev : quantizedWidth);
             if (w < 640) setCount(1);
             else if (w < 768) setCount(2);
             else if (w < 1280) setCount(3);
@@ -76,7 +63,46 @@ function useColumnCount() {
         };
     }, []);
 
-    return { count, viewportWidth };
+    return count;
+}
+
+function useMasonryContainerWidth() {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [containerWidth, setContainerWidth] = useState(0);
+
+    useEffect(() => {
+        const node = containerRef.current;
+        if (!node) return;
+
+        let rafId: number | null = null;
+        let mounted = true;
+        const update = (width: number) => {
+            if (!mounted) return;
+            const quantizedWidth = quantizeMasonryContainerWidth(width);
+            setContainerWidth((previous) => previous === quantizedWidth ? previous : quantizedWidth);
+        };
+        const scheduleUpdate = (width: number) => {
+            if (rafId !== null) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                update(width);
+                rafId = null;
+            });
+        };
+        const observer = new ResizeObserver((entries) => {
+            scheduleUpdate(entries[0]?.contentRect.width ?? node.getBoundingClientRect().width);
+        });
+
+        observer.observe(node);
+        scheduleUpdate(node.getBoundingClientRect().width);
+
+        return () => {
+            mounted = false;
+            observer.disconnect();
+            if (rafId !== null) cancelAnimationFrame(rafId);
+        };
+    }, []);
+
+    return { containerRef, containerWidth };
 }
 
 export interface GalleryImage {
@@ -228,25 +254,23 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
-    const { count: columnCount, viewportWidth } = useColumnCount();
+    const columnCount = useColumnCount();
+    const { containerRef: masonryContainerRef, containerWidth } = useMasonryContainerWidth();
     const orderedImages = allImages;
     const itemCount = orderedImages.length;
     const responsiveSizes = useMemo(() => getMainMasonrySizes(itemCount), [itemCount]);
     const effectiveColumnCount = getEffectiveMasonryColumns(itemCount, columnCount);
 
-    // DES-R5C3-04 (plan-315 item 26): estimate the rendered card width from the
-    // measured viewport / item-capped column count (minus the gap-4 = 16 px
-    // gutters between columns) so containIntrinsicSize's reserved height
-    // follows the same sparse-gallery geometry as the CSS classes and image
-    // sizes. Falls back to 300 before the viewport is measured (SSR / first
-    // paint) — the documented constant.
-    const estimatedCardWidth = useMemo(() => {
-        if (!viewportWidth) return 300;
-        const GAP_PX = 16; // Tailwind gap-4 between masonry columns
-        const usable = viewportWidth - GAP_PX * (effectiveColumnCount - 1);
-        const w = Math.floor(usable / effectiveColumnCount);
-        return w > 0 ? w : 300;
-    }, [viewportWidth, effectiveColumnCount]);
+    // C7-01: the public layout is a padded, max-width container, so viewport
+    // width is not the rendered masonry width at either edge of the responsive
+    // range. Observe the one shared grid, bucket that value to avoid per-pixel
+    // resize rerenders, and keep the item-capped column divisor aligned with
+    // the CSS/source policy. The helper uses the documented 300 px fallback
+    // until the first measurement arrives.
+    const estimatedCardWidth = useMemo(
+        () => estimateMasonryCardWidth(containerWidth, effectiveColumnCount),
+        [containerWidth, effectiveColumnCount],
+    );
 
     // Limit column count to actual item count so empty columns don't leave
     // unused whitespace on the right side of the masonry grid.
@@ -322,7 +346,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                 (1536px+) to make better use of widescreen real estate.
                 When fewer items than the breakpoint's max columns exist,
                 clamp to the item count so the grid fills its width. */}
-            <GridPictureFallbackBoundary className={masonryClasses}>
+            <GridPictureFallbackBoundary className={masonryClasses} containerRef={masonryContainerRef}>
                 {orderedImages.map((image, index) => (
                     <MasonryCard
                         key={image.id}

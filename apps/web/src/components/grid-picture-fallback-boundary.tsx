@@ -1,15 +1,17 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 
 type GridPictureFallbackBoundaryProps = {
     children: ReactNode;
     className?: string;
+    containerRef?: Ref<HTMLDivElement>;
 };
 
-export function GridPictureFallbackBoundary({ children, className }: GridPictureFallbackBoundaryProps) {
+export function GridPictureFallbackBoundary({ children, className, containerRef }: GridPictureFallbackBoundaryProps) {
     return (
         <div
+            ref={containerRef}
             className={className}
             onErrorCapture={(event) => {
                 const target = event.target;
