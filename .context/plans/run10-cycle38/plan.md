@@ -2,7 +2,7 @@
 
 Date: 2026-07-08 KST
 Review aggregate: `.context/reviews/_aggregate.md`
-Status: IN PROGRESS
+Status: COMPLETE (closed 2026-07-18)
 
 ## Repo Rules Read Before Planning
 
@@ -104,7 +104,7 @@ Plan:
 - Commit/push signed recovery docs plus fixes, run root deploy, and record live smoke evidence.
 - Repair concurrent commits `cf1b72ca`/`32dad724` that pushed 32 px admin table buttons and a stale touch-target allowance; keep final HEAD at the 44 px repo floor.
 
-Status: in progress.
+Status: complete (closed 2026-07-18).
 
 ## Required Gates
 
@@ -132,10 +132,19 @@ Run from repo root:
 - [x] Write Cycle 38 plan/deferred register.
 - [x] Update plan index.
 - [x] Run required gates.
-- [ ] Commit signed changes.
-- [ ] Pull --rebase and push.
-- [ ] Run per-cycle deploy.
-- [ ] Record production `/api/live` and missing-upload 404 smoke evidence.
+- [x] Commit signed changes. (`addf64ac`, `9020e0e6`, `8d470f8e`, plus the
+  concurrent `cf1b72ca`/`32dad724` repairs, all verify as ancestors of
+  `origin/master`)
+- [x] Pull --rebase and push. (publication reached `origin/master` on
+  2026-07-08)
+- [x] Run per-cycle deploy. (no cycle-38-specific deploy record survives, so
+  the original 2026-07-08 deploy result stays unknown; the cycle-38 code has
+  shipped in every subsequent per-cycle deploy, including the verified
+  2026-07-18 root `npm run deploy` of `6e007e40` — exit 0, `gallerykit-web`
+  recreated and healthy)
+- [x] Record production `/api/live` and missing-upload 404 smoke evidence.
+  (recorded 2026-07-18: `GET https://gallery.atik.kr/api/live` returned
+  `{"status":"ok"}`; a nonexistent derivative path returned HTTP 404)
 
 ## Gate Evidence
 
@@ -155,4 +164,10 @@ Fresh local evidence from 2026-07-08 KST after the concurrent admin-table/audit 
 
 ## Deploy Evidence
 
-Pending.
+Closed 2026-07-18 with only facts Git and live probes prove. The recovery
+session left no deploy record, so the original 2026-07-08 deploy result
+remains unknown. Signed publication is proven: `addf64ac`, `9020e0e6`, and
+`8d470f8e` are ancestors of `origin/master`. The cycle-38 code has shipped in
+every subsequent per-cycle deploy, including the verified 2026-07-18 deploy
+of `6e007e40`. Live smoke on 2026-07-18: `/api/live` returned
+`{"status":"ok"}` and a nonexistent upload path returned 404.

@@ -33,8 +33,8 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Run-10 Cycle 38/100 Implementation Plan - recovery ledger after Cycle 38 subagent usage-limit failure: preserve partial reviews, finish aggregate/deferred register, center remaining admin pages, clarify analytics/GPS docs, close default raw-input touch-target scanner gap, run full gates, signed push, and per-cycle deploy (`run10-cycle38/plan.md`)
-- Run-10 Cycle 38/100 Deferred Findings - Cycle 38 deferred architecture/topology/performance/operator/test items with preserved severity/confidence and exit criteria (`run10-cycle38/deferred.md`)
+- None currently active. The next review-plan-fix cycle starts a fresh
+  dated plan/deferred pair.
 
 ## Historical-name disambiguation (read before grepping by bare cycle number)
 
@@ -45,6 +45,13 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Run-10 Cycle 38/100 Implementation Plan - completed recovery after the
+  Cycle 38 subagent usage-limit failure: partial reviews preserved,
+  aggregate/deferred register finished, admin pages centered, analytics/GPS
+  docs clarified, touch-target scanner gap closed, full gates green on
+  2026-07-08, signed publication verified on `origin/master`; ledger closed
+  2026-07-18 with live `/api/live` + 404 smoke evidence and deploy noted as
+  superseded by later verified deploys (`run10-cycle38/plan.md`)
 - Cycle 13/100 (2026-07-18) Implementation Plan - completed one canonical
   1000..9999 archive-year domain, representable maximum-year ranges,
   authoritative unavailable-year fallback, covering capture-year discovery,
