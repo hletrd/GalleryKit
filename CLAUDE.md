@@ -763,3 +763,8 @@ npm run deploy
 ```
 
 Keep real SSH keys, hostnames, and optional `DEPLOY_REMOTE_SCRIPT` / `DEPLOY_CMD` overrides in `.env.deploy`; never commit that file.
+The helper accepts a private env file owned by the caller or by the checkout
+owner. This does not create a separate trust grant: executing a checkout-owned
+shell script already trusts that owner to control the script. An immutable
+root-owned installed helper must not infer trust from an unrelated checkout;
+configure its allowed principal explicitly instead.

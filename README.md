@@ -47,7 +47,7 @@ The linked example deployment is a live GalleryKit site and may include deployme
 - **Categories & Sharing** -- organize photos into categories with slug aliases and publish per-photo or group share links with Base56 short keys
 - **EXIF Extraction** -- camera model, lens, ISO, aperture, shutter speed, focal length, GPS, ICC name, source bit depth, color pipeline decision (admin). Review GPS stripping before the first upload; once any photo exists, the setting is locked because changing it later would not rewrite already stored originals.
 - **Tagging & Search** -- keyword metadata search across titles, descriptions, cameras, and tags
-- **Semantic Search (AI, self-hosted, operator-runbook)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; production mode is not enabled from the Settings UI** and requires operator setup (one-time public model-weight download into the host bind mount + backfill + env opt-in). Runtime photo/query inference stays local and offline after weights are seeded. Results are served from a bounded newest-first embedding scan, not a vector index, so very large galleries require repeated backfills or future index work for complete old-photo recall. A production deployment may enable it after the runbook checks; fresh installs do not.
+- **Semantic Search (AI, self-hosted, operator-runbook)** -- natural-language photo search in **English & Korean** plus **"similar photos"** (image→image), powered by an in-process multilingual CLIP encoder (jina-clip-v2, int8 ONNX on CPU — no per-query API cost). **Disabled by default; production mode is not enabled from the Settings UI** and requires operator setup (one-time public model-weight download into the host bind mount + backfill + env opt-in). Runtime photo/query inference stays local and offline after weights are seeded. Results are served from a bounded newest-first embedding scan, not a vector index. Repeated backfill runs can finish a missing-embedding backlog but do not rotate the request-time scan to older rows; broader old-photo recall requires raising the bounded scan limit within its hard cap or adding a vector index. A production deployment may enable it after the runbook checks; fresh installs do not.
 - **Progressive Web App** -- installable PWA with same-origin visited image caching and an offline HTML fallback; it is not a full offline gallery sync
 - **Admin Dashboard** -- drag-and-drop uploads, batch metadata editing, PAT-authenticated upload API for external clients (no Lightroom Classic plugin is bundled), multiple root-admin accounts for trusted co-admins (Argon2; no role separation yet); color tunables for chroma subsampling, AVIF effort, force-sRGB derivatives, HDR ingest opt-in
 
@@ -138,6 +138,12 @@ npm run deploy
 ```
 
 `npm run deploy` reads `.env.deploy` when present, otherwise it falls back to `$HOME/.gallerykit-secrets/gallery-deploy.env`; set `DEPLOY_ENV_FILE` to point somewhere else. It derives the SSH deploy command from `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_KEY`, and `DEPLOY_PATH`. Use `DEPLOY_REMOTE_SCRIPT` if you only need to change the remote entrypoint while keeping the derived SSH wrapper. Keep `DEPLOY_CMD` only as an escape hatch when you need a fully custom command.
+
+The helper accepts a private env file owned by the executing user or by the
+checkout owner. That checkout-owner trust is inherent: anyone who can replace
+the checkout-owned helper script can already control what the caller executes.
+Do not copy this exception into a root-owned immutable installed helper; such a
+helper must use an explicitly configured trusted principal instead.
 
 ### Environment Setup
 
