@@ -255,6 +255,7 @@ operator-enabled rather than assumed live in production.
 The `images` table has composite indexes optimized for query patterns:
 - `(processed, capture_date, created_at, id)` — homepage and gallery listing sort, including the canonical final tie-breaker (migration 0032)
 - `(processed, capture_month, capture_day, capture_date, created_at, id)` — cross-year On This Day lookup through stored generated month/day fields, without applying `MONTH()`/`DAY()` to every row (migration 0032)
+- `(processed, capture_year)` — distinct timeline-year discovery through a stored generated year field, without applying `YEAR()` to every processed capture date (migration 0033)
 - `(processed, created_at)` — prev/next navigation
 - `(topic, processed, capture_date, created_at, id)` — topic-filtered listings, including the canonical final tie-breaker (migration 0032)
 - `(processed, updated_at, created_at, id)` and `(topic, processed, updated_at, created_at, id)` — `updated_at`-ordered feed/sitemap listings so admin edits advance the entry's freshness instant (`idx_images_processed_updated_at` / `idx_images_topic_updated_at`, migration 0029)

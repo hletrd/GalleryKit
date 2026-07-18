@@ -144,12 +144,13 @@ export async function getOnThisDayImages(month: number, day: number) {
 
 /**
  * Return the distinct years that appear in capture_date, descending.
- * Used by the year scrubber on /timeline.
+ * Uses the stored generated year so the year scrubber does not evaluate
+ * YEAR(capture_date) across every processed photo on each uncached request.
  */
 export async function getTimelineYears(): Promise<number[]> {
     const rows = await db
         .selectDistinct({
-            year: sql<number>`YEAR(${images.capture_date})`,
+            year: images.capture_year,
         })
         .from(images)
         .where(
@@ -158,7 +159,7 @@ export async function getTimelineYears(): Promise<number[]> {
                 isNotNull(images.capture_date),
             ),
         )
-        .orderBy(desc(sql`YEAR(${images.capture_date})`));
+        .orderBy(desc(images.capture_year));
 
     return rows
         .map((r) => Number(r.year))

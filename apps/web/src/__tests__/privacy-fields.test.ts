@@ -42,6 +42,7 @@ const SENSITIVE_KEYS = [
     // C11: internal generated date lookup accelerators, not public metadata.
     'capture_month',
     'capture_day',
+    'capture_year',
     'latitude',
     'longitude',
     'filename_original',

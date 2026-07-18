@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, tinyint, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, primaryKey, bigint, customType } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, tinyint, smallint, float, double, uniqueIndex, index, timestamp, datetime, boolean, text, primaryKey, bigint, customType } from "drizzle-orm/mysql-core";
 import { sql } from "drizzle-orm";
 
 const mediumblob = customType<{ data: Buffer; driverData: Buffer }>({
@@ -40,10 +40,11 @@ export const images = mysqlTable("images", {
 
     // EXIF Data
     capture_date: datetime("capture_date", { mode: 'string' }),
-    // C11: stored generated columns keep the cross-year MM-DD lookup sargable.
-    // They are internal query accelerators, never public metadata.
+    // Stored generated columns keep cross-year MM-DD and timeline-year lookup
+    // sargable. They are internal query accelerators, never public metadata.
     capture_month: tinyint("capture_month", { unsigned: true }).generatedAlwaysAs(sql`MONTH(capture_date)`, { mode: 'stored' }),
     capture_day: tinyint("capture_day", { unsigned: true }).generatedAlwaysAs(sql`DAY(capture_date)`, { mode: 'stored' }),
+    capture_year: smallint("capture_year", { unsigned: true }).generatedAlwaysAs(sql`YEAR(capture_date)`, { mode: 'stored' }),
     camera_model: varchar("camera_model", { length: 255 }),
     lens_model: varchar("lens_model", { length: 255 }),
     iso: int("iso"),
@@ -131,6 +132,7 @@ export const images = mysqlTable("images", {
 }, (table) => ({
     idxImagesProcessedCaptureDate: index('idx_images_processed_capture_date').on(table.processed, table.capture_date, table.created_at, table.id),
     idxImagesProcessedCaptureMonthDay: index('idx_images_processed_capture_month_day').on(table.processed, table.capture_month, table.capture_day, table.capture_date, table.created_at, table.id),
+    idxImagesProcessedCaptureYear: index('idx_images_processed_capture_year').on(table.processed, table.capture_year),
     idxImagesProcessedCreatedAt: index('idx_images_processed_created_at').on(table.processed, table.created_at),
     idxImagesProcessedUpdatedAt: index('idx_images_processed_updated_at').on(table.processed, table.updated_at, table.created_at, table.id),
     idxImagesProcessedPipelineVersion: index('idx_images_processed_pipeline_version').on(table.processed, table.pipeline_version, table.id),

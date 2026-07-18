@@ -296,4 +296,19 @@ describe('reconcileLegacySchema column-definition convergence (C12-01)', () => {
         expect(MIGRATE_SRC_CODE).toMatch(/isBooleanFalseDefault\(/);
         expect(MIGRATE_SRC_CODE).toMatch(/ALTER TABLE images MODIFY COLUMN processed boolean DEFAULT false/);
     });
+
+    it('repairs generated capture-date columns by their full definitions', () => {
+        expect(MIGRATE_SRC_CODE).toContain("isStoredGeneratedColumn(info, 'tinyint unsigned', 'month(capture_date)')");
+        expect(MIGRATE_SRC_CODE).toContain("isStoredGeneratedColumn(info, 'tinyint unsigned', 'day(capture_date)')");
+        expect(MIGRATE_SRC_CODE).toContain("isStoredGeneratedColumn(info, 'smallint unsigned', 'year(capture_date)')");
+        expect(MIGRATE_SRC_CODE).toContain('GENERATION_EXPRESSION');
+        expect(MIGRATE_SRC_CODE).toContain('STORED AFTER capture_day');
+    });
+
+    it('repairs material capture-index definition drift, not only column lists', () => {
+        expect(MIGRATE_SRC_CODE).toContain('ensureIndexDefinition(');
+        expect(MIGRATE_SRC_CODE).toContain("row.COLLATION === 'A'");
+        expect(MIGRATE_SRC_CODE).toContain("String(row.IS_VISIBLE ?? '').toUpperCase() === 'YES'");
+        expect(MIGRATE_SRC_CODE).toContain("idx_images_processed_capture_year");
+    });
 });

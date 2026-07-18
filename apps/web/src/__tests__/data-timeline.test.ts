@@ -97,6 +97,15 @@ describe('data-timeline.ts — tagNamesAgg shape', () => {
     });
 });
 
+describe('data-timeline.ts — timeline year index', () => {
+    it('reads the indexed generated year without a YEAR(capture_date) expression', () => {
+        const body = extractFunctionBody(readSource(), 'getTimelineYears');
+        expect(body).toContain('year: images.capture_year');
+        expect(body).toContain('desc(images.capture_year)');
+        expect(body).not.toMatch(/YEAR\(/);
+    });
+});
+
 describe('data-timeline.ts — getTimelineImages', () => {
     it('getTimelineImages uses sargable capture_date ranges instead of YEAR()/MONTH() predicates', () => {
         const body = extractFunctionBody(readSource(), 'getTimelineImages');

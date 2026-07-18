@@ -232,6 +232,13 @@
       "when": 1784376151000,
       "tag": "0032_capture_date_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1784377800000,
+      "tag": "0033_capture_year_index",
+      "breakpoints": true
     }
   ]
 }

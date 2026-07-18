@@ -71,7 +71,14 @@ export default async function TimelinePage({
         return <PublicRestoreMaintenance title={tCommon('restoreMaintenanceTitle')} body={tCommon('restoreMaintenanceBody')} />;
     }
 
-    const [locale, t, tCommon, tAria, years, config, seo, nonce] = await Promise.all([
+    const requestedYear = yearParam && /^\d{4}$/.test(yearParam)
+        ? Number(yearParam)
+        : null;
+    const requestedTimelinePromise = requestedYear !== null
+        ? getTimelineImages(requestedYear)
+        : Promise.resolve(null);
+
+    const [locale, t, tCommon, tAria, years, config, seo, nonce, requestedTimeline] = await Promise.all([
         getLocale(),
         getTranslations('timeline'),
         getTranslations('common'),
@@ -80,20 +87,18 @@ export default async function TimelinePage({
         getGalleryConfig(),
         getSeoSettings(),
         getCspNonce(),
+        requestedTimelinePromise,
     ]);
 
     // Validate year param
-    const selectedYear =
-        yearParam && /^\d{4}$/.test(yearParam)
-            ? Number(yearParam)
-            : years[0] ?? null;
+    const selectedYear = requestedYear ?? years[0] ?? null;
 
     // R4C6 COR-R4C6-02: getTimelineImages now reports truncation so the
     // page can surface it instead of silently dropping early months.
-    const { images: photos, truncated } =
-        selectedYear !== null
+    const { images: photos, truncated } = requestedTimeline
+        ?? (selectedYear !== null
             ? await getTimelineImages(selectedYear)
-            : { images: [], truncated: false };
+            : { images: [], truncated: false });
 
     const imageSizes = config.imageSizes ?? DEFAULT_IMAGE_SIZES;
     const smallSize = findNearestImageSize(imageSizes, 640);

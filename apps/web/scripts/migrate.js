@@ -234,7 +234,8 @@ async function queryOne(connection, sql, params) {
 async function columnInfo(connection, dbName, tableName, columnName) {
     return queryOne(
         connection,
-        `SELECT DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, CHARACTER_MAXIMUM_LENGTH
+        `SELECT DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT,
+                CHARACTER_MAXIMUM_LENGTH, EXTRA, GENERATION_EXPRESSION
          FROM INFORMATION_SCHEMA.COLUMNS
          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
         [dbName, tableName, columnName]
@@ -288,6 +289,20 @@ function isBooleanFalseDefault(info) {
     return defaultValue === '0' || defaultValue === 'false' || defaultValue === "b'0'";
 }
 
+function normalizeGenerationExpression(value) {
+    return String(value ?? '')
+        .toLowerCase()
+        .replace(/`/g, '')
+        .replace(/\s+/g, '');
+}
+
+function isStoredGeneratedColumn(info, columnType, expression) {
+    return String(info.COLUMN_TYPE ?? '').toLowerCase() === columnType
+        && info.IS_NULLABLE === 'YES'
+        && String(info.EXTRA ?? '').toLowerCase().includes('stored generated')
+        && normalizeGenerationExpression(info.GENERATION_EXPRESSION) === expression;
+}
+
 // Idempotent column drop. MySQL 8.0 has no DROP COLUMN IF EXISTS (MariaDB-only),
 // so guard on INFORMATION_SCHEMA. Used by reconcileLegacySchema to converge a DB
 // to the CURRENT schema even when a feature's column was removed — the migration
@@ -316,27 +331,38 @@ async function ensureIndex(connection, dbName, tableName, indexName, createSql) 
     return false;
 }
 
-async function indexColumns(connection, dbName, tableName, indexName) {
+async function indexDefinition(connection, dbName, tableName, indexName) {
     const [rows] = await connection.query(
-        `SELECT COLUMN_NAME
+        `SELECT NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, COLLATION, SUB_PART,
+                INDEX_TYPE, IS_VISIBLE, EXPRESSION
          FROM INFORMATION_SCHEMA.STATISTICS
          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = ?
          ORDER BY SEQ_IN_INDEX`,
         [dbName, tableName, indexName]
     );
-    return rows.map((row) => row.COLUMN_NAME);
+    return rows;
 }
 
-// Existing legacy indexes can have the right name but an obsolete column
-// shape. Converge both absence and shape drift; identifiers are passed through
-// mysql2's identifier placeholders instead of string interpolation.
-async function ensureIndexColumns(connection, dbName, tableName, indexName, expectedColumns, createSql) {
-    const actualColumns = await indexColumns(connection, dbName, tableName, indexName);
-    if (actualColumns.length === expectedColumns.length
-        && actualColumns.every((column, index) => column === expectedColumns[index])) {
+// Existing legacy indexes can have the right name while their definition has
+// drifted. Check every material property used by the current ordinary BTREE
+// contract, not just the ordered column list.
+async function ensureIndexDefinition(connection, dbName, tableName, indexName, expectedColumns, createSql) {
+    const actual = await indexDefinition(connection, dbName, tableName, indexName);
+    const matches = actual.length === expectedColumns.length
+        && actual.every((row, index) => (
+            Number(row.NON_UNIQUE) === 1
+            && Number(row.SEQ_IN_INDEX) === index + 1
+            && row.COLUMN_NAME === expectedColumns[index]
+            && row.COLLATION === 'A'
+            && row.SUB_PART == null
+            && String(row.INDEX_TYPE ?? '').toUpperCase() === 'BTREE'
+            && String(row.IS_VISIBLE ?? '').toUpperCase() === 'YES'
+            && row.EXPRESSION == null
+        ));
+    if (matches) {
         return false;
     }
-    if (actualColumns.length > 0) {
+    if (actual.length > 0) {
         await connection.query('DROP INDEX ?? ON ??', [indexName, tableName]);
     }
     await connection.query(createSql);
@@ -440,6 +466,7 @@ async function reconcileLegacySchema(connection, dbName) {
             capture_date datetime DEFAULT NULL,
             capture_month tinyint unsigned GENERATED ALWAYS AS (MONTH(capture_date)) STORED,
             capture_day tinyint unsigned GENERATED ALWAYS AS (DAY(capture_date)) STORED,
+            capture_year smallint unsigned GENERATED ALWAYS AS (YEAR(capture_date)) STORED,
             camera_model varchar(255) DEFAULT NULL,
             lens_model varchar(255) DEFAULT NULL,
             iso int DEFAULT NULL,
@@ -504,6 +531,31 @@ async function reconcileLegacySchema(connection, dbName) {
     await ensureColumn(connection, dbName, 'images', 'derivative_max_width', 'ALTER TABLE images ADD COLUMN derivative_max_width int DEFAULT NULL');
     await ensureColumn(connection, dbName, 'images', 'capture_month', 'ALTER TABLE images ADD COLUMN capture_month tinyint unsigned GENERATED ALWAYS AS (MONTH(capture_date)) STORED AFTER capture_date');
     await ensureColumn(connection, dbName, 'images', 'capture_day', 'ALTER TABLE images ADD COLUMN capture_day tinyint unsigned GENERATED ALWAYS AS (DAY(capture_date)) STORED AFTER capture_month');
+    await ensureColumn(connection, dbName, 'images', 'capture_year', 'ALTER TABLE images ADD COLUMN capture_year smallint unsigned GENERATED ALWAYS AS (YEAR(capture_date)) STORED AFTER capture_day');
+    await ensureColumnDefinition(
+        connection,
+        dbName,
+        'images',
+        'capture_month',
+        (info) => isStoredGeneratedColumn(info, 'tinyint unsigned', 'month(capture_date)'),
+        'ALTER TABLE images MODIFY COLUMN capture_month tinyint unsigned GENERATED ALWAYS AS (MONTH(capture_date)) STORED AFTER capture_date'
+    );
+    await ensureColumnDefinition(
+        connection,
+        dbName,
+        'images',
+        'capture_day',
+        (info) => isStoredGeneratedColumn(info, 'tinyint unsigned', 'day(capture_date)'),
+        'ALTER TABLE images MODIFY COLUMN capture_day tinyint unsigned GENERATED ALWAYS AS (DAY(capture_date)) STORED AFTER capture_month'
+    );
+    await ensureColumnDefinition(
+        connection,
+        dbName,
+        'images',
+        'capture_year',
+        (info) => isStoredGeneratedColumn(info, 'smallint unsigned', 'year(capture_date)'),
+        'ALTER TABLE images MODIFY COLUMN capture_year smallint unsigned GENERATED ALWAYS AS (YEAR(capture_date)) STORED AFTER capture_day'
+    );
     // R17-L2: admin user that performed the upload (admin-only PII).
     // Nullable so legacy rows keep working; ON DELETE SET NULL keeps the
     // photo when the admin is removed but drops the authorship link.
@@ -751,16 +803,19 @@ async function reconcileLegacySchema(connection, dbName) {
     // reconciled here so a baselined legacy DB matches the post-0023 schema.
 
     await ensureIndex(connection, dbName, 'image_tags', 'idx_image_tags_tag_id', 'CREATE INDEX idx_image_tags_tag_id ON image_tags (tag_id)');
-    await ensureIndexColumns(connection, dbName, 'images', 'idx_images_processed_capture_date',
+    await ensureIndexDefinition(connection, dbName, 'images', 'idx_images_processed_capture_date',
         ['processed', 'capture_date', 'created_at', 'id'],
         'CREATE INDEX idx_images_processed_capture_date ON images (processed, capture_date, created_at, id)');
-    await ensureIndexColumns(connection, dbName, 'images', 'idx_images_processed_capture_month_day',
+    await ensureIndexDefinition(connection, dbName, 'images', 'idx_images_processed_capture_month_day',
         ['processed', 'capture_month', 'capture_day', 'capture_date', 'created_at', 'id'],
         'CREATE INDEX idx_images_processed_capture_month_day ON images (processed, capture_month, capture_day, capture_date, created_at, id)');
+    await ensureIndexDefinition(connection, dbName, 'images', 'idx_images_processed_capture_year',
+        ['processed', 'capture_year'],
+        'CREATE INDEX idx_images_processed_capture_year ON images (processed, capture_year)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_created_at', 'CREATE INDEX idx_images_processed_created_at ON images (processed, created_at)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_updated_at', 'CREATE INDEX idx_images_processed_updated_at ON images (processed, updated_at, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_processed_pipeline_version', 'CREATE INDEX idx_images_processed_pipeline_version ON images (processed, pipeline_version, id)');
-    await ensureIndexColumns(connection, dbName, 'images', 'idx_images_topic',
+    await ensureIndexDefinition(connection, dbName, 'images', 'idx_images_topic',
         ['topic', 'processed', 'capture_date', 'created_at', 'id'],
         'CREATE INDEX idx_images_topic ON images (topic, processed, capture_date, created_at, id)');
     await ensureIndex(connection, dbName, 'images', 'idx_images_topic_updated_at', 'CREATE INDEX idx_images_topic_updated_at ON images (topic, processed, updated_at, created_at, id)');
