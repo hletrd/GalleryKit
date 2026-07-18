@@ -33,11 +33,11 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Cycle 9/100 (2026-07-18) Implementation Plan - detached gallery-config
-  invalidation generation/ownership, complete configurable public-grid source
-  ladders, custom/high-DPR regression coverage, Cycle 8 release-ledger closure,
-  full gates, signed push, and per-cycle deploy
-  (`cycle-9-2026-07-18-plan.md`)
+- Cycle 10/100 (2026-07-18) Implementation Plan - persist truthful delivered
+  derivative widths, deduplicate responsive candidates by actual pixels,
+  replace suffix-only browser evidence, remove the expired config alias, close
+  the Cycle 9 release ledger, run full gates, signed push, and per-cycle deploy
+  (`cycle-10-2026-07-18-plan.md`)
 - Run-10 Cycle 38/100 Implementation Plan - recovery ledger after Cycle 38 subagent usage-limit failure: preserve partial reviews, finish aggregate/deferred register, center remaining admin pages, clarify analytics/GPS docs, close default raw-input touch-target scanner gap, run full gates, signed push, and per-cycle deploy (`run10-cycle38/plan.md`)
 - Run-10 Cycle 38/100 Deferred Findings - Cycle 38 deferred architecture/topology/performance/operator/test items with preserved severity/confidence and exit criteria (`run10-cycle38/deferred.md`)
 
@@ -50,6 +50,12 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Cycle 9/100 (2026-07-18) Implementation Plan - completed signed publication
+  through `1e3646e3`; shipped detached-config generation/ownership fencing and
+  complete configured public-grid source ladders. Cycle 10 identified and
+  scheduled the remaining configured-alias versus decoded-width contract
+  defect without reopening the complete-ladder wiring
+  (`archive/cycle-9-2026-07-18-plan.md`)
 - Cycle 8/100 (2026-07-18) Implementation Plan - completed signed publication
   through `f50e96b3`; shipped container-capped responsive source hints across
   main/archive/shared grids and deterministic candidate-selection regressions.
