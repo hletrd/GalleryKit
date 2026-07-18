@@ -25,4 +25,11 @@ describe('SimilarPhotos fetch cancellation contract', () => {
         expect(SOURCE).toContain('if (isCurrentOpenRequest()) setResults(json.results ?? [])');
         expect(SOURCE).toContain('if (mountedRef.current && openRef.current && requestIdRef.current === requestId) setLoading(false)');
     });
+
+    it('re-arms the mount guard when Strict Effects replays setup', () => {
+        const setupIndex = SOURCE.indexOf('mountedRef.current = true', SOURCE.indexOf('useEffect(() => {'));
+        const cleanupIndex = SOURCE.indexOf('mountedRef.current = false', setupIndex);
+        expect(setupIndex).toBeGreaterThan(-1);
+        expect(cleanupIndex).toBeGreaterThan(setupIndex);
+    });
 });

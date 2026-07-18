@@ -71,6 +71,9 @@ export default function SimilarPhotos({ imageId, imageSizes = DEFAULT_IMAGE_SIZE
     const requestIdRef = useRef(0);
 
     useEffect(() => {
+        // React Strict Effects replays setup -> cleanup -> setup in development.
+        // Re-arm the guard in setup so the second live mount can commit results.
+        mountedRef.current = true;
         return () => {
             mountedRef.current = false;
             openRef.current = false;
