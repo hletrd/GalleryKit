@@ -1,26 +1,97 @@
-# Cycle 1 Designer Review
+# Designer Review — Cycle 2
 
 Date: 2026-07-18 KST
-Start HEAD: `64f6ac63`
-Scope: public/admin UI components and routes, Tailwind/global styling, i18n UI copy, accessibility/touch-target fixtures, Playwright UI coverage, and a live browser pass against `https://gallery.atik.kr` at desktop, 393 px, and 320 px widths.
+Review HEAD: `ba4bc60a`
+Role: designer
+Mode: static + live browser review
 
-## Inventory and method
+## Inventory and runtime method
 
-- Inventoried the UI under `apps/web/src/app/**`, `apps/web/src/components/**`, `apps/web/messages/**`, `apps/web/e2e/**`, and the touch-target/accessibility tests under `apps/web/src/__tests__/**`.
-- Exercised the live home page, tag filters, search dialog, photo page, lightbox focus trap/escape restoration, mobile menu, theme/media settings, accessibility snapshots, computed boxes, console/page errors, and desktop/mobile screenshots with `agent-browser`.
-- Confirmed visible interactive targets on the exercised pages meet the repository's 44 px floor, dialogs expose names and modal state, lightbox focus returns to its trigger, and the 393 px layout does not overflow.
+I read `AGENTS.md`, `CLAUDE.md`, and the complete instructions for the
+`agent-browser`, configuration, interaction, query, visual, debug, network, and
+wait skills. I inventoried the 61 components, 80 app route/page files, English
+and Korean messages, global/Tailwind styling, 374 unit/e2e files, touch-target
+and focus audits, and public/admin state components. The review covered IA,
+affordances, focus/keyboard, WCAG 2.2, responsive/reflow, loading/empty/error,
+form feedback, light/dark/system theme, i18n, RTL applicability, and perceived
+performance.
 
-## Finding DES-C1-01 — production semantic-search label collapses the site identity at 320 CSS px
+Live production checks covered desktop 1280x800 and mobile 320x700/393x852,
+collapsed and expanded nav, full accessibility snapshots, computed boxes,
+Tab/Escape focus behavior, search/no-results, theme switching, screenshots,
+console/page errors, and a fresh-context resource timeline. The current locales
+are English and Korean and both are LTR; RTL is therefore not a currently
+reachable product state rather than an exercised language path.
 
-- Severity: Medium (WCAG 2.2 reflow / responsive information loss)
-- Confidence: High; reproduced on the deployed site with DOM box evidence
-- Status: Confirmed
-- Code: `apps/web/src/components/search.tsx:381-398`, especially the production-mode exception at line 397; `apps/web/src/components/nav-client.tsx:97-110,169-205`
-- Test gap: `apps/web/e2e/nav-visual-check.spec.ts:40-59` tests 375 px only, while `apps/web/src/__tests__/client-source-contracts.test.ts:73-76` positively pins the production-mode label exception.
-- Evidence: at a 320×700 viewport on `/en`, `document.documentElement.scrollWidth` remains 320 only because the nav brand link is squeezed to `{ width: 0, left: 16, right: 16 }`. The search control remains 143.55 px wide because production semantic mode forces its visible text label; theme, locale, and expand controls each remain 44 px. The site identity is therefore completely invisible at the WCAG 1.4.10 reflow width even though its focusable link remains in the accessibility tree.
-- Failure scenario: a visitor using a 320 CSS px viewport or 400% zoom cannot see the gallery identity/home affordance in the sticky header. Keyboard users can focus an apparently blank home link.
-- Suggested fix: when `showDesktopLabel` is true, keep the visible search text desktop-only regardless of semantic-search mode; the existing `aria-label` preserves the icon button's accessible name. Add a 320 px Playwright assertion that the brand link has a non-zero box and all visible nav targets remain at least 44×44 without overlap.
+## New finding
+
+### DES-C2-01 — Search announces an expanded combobox even when no popup exists
+
+- Severity: **Medium** (WCAG 4.1.2 / ARIA state semantics)
+- Confidence: **High**
+- Status: Confirmed new finding with live accessibility/DOM evidence
+- Regions: `apps/web/src/components/search.tsx:402-414,444-453,493-520`;
+  positive test pin at `apps/web/src/__tests__/search-status-source.test.ts:29-40`
+
+The input has `role="combobox"` and `aria-expanded={isOpen}`. `isOpen` describes
+the outer search dialog, not the combobox popup. As soon as the dialog opens,
+the combobox reports expanded even before a result list exists; for an empty
+query or settled no-results state there is no `#search-results` listbox and no
+`aria-controls` target at all.
+
+Runtime evidence at 320px: after searching `zzzznotfound`, visible feedback was
+"No results", no `role=listbox` existed, `aria-controls` was absent, but the
+input's `aria-expanded` remained `true`. The source test explicitly requires
+this mismatch and rejects `aria-expanded={hasDisplayedResults}`.
+
+Concrete failure scenario: a screen-reader user hears that the combobox is
+expanded, tries list navigation, but there is no popup or controlled element.
+The state conflates the modal dialog with the result suggestion popup and makes
+the widget's available interaction unclear.
+
+Suggested fix: set combobox `aria-expanded={hasDisplayedResults}` (or another
+boolean that exactly tracks listbox presence), and keep the trigger button's
+separate `aria-haspopup="dialog"`/expanded state for the modal. Update the
+source test and add live accessibility assertions for empty, loading,
+no-results, results, and closed states.
+
+## Revalidated responsive/perceived-performance issue
+
+### DES-C2-R1 — Mobile cold start spends bandwidth on four below-fold cards
+
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Confirmed new implementation regression, shared with PERF-C2-01
+- Regions: `apps/web/src/components/home-client.tsx:94-108,299-309` and
+  `apps/web/src/components/masonry-card.tsx:121-124,143-145`
+
+At 320px the first five 640px AVIFs began together before hydration, totaling
+about 409 KiB, while only the first card remained eager/above-fold. On a slow
+mobile connection this competes with the content the visitor can actually see.
+Use a pre-hydration responsive priority mechanism and test cold request counts
+at mobile and desktop breakpoints.
+
+## Verified design behavior / non-findings
+
+- The cycle-1 320px zero-width-home-link failure is closed: collapsed nav had
+  no horizontal overflow; the home link was 88x44 and every visible control was
+  at least 44x44 without overlap. The visible title is truncated to `ATIK.K...`
+  at the minimum width, but retains a meaningful visible brand fragment and the
+  full accessible name, so I did not classify it as a WCAG defect.
+- Expanded 320px nav exposes full branding/topics and 44px controls; DOM focus
+  order follows the visual control order.
+- Search is a full-height mobile dialog, focuses the input, locks background
+  scroll, traps focus, closes with Escape, and restores focus to its trigger.
+- Mobile cards provide visible titles without hover; empty/no-result feedback,
+  touch targets, light/dark surfaces, and the exercised Korean/English paths
+  showed no overflow or page/console error.
 
 ## Final missed-issue sweep
 
-No additional confirmed UI defect was found in the exercised home/photo/lightbox/search/mobile-menu flows. Large-map payloads, broader browser-matrix coverage, and admin mobile redesign remain pre-existing recorded items rather than new findings from this cycle.
+The final sweep revisited navigation hierarchy, landmarks/headings, accessible
+names, focus-visible treatment, keyboard-only paths, control sizing, text
+contrast fixtures, 320px reflow, desktop/mobile loading, errors/empty states,
+forms, theme persistence, bilingual strings, and current LTR directionality.
+Admin authentication was not mutated because credentials were not part of the
+review scope; admin state coverage therefore also used its static/e2e source.
+No additional confirmed designer issue survived the sweep.

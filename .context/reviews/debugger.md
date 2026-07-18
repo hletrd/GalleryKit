@@ -1,70 +1,83 @@
-# Cycle 1 Group A — Debugger Review
+# Debugger Review — Cycle 2
 
 Date: 2026-07-18 KST
-Review HEAD: `64f6ac63`
-Role: latent failures, exception paths, recovery behavior, diagnosability
-Mode: review-only.
+Review HEAD: `ba4bc60a`
+Role: debugger
+Mode: review-only latent failure and diagnosability review
 
 ## Inventory and method
 
-I read `AGENTS.md` and `CLAUDE.md`, inventoried the complete app/script/migration/e2e tree, then traced failure branches in startup/shutdown, GeoIP analytics, DB pool acquisition, restore/import, uploads and GPS stripping, image queue retry/cleanup, backfills, semantic inference, public data fetches, deploy/health checks, migrations, and external package loading. I grep-swept catches, ignored rejections, timers, file reads/renames, advisory locks, and process exits across all TypeScript/JavaScript sources. Security scanners, ESLint, TypeScript, key parity, and targeted analytics/config tests passed.
+I read `AGENTS.md` and `CLAUDE.md`, inventoried the runtime/actions/routes/libs,
+operational scripts and 374 test/e2e files, then reviewed exception, abort,
+timeout, cleanup, shutdown, child-process, lock-release, temp-file, stale-state,
+and hydration failure paths. I ran the focused 106-test regression set and used
+a clean browser context plus console/page-error checks on production.
 
-## Findings
+## New finding
 
-### DBG-A-01 — GeoIP can fail permanently with no error signal
+### DBG-C2-01 — Post-hydration inspection masks the initial five-image mobile request burst
 
-- Severity: Medium
-- Confidence: High
-- Classification: confirmed diagnosability defect; new in this review
-- Citations: `apps/web/src/instrumentation.ts:12-20`; `apps/web/src/lib/analytics.ts:34-61`; `apps/web/next.config.ts:54-59`
-- Failure scenario: `geoip-lite` imports but cannot find/read its data after a packaging or filesystem change. Startup catches and discards the exception; the first analytics lookup also catches, installs a permanent null function, and every view becomes `XX`. Liveness and readiness remain green. This is the same user-visible symptom the recent `serverExternalPackages` fix was written to correct, but the runtime still cannot tell an operator if it returns.
-- Fix: production startup should log/fail a dedicated analytics readiness check when the required module/data lookup is broken. Add a standalone artifact test that asserts the package data exists and a child-process smoke that performs a known lookup from the built output.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Confirmed new diagnosability/test blind spot; same underlying defect as PERF-C2-01
+- Regions: `apps/web/src/components/home-client.tsx:26-32,94-108,299-309`;
+  `apps/web/src/components/masonry-card.tsx:121-124,143-145`;
+  `apps/web/src/__tests__/masonry-card-memo.test.ts:190-195`
 
-### DBG-A-02 — Failed deploy health exits before the disk-recovery step
+The source test proves the pure helper returns five eager cards before viewport
+measurement, but it never observes browser requests. By the time a debugger
+queries the page, the effect has rewritten cards 2-5 to `loading="lazy"` and
+card 2 to `fetchpriority="auto"`. In a fresh 320px session the Network Timing
+entries nevertheless showed five AVIFs start at 62 ms and transfer about 409
+KiB total.
 
-- Severity: Medium
-- Confidence: High
-- Classification: confirmed recovery-path weakness; unresolved carry-forward
-- Citations: `apps/web/deploy.sh:51-76`; `apps/web/deploy.sh:79-104`; `AGENTS.md` deploy disk-hygiene invariant
-- Failure scenario: `docker compose up -d --build` creates unused layers, or the new container starts but fails health on a disk-constrained host. `set -e` or the explicit health failure exits before container/image/builder pruning. The next deploy has less free space and may fail even earlier—the cleanup intended to recover the constrained host is reachable only after a successful health check.
-- Fix: retain prune-after-up for the success contract, but add a failure trap that performs only the same safe unused-artifact pruning after collecting logs, never prunes volumes with `-a`, reports disk, and preserves the failed container/log evidence needed for diagnosis.
+Concrete failure scenario: an engineer investigates mobile bandwidth after
+load, sees only one eager DOM image and closes the incident as non-reproducible,
+while the cold-start waterfall still includes four avoidable transfers.
 
-### DBG-A-03 — Near-limit GPS stripping can turn a valid upload into an OOM restart
+Suggested fix: add a browser regression that records requests from navigation
+start in a fresh context and asserts mobile/desktop budgets separately. Preserve
+the trace/waterfall artifact on failure so the initial HTML decision is visible.
 
-- Severity: Medium
-- Confidence: Medium
-- Classification: likely production failure; unresolved carry-forward
-- Citations: `apps/web/src/lib/upload-limits.ts:1-6`; `apps/web/src/app/actions/images.ts:350-381`; `apps/web/src/lib/process-image.ts:1725-1805`
-- Failure scenario: a 200 MiB original is accepted, written to disk, then fully read into a Buffer for container-aware GPS stripping. A malformed container can additionally trigger Sharp re-encoding while the Buffer remains live. Concurrent image/CLIP work increases RSS enough for an OOM kill; the admin sees a generic failed upload and the process restarts.
-- Fix: use bounded file/range scrubbers or a memory-limited worker, and add near-limit RSS measurement plus explicit memory admission. Keep the fail-closed deletion behavior for formats whose privacy cannot be guaranteed.
+## Revalidated carry-forward failure modes
 
-### DBG-A-04 — Valid-looking multi-file uploads can fail before application error handling
+### DBG-C2-R1 — Deploy failure exits before the disk-pressure cleanup path
 
-- Severity: Low-Medium
-- Confidence: Medium-High
-- Classification: latent interface/failure-path mismatch; unresolved carry-forward
-- Citations: `apps/web/src/app/actions/images.ts:106-143`; `apps/web/src/app/actions/images.ts:197-207`; `apps/web/src/lib/upload-limits.ts:19-35`; `apps/web/next.config.ts:111-119`
-- Failure scenario: a future client calls the exported plural server action with two files whose total is below the app’s 2 GiB limit but above the 266 MiB framework cap. Next rejects while parsing, before action validation, localized responses, logging, or quota logic runs. The action's defensive error paths are unreachable for part of its advertised domain.
-- Fix: enforce and document one file per invocation, or implement a streaming batch route with pre-parse limits and structured failures.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Confirmed carry-forward recovery gap
+- Region: `apps/web/deploy.sh:63-89,91-116`
 
-### DBG-A-05 — Background pool starvation presents as unrelated request failures
+Any build/start or health failure exits under `set -e` or at line 88 before the
+only Docker prune block. On a host whose documented incident mode is disk
+exhaustion, a failed build can leave more layers/cache and make the next deploy
+less likely to succeed. Capture failure evidence, then run the same safe unused
+artifact cleanup in an `EXIT` trap; retain prune-after-up for success and never
+add `-a` to volume prune.
 
-- Severity: High
-- Confidence: High
-- Classification: confirmed latent failure mode; unresolved carry-forward
-- Citations: `apps/web/src/db/index.ts:31-42`; `apps/web/src/lib/image-queue.ts:121-153`; `apps/web/src/lib/admin-backfill-runner.ts:109-142`; `apps/web/src/lib/background-db-writes.ts:34-75`
-- Failure scenario: queue and backfill each run at their independently calculated cap while analytics writes are active. Foreground routes enter the pool queue (`queueLimit: 20`) and eventually surface DB timeouts/500s. Logs point at whichever page query failed, not the background consumers that exhausted the shared capacity.
-- Fix: centralize admission and expose pool wait/active/background-lane metrics. A health diagnostic should show active queue workers, backfill workers, pending analytics, and pool saturation together.
+### DBG-C2-R2 — Pool starvation surfaces at the unrelated foreground victim
 
-## Failure paths cleared
+- Severity: **High**
+- Confidence: **High**
+- Status: Confirmed carry-forward
+- Regions: `apps/web/src/db/index.ts:31-42`,
+  `apps/web/src/lib/image-queue.ts:121-153`,
+  `apps/web/src/lib/admin-backfill-runner.ts:109-142`, and
+  `apps/web/src/lib/background-db-writes.ts:34-75`
 
-- `stripGpsFromOriginal()` returns false on unsupported/anomalous privacy cases, and both upload paths delete/reject rather than retaining GPS silently.
-- Image queue permanent failures persist diagnostics; delete-mid-processing and delete-mid-reencode variants are cleaned.
-- Pending file deletion rows are durable and retried by maintenance; ledger removal happens after file cleanup.
-- Graceful shutdown races queue/backfill/maintenance/view/background drains against a bounded timeout and exits nonzero if truncated.
-- Restore finalization keeps durable maintenance active on marker-clear failure rather than falsely reopening mutations.
-- Current GeoIP standalone output does contain the required data files; DBG-A-01 is about future failure detection, not a current missing artifact.
+Independent background caps can overlap and fill the pool queue. The resulting
+timeout/500 is logged by whichever foreground query lost the connection race,
+not by the background consumers that caused saturation. Centralize admission
+and expose active/waiting counts by lane in health/diagnostic logs.
 
-## Final missed-failure sweep
+## Cleared paths and final missed-failure sweep
 
-I rechecked unhandled promises, swallowed exceptions, abort paths, timer cleanup, lock release on throws, temp-file cleanup, stale in-memory state across restart, framework pre-parse failures, health/deploy error branches, and malformed migration states. No additional latent failure was confirmed.
+The new auth path still charges both local budgets when one durable increment
+rejects; GeoIP packaging failure now logs once; Similar Photos re-arms its
+mounted guard under Strict Effects; restore child processes have watchdogs and
+cleanup ownership; upload serving closes descriptors on HEAD/abort; shutdown
+drains are bounded and exit nonzero if truncated. Console/page-error checks on
+the exercised public flows were clean. Rechecking unhandled promises, swallowed
+exceptions, abort races, timers/listeners, lock releases, temp files, framework
+pre-parse limits, deploy errors, and malformed migrations found no additional
+new latent failure.

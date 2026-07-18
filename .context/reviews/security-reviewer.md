@@ -1,114 +1,81 @@
-# Security Review — Cycle 1 Group B
+# Security Review — Cycle 2
 
 Date: 2026-07-18 KST
-Start HEAD: `64f6ac63`
+Review HEAD: `ba4bc60a`
 Role: security-reviewer
+Mode: review-only
 
 ## Inventory and method
 
-I read `AGENTS.md` and `CLAUDE.md` first, then inventoried all 635 files under
-`apps/web/src` (81 app files, 61 components, 115 library files, 3 DB files, and
-369 tests) plus the root/deploy scripts, Docker/Compose/nginx configuration,
-migrations, package manifests, and current review/plan history. The security
-sweep covered every exported server action and route, session/PAT auth, origin
-checks, rate limiting, public/private projections, upload and restore paths,
-filesystem containment, SQL construction, CSP/headers, proxy trust, secrets,
-and deployment entry points. I also checked existing review history before
-classifying findings so established/accepted risks were not presented as new
-confirmed defects.
+I read `AGENTS.md` and the repository architecture/security/operations rules in
+`CLAUDE.md`, then inventoried 263 non-test TypeScript runtime files (80 app
+files, 61 components, 115 library files), 12 route handlers, 53 exported
+action functions, 31 migrations, 31 operational scripts, and 374 unit/e2e test
+files. The security pass traced authentication and session rotation, PAT scope
+checks, action origin and restore barriers, public rate limiting, upload and
+backup path containment, privacy projections, restore SQL scanning and child
+processes, CSP/proxy trust, secrets, migrations, and deploy ownership checks.
+The cycle-1-to-HEAD diff was reviewed separately so regressions in the auth and
+deploy fixes were not hidden by the broader inventory.
 
-## Findings
+Executed evidence:
 
-### SEC-C1-01 — A DB failure skips the account-scoped in-memory login increment
+- `lint:api-auth`, `lint:action-origin`, and
+  `lint:public-route-rate-limit`: all passed.
+- `npm run audit:prod`: zero production vulnerabilities.
+- Live `https://gallery.atik.kr/en` response headers include a per-response
+  nonce CSP, HSTS, `nosniff`, `SAMEORIGIN`, restrictive permissions policy,
+  and strict referrer policy.
+- The targeted auth/deploy/analytics regression suite passed (106 tests across
+  eight files).
+
+## New findings
+
+No new security defect was confirmed at this HEAD.
+
+The cycle-1 fixes were specifically revalidated: both in-memory login budgets
+advance before the first durable await and durable increments are independent
+(`apps/web/src/app/actions/auth.ts:137-158`); deploy files are rejected unless
+owned by the caller or the repository owner and are still required to be
+private (`scripts/deploy-remote.sh:55-97`, `apps/web/deploy.sh:17-55`). Trusting
+the repository owner does not create an additional privilege boundary because
+that owner can already edit the executed deploy script itself.
+
+## Revalidated carry-forward security risk
+
+### SEC-C2-R1 — Multi-process safety remains warn-only
 
 - Severity: **High**
 - Confidence: **High**
-- Status: Confirmed security defect
-- Region: `apps/web/src/app/actions/auth.ts:137-175`
-- Test gap: `apps/web/src/__tests__/auth-rate-limit-ordering.test.ts:118-130` and
-  `apps/web/src/__tests__/auth-actions-behavior.test.ts:114-144,195-196`
+- Status: Revalidated carry-forward; confirmed architecture constraint, not new
+- Regions: `apps/web/src/instrumentation.ts:18-27` and
+  `apps/web/src/lib/single-writer-guard.ts` (startup advisory-lock guard);
+  process-local coordinators in `apps/web/src/lib/admin-mutation-barrier.ts`,
+  `apps/web/src/lib/rate-limit.ts`, and `apps/web/src/lib/image-queue.ts`
 
-The login path intends to maintain two independent brute-force budgets: one by
-IP and one by normalized account. It mutates the IP map, then immediately
-awaits the durable IP increment at `auth.ts:140-145`. The account map mutation
-does not happen until `auth.ts:146-149`, after that await. If the first
-`incrementRateLimit(ip, 'login', ...)` rejects because MySQL is unavailable,
-control jumps to the shared catch at line 150. The account entry therefore
-remains at its old count. The subsequent DB checks also fail, and the fallback
-at lines 170-175 observes the unchanged `accountLimitData.count`.
+The startup check intentionally warns and continues when another writer is
+present. A second app process therefore has independent in-memory mutation
+slots, request budgets, and queue state even though both processes use the same
+database and mutable file stores.
 
-Concrete failure scenario: during a MySQL outage or pool-exhaustion episode, an
-attacker distributes guesses for one admin username over many source IPs. Each
-IP still gets its five-attempt process-local budget, but the account-wide
-process-local budget never advances. This restores the distributed brute-force
-class the account limiter was specifically added to stop, precisely when the
-code comments claim both in-memory maps are the fallback authority.
+Concrete failure scenario: an operator temporarily starts a second replica
+during recovery. Both accept writes; a restore can drain only one process's
+in-memory slots, process-local public abuse budgets split, and duplicate image
+work competes against the shared DB/filesystem. The warning is easy to miss and
+does not make the topology fail closed.
 
-The source-order test only proves that both textual DB increment calls appear
-before the DB checks; it does not simulate rejection of the first awaited
-increment. The behavior test always resolves `incrementRateLimitMock`, so it
-also misses this branch.
-
-Suggested fix: synchronously update **both** in-memory entries before the first
-await. Execute the two durable increments independently (or with
-`Promise.allSettled`) so failure of one cannot skip the other in-memory guard.
-Add a behavioral regression test where the first durable increment rejects and
-assert that `accountLoginRateLimit` still advances and reaches its cap across
-repeated calls.
-
-### SEC-C1-02 — Root-run deploy can source and execute a different user's env file
-
-- Severity: **Medium**
-- Confidence: **High**
-- Status: Confirmed local privilege-boundary weakness
-- Regions: `scripts/deploy-remote.sh:55-85,87-93`,
-  `apps/web/deploy.sh:17-43,51-55`
-
-Both deployment scripts detect that their configuration file is not owned by
-the current user, but only print a warning (`deploy-remote.sh:61-63` and
-`deploy.sh:24-26`). They then source or consume it. The remote helper is the
-stronger case: it runs `source "$ENV_FILE"` at lines 82-85 and later passes the
-file-controlled `DEPLOY_CMD` to `bash -lc` at lines 87-93.
-
-Concrete failure scenario: an operator invokes the deploy under `sudo` or a
-root automation account while `.env.deploy` is owned and writable by a less
-privileged workspace user. Mode `0600` passes the permissions check because
-root can read it; the ownership warning does not stop execution. That user can
-set `DEPLOY_CMD` (or use shell syntax in the sourced file) and obtain code
-execution as the deploy account. The runtime deploy script similarly allows an
-untrusted owner to select Docker Compose env/build values when run by root.
-
-Suggested fix: fail closed on `! -O "$ENV_FILE"`, not warn. If shared ownership
-is a supported operational requirement, define an explicit trusted owner UID
-or root-owned config contract and verify it before sourcing. Add shell contract
-tests for wrong-owner rejection alongside the existing mode checks.
-
-## Verified defenses / non-findings
-
-- All current admin API exports use `withAdminAuth(...)`; cookie requests get
-  same-origin validation and PAT requests require the declared scope.
-- Mutating admin server actions consistently guard origin and authentication;
-  public exemptions are explicit and rate-limited.
-- Public image/search/timeline projections retain compile-time privacy guards;
-  GPS is isolated to the map-visible opt-in projection.
-- Upload serving validates segments, extensions, realpath containment, and file
-  type; backup downloads validate filename, containment, and stream from the
-  validated descriptor.
-- SQL restore parsing has both dangerous-statement and write-target allowlist
-  gates; upload/restore concurrency is fenced by maintenance/advisory locks.
-- Session cookies remain HttpOnly, Secure in production, SameSite=Lax, and
-  backed by hashed server-side session rows.
-- The current `geoip-lite` externalization is consistent across
-  `next.config.ts`, production dependencies, Docker copy layout, and startup
-  prewarm; no country lookup packaging defect remains at HEAD.
+Suggested fix: either enforce the documented single-writer topology by holding
+a required process-lifetime lease, or move every affected coordinator to a
+shared durable primitive before supporting replicas. Keep this explicitly
+listed as unsupported until that is complete.
 
 ## Final missed-issue sweep
 
-I re-scanned dynamic execution, child processes, SQL templates, filesystem
-operations, `dangerouslySetInnerHTML`, suppressions, token/session construction,
-proxy header trust, CSP sources, backup permissions, and every route/action
-export. No additional high-confidence exploitable issue was found. Existing
-topology risks (warn-only single-writer enforcement, host-nginx drift, plaintext
-backups, non-expiring PAT defaults, process-local fast-path limiters) remain
-documented in the current aggregate/deferred history and are not duplicated as
-new findings here.
+The closing sweep rechecked every route/action export, auth and rate-limit
+ordering, dynamic SQL/child processes, filesystem opens and realpath checks,
+public field projections, `dangerouslySetInnerHTML` sites, proxy-derived IPs,
+cookie settings, backup permissions, environment sourcing, and security
+header construction. Current restore scanners, privacy type guards, upload
+serving, and authenticated backup download all retain their defenses. Apart
+from the documented single-writer constraint, no additional confirmed or
+likely security issue survived the final sweep.

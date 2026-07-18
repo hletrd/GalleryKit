@@ -1,69 +1,96 @@
-# Cycle 1 Group A — Tracer Review
+# Tracer Review — Cycle 2
 
 Date: 2026-07-18 KST
-Review HEAD: `64f6ac63`
-Role: causal/data-flow tracing, competing hypotheses, cross-system invariants
-Mode: review-only.
+Review HEAD: `ba4bc60a`
+Role: tracer
+Mode: review-only causal/data-flow review
 
 ## Trace inventory
 
-I read `AGENTS.md` and `CLAUDE.md`, inventoried all 709 app/script/migration/e2e files, and built causal traces for: request headers → client IP → rate limit/GeoIP → analytics rows; upload multipart → quota claim → original → GPS scrub → queue → derivatives/embedding → DB state; delete → retry ledger → filesystem; restore request → advisory locks → durable marker → drains → SQL import → reconciliation; queue/admin/sidecar concurrency → DB pool/CPU; semantic mode → model queue → embedding writers → public ranking; schema migration/journal → reconcile/baseline; and deploy → build/container health → pruning. Binary fixtures/generated output/live state were excluded.
+I read the repository rules and architecture first, inventoried all runtime,
+route, action, schema, migration, operational, and test files, and constructed
+end-to-end traces for: request headers to IP/rate-limit/analytics; login to
+local/durable counters to Argon2/session rotation; multipart upload to quota,
+original, privacy scrub, queue, derivatives, embeddings, and DB state; delete
+to durable cleanup; restore request to leases, drains, import, migration, and
+mutable stores; SSR image props to browser scheduling to hydration; search to
+CLIP queue/vector ranking; migration journal to reconciliation; and deploy to
+health/prune. Competing explanations were checked against tests and live
+browser evidence.
 
-## Findings
+## New finding
 
-### TRC-A-01 — GeoIP error propagation is intentionally severed before durable analytics
+### TRC-C2-01 — Hydration corrects attributes but cannot undo the SSR image-request fan-out
 
-- Severity: Medium
-- Confidence: High
-- Classification: confirmed causal observability gap; new in this review
-- Trace: `apps/web/next.config.ts:54-59` external package contract → `apps/web/src/instrumentation.ts:12-20` swallowed prewarm error → `apps/web/src/lib/analytics.ts:36-61` swallowed/memoized lookup failure → `apps/web/src/app/actions/public.ts:415-425` `country_code` construction → analytics table inserts.
-- Failure scenario: package/data resolution breaks. Both error boundaries collapse the cause into the legitimate sentinel `XX`; view insertion continues successfully, so no later layer can distinguish “unknown IP country” from “GeoIP subsystem broken.” A single startup failure therefore contaminates all country summaries without an alarm.
-- Fix: preserve the cause as process health/telemetry state. Validate the runtime DB once at startup, log a production error, and expose a non-sensitive readiness diagnostic; do not log visitor IPs.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Confirmed new causal break (same root as PERF-C2-01)
+- Trace: `apps/web/src/components/home-client.tsx:26-32` (`viewportWidth=0`,
+  `count=2`) -> `:94-108` (unmeasured means five eager) -> `:299-309`
+  (props) -> `apps/web/src/components/masonry-card.tsx:121-124,143-145`
+  (HTML scheduling attributes) -> browser preload/parser ->
+  `home-client.tsx:34-76` (effect changes final attributes)
+- Test gap: `apps/web/src/__tests__/masonry-card-memo.test.ts:190-195`
 
-### TRC-A-02 — Background connection reservations do not compose
+The intended causal edge is "measure viewport, then choose its first row," but
+the browser consumes the server attributes before that measurement exists.
+At 320px, a fresh session showed all five AVIFs starting together at 62 ms;
+after hydration, inspection showed only card 1 as eager. Thus final-state DOM
+tests and DevTools inspection after load can falsely clear the regression.
 
-- Severity: High
-- Confidence: High
-- Classification: confirmed causal resource bug; unresolved carry-forward
-- Trace: `apps/web/src/db/index.ts:31-42` ten-connection shared pool → `apps/web/src/lib/image-queue.ts:121-153` queue cap assuming its own reserve → `apps/web/src/lib/admin-backfill-runner.ts:109-142` second cap assuming the same reserve → `apps/web/src/lib/background-db-writes.ts:34-75` two analytics writers.
-- Failure scenario: queue processing and admin backfill overlap. The backfill pins one run lock plus up to two connections per worker; queue workers can likewise hold claims plus transient updates. Analytics adds two requests. The “five free” conclusion in either module is false under composition, and public page fan-outs queue behind encoding work.
-- Fix: replace per-module reserve arithmetic with a shared weighted admission ledger and an overlap proof at the default pool size.
+Concrete failure scenario: monitoring sees a correct one-card mobile DOM while
+real users still paid for the original five requests, hiding the bandwidth and
+contention regression from normal assertions.
 
-### TRC-A-03 — Semantic backfill ownership does not reach live embedding writers
+Suggested fix: encode responsive priority in a primitive the browser can
+evaluate before requesting (for example media-qualified preloads), and test the
+request timeline from a clean context before hydration.
 
-- Severity: Medium
-- Confidence: High
-- Classification: confirmed coordination gap; unresolved carry-forward
-- Trace: `apps/web/scripts/backfill-clip-embeddings.ts:109-131` acquires `LOCK_SEMANTIC_EMBEDDING_BACKFILL` → `apps/web/src/lib/image-queue.ts:501-539` post-upload writer checks only restore maintenance → `apps/web/src/lib/image-queue.ts:542-637` missing-embedding scan does the same → `apps/web/src/lib/clip-model.ts` shared inference queue/model.
-- Failure scenario: a forced sidecar backfill and live bootstrap choose the same missing image. Primary-key upsert prevents corruption, but both spend image decode/inference and DB capacity while public text/similar requests compete for inference slots. The semantic advisory lock serializes sidecars/restores, not the full writer set its name implies.
-- Fix: make live writers observe the lease or place all writes in one durable job queue; reserve public inference separately if live writes must continue.
+## Revalidated carry-forward traces
 
-### TRC-A-04 — SQL restore has no causal reconciliation edge to mutable file stores
+### TRC-C2-R1 — Background DB reservations still do not compose
 
-- Severity: Medium
-- Confidence: High
-- Classification: explicit consistency boundary/manual-validation risk; unresolved carry-forward
-- Trace: DB restore action and migration/reconcile in `apps/web/src/app/[locale]/admin/db-actions.ts` → SQL row state; independent binds in `apps/web/docker-compose.yml:24-32` → originals, derivatives, topic resources.
-- Failure scenario: restoring an older SQL snapshot reintroduces rows for files removed since the dump and removes rows for files created since it. Locks/drains make the SQL transition internally safe, but no post-restore manifest links the database generation to the filesystem generation.
-- Fix: add an operator reconciliation report/manifest and document the required paired host snapshot generation. Full atomic restore requires one coordinated backup product boundary.
+- Severity: **High**
+- Confidence: **High**
+- Status: Confirmed carry-forward
+- Trace: `apps/web/src/db/index.ts:21-42` (10-connection pool) ->
+  `apps/web/src/lib/image-queue.ts:121-153` (queue computes its own reserve) +
+  `apps/web/src/lib/admin-backfill-runner.ts:109-142` (backfill computes the
+  same reserve independently) + `apps/web/src/lib/background-db-writes.ts:34-75`
+  (analytics writers)
 
-### TRC-A-05 — Deploy failure bypasses the only automatic disk-pressure relief
+Queue and backfill each reason as though their reserved live capacity belongs
+only to them. If they overlap, their pinned locks/transient operations plus
+analytics can consume the supposedly reserved foreground capacity. Replace
+module-local arithmetic with a shared weighted admission ledger and expose the
+lane totals in diagnostics.
 
-- Severity: Medium
-- Confidence: High
-- Classification: confirmed recovery-flow gap; unresolved carry-forward
-- Trace: `apps/web/deploy.sh:51-55` build/up → `apps/web/deploy.sh:57-76` health gate/exit → `apps/web/deploy.sh:79-104` prune.
-- Failure scenario: build or health fails after producing unused layers. The script exits before prune, so the failure itself consumes more disk and increases the chance that the next pull/build cannot run. This is a positive feedback loop on the host whose documented incident mode is disk exhaustion.
-- Fix: collect failure evidence, then run the same safe unused-artifact cleanup in a trap. Preserve prune-after-up on success and the no-`-a` volume rule.
+### TRC-C2-R2 — A SQL restore has no generation link to mutable photo stores
 
-## Competing hypotheses resolved
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Confirmed explicit consistency boundary; manual operational validation required
+- Trace: `apps/web/src/app/[locale]/admin/db-actions.ts:789-1027` changes DB
+  generation; independent binds in `apps/web/docker-compose.yml` retain
+  originals, derivatives, and topic resources
 
-- GeoIP is not currently absent: `.next/standalone/node_modules/geoip-lite/data` exists and contains country/city DB files. The broken edge is error observability.
-- Semantic duplicate writers do not corrupt rows because the write is an idempotent primary-key/model-version upsert. The confirmed effect is duplicate resource consumption and public inference contention.
-- Restore does not miss a currently known in-process writer: queue side effects, background DB writes, maintenance, buffered group counts, and admin mutations are drained; sidecars are covered by advisory locks/durable-marker checks.
-- Upload quota check/claim is synchronous before post-claim awaits, and early awaited validation failures settle the claim.
-- Delete/reencode races preserve cleanup through the pending-deletion ledger and affected-row/orphan cleanup checks.
+Locks make the database transition internally safe, but an older SQL snapshot
+can resurrect rows whose files were removed and remove rows for files still on
+disk. Add a paired backup manifest/generation and a post-restore reconciliation
+report; document that full recovery requires the matching host snapshot.
 
-## Final sweep
+## Competing hypotheses and final sweep
 
-The closing trace sweep covered auth/origin → mutation, public limiter → expensive work, upload → disk/DB/queue, queue → embedding, delete → retry, restore → every known writer, migration cursor → SQL application, cache ETag → file replacement, request IP → analytics, and deploy → host recovery. No additional causal break was confirmed.
+- The auth fix does not retain the cycle-1 failure edge: both process-local
+  budgets advance before either durable increment awaits, and the durable
+  calls use `Promise.allSettled` (`auth.ts:137-158`).
+- The new mobile transfers are not ordinary near-viewport lazy loading: all
+  five began at the same parser-time timestamp and the SSR helper explicitly
+  marks exactly five eager.
+- GeoIP failure observability now has a process-level error edge through
+  `initializeGeoIp()` (`instrumentation.ts:12-16`, `analytics.ts:34-82`).
+
+The closing trace covered auth/origin to mutation, public limiter to expensive
+work, upload/delete/restore and every known writer, schema journal to apply,
+cache validators to file replacement, request IP to analytics, and deploy to
+recovery. No further new causal break was confirmed.

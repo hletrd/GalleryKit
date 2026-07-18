@@ -1,83 +1,53 @@
-# Cycle 1 Group A — Architect Review
+# Architect — cycle 2 provenance
 
-Date: 2026-07-18 KST
-Review HEAD: `64f6ac63`
-Role: boundaries, ownership, layering, deployment topology, data consistency
-Mode: review-only.
+Review target: `ba4bc60acd4bc41b29ec02f509c3455d115ba083`, 2026-07-18 KST. Review only.
 
-## Architecture inventory
+## Relevant-file inventory
 
-After reading `AGENTS.md` and `CLAUDE.md`, I mapped the runtime into these ownership domains and inspected their implementation/configuration and interaction tests: Next App Router public/admin surfaces; server actions and route-handler gates; Drizzle/MySQL pool and schema; process-local queue/rate-limit/maintenance state; advisory-lock ownership; upload/original/derivative stores; image/CLIP processing; public data projections; migration+journal+legacy reconcile; Next standalone packaging; Docker/host-nginx deployment; and restore/backup operations. All 709 app/script/migration/e2e files were inventoried; relevant modules in each domain were examined, with binary fixtures, generated/dependency output, historical archives, and live host state excluded.
+Repository-wide architecture inventory covered all 939 files, with direct tracing across: App Router pages/routes/actions (81 files); data, auth, queue, processing, restore, rate-limit, semantic-search, storage, cache, and config libraries (115); DB schema/pool plus 31 migrations/reconcile; 61 UI components and their server/client boundaries; 369 unit tests and 9 browser specs; instrumentation/proxy; Docker/Compose/nginx/deploy scripts; CI and package/build configs; service-worker source/generated artifact; and all governing/operator docs. Boundaries examined were request→action→DB, upload→private original→derivatives, restore→writers/sidecars, build→runtime config, process-local→DB-shared coordination, and deploy→host traffic.
 
 ## Findings
 
-### ARCH-A-01 — A correctness-critical single-writer invariant is enforceable only by logs
+### ARCH-2-01 — Queue and color backfill independently spend the same reserved DB capacity
 
-- Severity: High
-- Confidence: High
-- Classification: confirmed topology risk; unresolved carry-forward
-- Citations: `apps/web/docker-compose.yml:12-27`; `apps/web/src/lib/single-writer-guard.ts:218-235`; `apps/web/src/lib/single-writer-guard.ts:277-309`; `apps/web/src/instrumentation.ts:22-31`
-- Problem: process-local restore fencing, upload quota state, queue ownership, rate-limit fast paths, backfill status, and buffered counts all rely on one web process. The guard detects a second instance but explicitly continues serving, and even guard initialization failure is non-fatal.
-- Failure scenario: an operator briefly launches a second container during manual recovery or changes orchestration to two replicas. Both accept mutations against the same DB while holding independent in-memory coordinators. The warning may be missed, allowing weakened rate limits, competing queue jobs, and restore/write races at the topology boundary.
-- Concrete fix: add an explicit production enforcement mode that fails readiness/startup after the rolling-deploy reprobe window when another holder persists. Keep warn-only as an intentional opt-out for recovery, or migrate every process-local correctness state to shared durable coordination before supporting replicas.
+- Severity: **High**
+- Confidence: **High**
+- Status: **Confirmed; revalidated carry-forward**
+- Region: `apps/web/src/lib/image-queue.ts:120-141`; `apps/web/src/lib/admin-backfill-runner.ts:97-142`; `apps/web/src/db/index.ts:31-45`
 
-### ARCH-A-02 — Background resource ownership is local to modules rather than the process
+Failure scenario: at the shipped pool limit of 10, the upload queue independently permits two workers and the color backfill independently permits two workers. The backfill also pins its run lock. Their combined worst case is about nine connections, despite each resolver claiming to reserve five for live traffic. A photo request fan-out, topic mutation, or restore preparation then queues behind encode-duration holds and can exhaust the pool queue.
 
-- Severity: High
-- Confidence: High
-- Classification: confirmed resource-architecture flaw; unresolved carry-forward
-- Citations: `apps/web/src/db/index.ts:21-42`; `apps/web/src/lib/image-queue.ts:121-153`; `apps/web/src/lib/admin-backfill-runner.ts:97-142`; `apps/web/src/lib/background-db-writes.ts:3-75`; `apps/web/src/lib/clip-model.ts`
-- Problem: the upload queue, admin color backfill, analytics queue, embedding bootstrap, and CLIP inference each own separate concurrency controls while sharing the same ten DB connections, CPU, libvips threads, and process RSS. Module-local caps cannot prove a process-wide foreground reserve.
-- Failure scenario: two independently safe background modes overlap and consume nearly all DB connections and CPU. Public reads then queue behind long encoding/inference tasks, despite comments in each module claiming half-pool headroom.
-- Concrete fix: introduce one process-wide weighted scheduler with explicit DB-connection, CPU, and memory costs. Foreground work should own a non-borrowable reserve; background lanes should expose pause/drain semantics through this coordinator.
+Suggested fix: introduce one process-wide background DB/CPU budget leased by queue workers and backfills, or make the color backfill quiesce the upload queue. Test combined occupancy, not each resolver in isolation.
 
-### ARCH-A-03 — Semantic embedding has several writers but no shared ownership protocol
+### ARCH-2-02 — Sitemap freshness is owned by both build-time prerendering and runtime DB state
 
-- Severity: Medium
-- Confidence: High
-- Classification: confirmed coordination gap with performance consequences; unresolved carry-forward
-- Citations: `apps/web/scripts/backfill-clip-embeddings.ts:109-131`; `apps/web/src/app/actions/embeddings.ts`; `apps/web/src/lib/image-queue.ts:501-539`; `apps/web/src/lib/image-queue.ts:542-637`; `apps/web/src/lib/clip-model.ts`
-- Problem: the sidecar/admin backfill observes `LOCK_SEMANTIC_EMBEDDING_BACKFILL`, but live post-upload embedding and `bootstrapMissingActiveEmbeddings()` only observe restore maintenance. Idempotent upsert avoids row corruption, yet ownership of inference/model/DB capacity remains split.
-- Failure scenario: an operator runs a forced production embedding backfill while the live queue scans missing rows and public semantic queries need the same model resources. Duplicate inference work increases queue timeouts/503s and extends activation convergence.
-- Concrete fix: route all embedding writes through a durable job/lease owner, or require live bootstrap to observe the semantic backfill lease and defer. If uploads must continue, reserve separate public inference capacity and prove it under backfill load.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed**
+- Region: `apps/web/src/app/sitemap.ts:4-12,36-82`; build output `.next/prerender-manifest.json` (`/sitemap.xml.initialRevalidateSeconds = 3600`)
 
-### ARCH-A-04 — Public data contracts are split across hand-mirrored modules
+Failure scenario: build time owns the initial sitemap even though build time intentionally has no DB. Runtime owns the authoritative topics, photos, freshness timestamps, and navigation-discovery flags, but cannot replace the build fallback until the route-cache TTL expires. This is split ownership of one SEO artifact, not merely graceful degradation.
 
-- Severity: Medium
-- Confidence: High
-- Classification: maintainability/privacy architecture risk; unresolved carry-forward
-- Citations: `apps/web/src/lib/data.ts:251-488`; `apps/web/src/lib/data-timeline.ts:17-80`; `apps/web/src/lib/search-enrichment-fields.ts:1-46`
-- Problem: each public surface defines its own projection. Compile-time deny guards are valuable but operate after a column has been classified sensitive and do not provide one positive owner for public fields or aggregations.
-- Failure scenario: a schema evolution updates gallery cards but not timeline/search, or a new sensitive field is copied into a public mirror before the sensitive-key union is extended. Different routes expose inconsistent data while each local type guard passes.
-- Concrete fix: derive public projections from a canonical module with narrow typed extensions (map coordinates behind opt-in, search metadata, admin diagnostics). Make a schema change update one owner and retain runtime privacy fixtures.
+Suggested fix: choose one owner. Prefer first-request runtime generation backed by a successful-result cache/revalidation policy; do not commit a known-incomplete build result to the same freshness window as an authoritative runtime result.
 
-### ARCH-A-05 — Migration correctness has dual implementations without structural parity proof
+### ARCH-2-03 — The deployment health check observes replacement rather than gates promotion
 
-- Severity: Medium
-- Confidence: Medium-High
-- Classification: test/architecture gap; unresolved carry-forward
-- Citations: `apps/web/scripts/migrate.js`; `apps/web/drizzle/meta/_journal.json`; `apps/web/src/db/schema.ts`; `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:1-19`; `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:76-180`
-- Problem: current schema is represented in Drizzle schema/migrations and again in `reconcileLegacySchema`. Tests largely prove that names appear in executable source, with a few structural pins; they do not compare types, nullability, defaults, collations, complete indexes, or foreign-key actions in two disposable databases.
-- Failure scenario: a new column exists in both places but has a different default/type, so normal migration upgrades and legacy/fresh reconcile installs behave differently while source-name tripwires pass.
-- Concrete fix: create two disposable MySQL schemas—one migrated normally and one reconciled/baselined—and diff normalized `information_schema` tables, columns, indexes, and constraints as a blocking integration gate.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed; revalidated carry-forward**
+- Region: `apps/web/deploy.sh:63-89`; `apps/web/docker-compose.yml:12-17`
 
-### ARCH-A-06 — Database restore and file-state restore have separate operational owners
+Failure scenario: Compose replaces the only web instance before health is known. A bad release enters `restart: always`; the old healthy instance is gone; the subsequent 90-second loop can only report the outage. With no staging and mandatory per-iteration deploys, this failure domain is exercised frequently.
 
-- Severity: Medium
-- Confidence: High
-- Classification: explicit operational consistency boundary; unresolved carry-forward/manual validation
-- Citations: `apps/web/src/app/[locale]/admin/db-actions.ts`; `apps/web/docker-compose.yml:24-32`; `CLAUDE.md` “Database Security” and “Important Notes”
-- Problem: the app correctly fences and restores SQL rows, but original uploads, derivatives, and topic resources are independent bind-mounted state. The product exposes database restore without a paired manifest/reconciliation mechanism for those stores.
-- Failure scenario: an operator restores yesterday’s SQL dump against today’s files. Rows can reference absent originals/derivatives or current files can become unreferenced; the SQL operation succeeds because file rollback is intentionally outside its transaction.
-- Concrete fix: keep the SQL-only label, but add an operator-owned backup manifest/reconciliation command that reports missing and orphaned files before/after restore. A future full backup feature should snapshot DB and mutable stores under one maintenance window.
+Suggested fix: blue/green the candidate on a second local port/container and atomically switch nginx/upstream after health, or implement captured-image rollback. Preserve the single-writer constraint by promoting only after the old writer is drained/stopped.
 
-## Architectural non-findings
+## Architecture defenses / accepted boundaries
 
-- Restore lock ordering and drain coverage are coherent at current HEAD: durable maintenance, queue side effects, background writes, maintenance sweeps, view buffers, and admin mutation slots are all covered before import.
-- The current standalone build contains `geoip-lite` data after externalization; no new package-boundary violation was found.
-- Admin-only image metadata remains protected by type and fixture guards, and the map coordinates remain a narrow `map_visible=true` extension.
-- Docker persistence remains bind-mounted and automatic volume pruning still omits `-a`.
+- Restore drains foreground mutations, image queue, maintenance, background DB writes, and buffered group counts; sidecars use durable maintenance/advisory locks. No new missing writer was confirmed.
+- Local-filesystem storage only, build-time JSON semantics, SQL-only backup scope, same-origin public image caching, and single-instance topology are accurately called out in `CLAUDE.md`.
+- The single-writer guard remains warn-only by explicit product policy; I did not relabel that accepted tradeoff as a new defect.
+- Public/admin projection separation and compile-time privacy guards remain layered correctly.
 
-## Final sweep
+## Final missed-issues sweep
 
-The missed-architecture sweep covered circular dependencies, shared mutable globals, worker/sidecar ownership, distributed topology assumptions, schema evolution, cache invalidation, public projection boundaries, restore/file consistency, external package tracing, and deploy/host ownership. No additional architectural issue was confirmed.
+I swept circular/shared-state ownership, async shutdown, restore ordering, lock namespace and connection lifetime, schema/reconcile dual ownership, cache invalidation, build/runtime env freezing, CDN/service-worker boundaries, multi-instance assumptions, and deploy/host ownership. No additional architectural issue was confirmed beyond the three recorded items.

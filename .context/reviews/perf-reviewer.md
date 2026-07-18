@@ -1,121 +1,93 @@
-# Performance Review — Cycle 1 Group B
+# Performance Review — Cycle 2
 
 Date: 2026-07-18 KST
-Start HEAD: `64f6ac63`
+Review HEAD: `ba4bc60a`
 Role: perf-reviewer
+Mode: review-only
 
 ## Inventory and method
 
-I read `AGENTS.md` and `CLAUDE.md`, inventoried all runtime source, tests,
-scripts, deployment files, migrations, and plans, and traced the main request
-surfaces end to end: public SSR and metadata, gallery pagination, image serving,
-photo/lightbox navigation, semantic search/CLIP, upload/Sharp queues, analytics,
-admin backfill, restore, sitemap/feed/OG, DB indexes, and client lifecycle work.
-The inventory includes all 81 app files, 61 components, 115 library files, 3 DB
-files, 369 tests, and the supporting scripts/configuration.
+After reading `AGENTS.md` and `CLAUDE.md`, I inventoried the complete app/lib/
+component/script/schema/test surface and traced public SSR/RSC, masonry image
+selection and hydration, pagination, photo/lightbox navigation, search and CLIP
+ranking, map rendering, Sharp queues, DB pool budgets, analytics, feeds/OG,
+restore, and deploy cleanup. I reviewed all changes since the cycle-1 baseline
+and ran a fresh isolated browser session against production at 320x700 so HTTP
+cache state could not hide initial image transfers.
 
-## Findings
+## New finding
 
-### PERF-C1-01 — Desktop first-row image priority is corrected only after hydration
-
-- Severity: **Medium**
-- Confidence: **High**
-- Status: Confirmed perceived-performance mismatch
-- Regions: `apps/web/src/components/home-client.tsx:26-76,124-126,227-242`
-- Downstream region: the `MasonryCard` props produced later in
-  `apps/web/src/components/home-client.tsx` from `computeIsAboveFold(...)`
-
-`useColumnCount()` initializes `count` to 2 at line 27. The actual 1/2/3/4/5
-breakpoint value is not known until the effect runs at lines 34-76. The server
-render and hydration render therefore classify only the first two cards as
-above-fold on every viewport. On a 3-, 4-, or 5-column desktop, cards 3-5 begin
-as lazy/auto-priority and are upgraded only after hydration/effect-driven state
-updates. By then the browser has already made its initial loading decisions,
-which weakens the intended LCP protection for much of the visible first row.
-
-Concrete failure scenario: on a wide screen with a cold JS/cache path, the
-third through fifth visible images wait behind hydration and other resources,
-despite the comments saying the 2xl fifth slot receives eager/high priority.
-The breakpoint mirroring is correct after mount; the initial state is the gap.
-
-Suggested fix: choose an SSR-safe initial loading strategy that does not depend
-on an after-paint viewport effect. One pragmatic option is to make the first
-maximum-row set eager while limiting `fetchPriority="high"` more conservatively;
-another is a CSS/media-aware preload strategy. Validate mobile overfetch versus
-desktop LCP with a cold-cache trace before selecting the policy. Add a test that
-asserts initial (pre-effect) priority semantics, not only breakpoint math.
-
-### PERF-C1-02 — Public map duplicates the full marker set into map props and fallback DOM
+### PERF-C2-01 — The desktop LCP fix eagerly downloads five mobile cards before hydration can correct it
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: Confirmed scaling cost; agrees with prior architecture review
-- Regions: `apps/web/src/lib/data.ts:1766-1816`,
-  `apps/web/src/app/[locale]/(public)/map/page.tsx:42-67,90-111`,
-  `apps/web/src/components/map/map-client.tsx`
+- Status: Confirmed new regression with cold-browser runtime evidence
+- Regions: `apps/web/src/components/home-client.tsx:26-32,94-108,299-309`;
+  `apps/web/src/components/masonry-card.tsx:81-124,128-145`;
+  `apps/web/src/__tests__/masonry-card-memo.test.ts:190-195`
 
-The DB cap of 10,000 prevents an unbounded query, but the page maps the complete
-row set into a client `markers` payload and then renders the same complete set
-again as `<ul>` fallback links. At the upper bound this produces thousands of
-serialized objects, thousands of server-rendered list nodes, client hydration
-work, and Leaflet marker work in one request. The cap prevents runaway memory;
-it does not make the endpoint interactive at its documented maximum.
+`useColumnCount()` begins with two columns and an unmeasured viewport. While
+unmeasured, `computeShouldEagerLoad()` deliberately returns true for the first
+five cards. The SSR HTML therefore marks five images `loading="eager"` on every
+viewport and initially marks the first two `fetchpriority="high"`. The mobile
+effect later changes the DOM to one eager/high image, but network requests
+started from the server HTML cannot be cancelled retroactively.
 
-Concrete failure scenario: a GPS-heavy gallery near the cap makes `/map` ship a
-large RSC/HTML payload and create 10,000 list items plus 10,000 interactive map
-markers, causing slow TTFB/parse/hydration and main-thread stalls on mobile.
+Runtime evidence: in a new browser session at 320x700, the first five 640px
+AVIF requests all began at 62 ms. Their encoded sizes were 58,307, 61,966,
+62,434, 56,926, and 169,453 bytes (about 409 KiB total), although only the first
+card was finally above-fold/eager after hydration. Cards 2-5 therefore consumed
+about 351 KiB on the cold mobile navigation. Post-hydration DOM inspection
+misleadingly showed cards 2-5 as lazy even though all five transfers had
+already completed.
 
-Suggested fix: cluster/virtualize map markers and page or virtualize the
-accessible fallback list. Prefer viewport/bbox loading if product semantics
-allow it. Preserve a discoverable non-map list and the current GPS opt-in guard.
-Benchmark representative 1k/5k/10k datasets before choosing thresholds.
+Concrete failure scenario: a visitor on a metered/slow mobile connection opens
+the gallery and competes for bandwidth with four below-fold AVIFs. This delays
+the actually visible image and JS/CSS while spending data the visitor may never
+scroll to. The source test positively pins the five-card unmeasured behavior
+but has no cold-navigation request assertion.
 
-### PERF-C1-03 — Semantic and similar search each rebuild the same brute-force matrix per request
+Suggested fix: keep the initial mobile-safe eager set small and use a
+desktop-media-qualified preload/priority mechanism for cards 3-5 (or another
+server-known responsive hint) rather than a viewport-agnostic eager attribute.
+Add cold-cache 320px and 1536px browser assertions over requests initiated
+before hydration, not merely the final DOM attributes.
+
+## Revalidated carry-forward findings
+
+### PERF-C2-R1 — The map duplicates up to 10,000 rows into client markers and fallback DOM
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: Confirmed hot-path duplication; agrees with prior architecture review
-- Regions: `apps/web/src/app/api/search/semantic/route.ts:263-353`,
-  `apps/web/src/app/api/search/similar/[id]/route.ts:137-270`,
-  `apps/web/src/lib/clip-embeddings.ts:36-48,80-86`
+- Status: Confirmed carry-forward
+- Regions: `apps/web/src/lib/data.ts:1781-1816` and
+  `apps/web/src/app/[locale]/(public)/map/page.tsx:42-111`
 
-Both routes fetch up to 25,000 MEDIUMBLOB vectors, decode every row into a
-Float32 view, score it in JavaScript, allocate a scored object per valid row,
-then issue a second enrichment query. Similar search additionally loads the
-target vector separately. There is no shared decoded-vector snapshot or ranking
-service, so concurrent searches repeat DB transfer, decode, allocation, and
-512-dimensional scoring over the same corpus.
+The DB cap bounds memory but the page still serializes the whole marker set,
+renders the same rows as fallback links, and asks Leaflet to create the marker
+layer. A GPS-heavy gallery near the cap can stall TTFB, parsing, hydration, and
+mobile interaction. Cluster/viewport-load markers and paginate or virtualize
+the accessible list while preserving the GPS opt-in projection.
 
-Concrete failure scenario: a handful of concurrent requests at a raised
-`SEMANTIC_SCAN_LIMIT` multiply roughly `rows × 2 KiB` DB transfer plus
-`rows × 512` floating operations and object allocation, competing with Sharp
-and foreground DB work in the single Node process.
+### PERF-C2-R2 — Semantic and similar search repeat full vector transfer/decode/ranking
 
-Suggested fix: centralize ranking and maintain a bounded, version-keyed decoded
-embedding snapshot (or move vector search to a purpose-built index). Ensure
-embedding updates invalidate/swap the snapshot atomically, keep request aborts,
-and budget memory explicitly before raising the scan cap.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: Confirmed carry-forward
+- Regions: `apps/web/src/app/api/search/semantic/route.ts:263-353` and
+  `apps/web/src/app/api/search/similar/[id]/route.ts:137-270`
 
-## Verified performance controls / non-findings
-
-- Public listing uses bounded keyset pagination and the corresponding compound
-  indexes; load-more prevents overlap and ignores stale/unmounted results.
-- Sharp work has queue/thread caps, bounded fan-out, upload size/pixel guards,
-  and atomic derivative publication.
-- Analytics DB writes are concurrency-bounded and queue-bounded; restore and
-  shutdown drains are tracked and timeout-aware.
-- Image serving streams from file descriptors, handles HEAD/304 without body
-  streams, and debounces its settings hash/config read.
-- Search aborts stale semantic fetches; Similar Photos fetches only on demand.
-- Sitemap/feed/OG routes have explicit caps/caches/rate limits, and the recent
-  `geoip-lite` fix does not add the database to client bundles.
+Each request loads and decodes up to the configured scan cap of 2 KiB vectors,
+allocates scored rows, sorts, and performs enrichment. Concurrent requests
+repeat the identical matrix work in the single web process. Centralize ranking
+behind a bounded model-versioned snapshot/index or a vector store, with atomic
+invalidation and an explicit memory budget.
 
 ## Final missed-issue sweep
 
-I rechecked sequential awaits, unbounded selects/maps, request-local versus
-module caches, timers/listeners/observers, image priority/preload behavior,
-buffer materialization, background queues, and query/index alignment. No new
-high-confidence catastrophic leak or unbounded production loop was found.
-Shared resource-budget fragmentation, non-sargable On This Day predicates, and
-deploy-failure Docker cleanup remain documented deferred risks rather than new
-findings.
+I rechecked unbounded collections, `offset`/keyset use, query/index alignment,
+sequential awaits, buffer materialization, image priority/srcset behavior,
+observers/listeners/timers, request caches, queue/thread caps, and failure-path
+Docker cleanup. Pagination, Sharp limits, bounded background writes, abortable
+search, and streamed upload serving remain intact. No further new performance
+regression survived the final sweep.
