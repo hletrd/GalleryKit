@@ -91,6 +91,20 @@ describe('deploy script safety contract', () => {
         expect(remoteDeployScript).toContain('Run: chmod 600 \\"$ENV_FILE\\"');
     });
 
+    it('fails closed on env-file ownership mismatches before use', () => {
+        const remoteOwnerCheck = remoteDeployScript.indexOf('if [[ ! -O "$ENV_FILE" ]]');
+        const remoteSource = remoteDeployScript.indexOf('source "$ENV_FILE"');
+        const runtimeOwnerCheck = deployScript.indexOf('if [ ! -O "$env_file" ]');
+        const compose = deployScript.indexOf('docker compose --env-file "$env_file"');
+
+        expect(remoteOwnerCheck).toBeGreaterThan(-1);
+        expect(remoteDeployScript.slice(remoteOwnerCheck, remoteSource)).toContain('exit 1');
+        expect(remoteDeployScript.slice(remoteOwnerCheck, remoteSource)).toContain('Refusing to source deploy env file not owned');
+        expect(runtimeOwnerCheck).toBeGreaterThan(-1);
+        expect(deployScript.slice(runtimeOwnerCheck, compose)).toContain('exit 1');
+        expect(deployScript.slice(runtimeOwnerCheck, compose)).toContain('Refusing to deploy with runtime env file not owned');
+    });
+
     it('refuses group/world-readable runtime env files before Docker Compose consumes them', () => {
         const checkIndex = deployScript.indexOf('if (( env_group_perms != 0 || env_world_perms != 0 )); then');
         const composeIndex = deployScript.indexOf('docker compose --env-file "$env_file" -f apps/web/docker-compose.yml up -d --build');

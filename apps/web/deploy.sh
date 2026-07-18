@@ -22,7 +22,8 @@ if [ ! -f "$env_file" ]; then
 fi
 
 if [ ! -O "$env_file" ]; then
-    echo "Warning: runtime env file is not owned by the current user: $env_file" >&2
+    echo "Refusing to deploy with runtime env file not owned by the current user: $env_file" >&2
+    exit 1
 fi
 
 env_mode="$(stat -c '%a' "$env_file" 2>/dev/null || true)"
