@@ -19,13 +19,34 @@ for (const viewport of [
 
     const cards = page.locator('.masonry-card');
     await expect(cards.first()).toBeVisible();
-    const priorityIndices = await cards.evaluateAll((nodes) => nodes.flatMap((node, index) => {
-      const image = node.querySelector('img');
-      return image?.getAttribute('loading') === 'eager' && image.getAttribute('fetchpriority') === 'high'
-        ? [index]
-        : [];
-    }));
-    expect(priorityIndices).toEqual([0]);
+    const layout = await cards.evaluateAll((nodes) => {
+      const cardsWithPriority = nodes.map((node, index) => {
+        const rect = node.getBoundingClientRect();
+        const image = node.querySelector('img');
+        return {
+          index,
+          top: rect.top,
+          isPriority: image?.getAttribute('loading') === 'eager'
+            && image.getAttribute('fetchpriority') === 'high',
+        };
+      });
+      const topEdge = Math.min(...cardsWithPriority.map((card) => card.top));
+      return {
+        leaderIndices: cardsWithPriority
+          .filter((card) => Math.abs(card.top - topEdge) < 2)
+          .map((card) => card.index),
+        priorityIndices: cardsWithPriority
+          .filter((card) => card.isPriority)
+          .map((card) => card.index),
+      };
+    });
+    expect(layout.priorityIndices).toEqual([0]);
+    expect(layout.leaderIndices).toContain(0);
+    if (viewport.name === 'mobile') {
+      expect(layout.leaderIndices).toEqual([0]);
+    } else {
+      expect(layout.leaderIndices.length).toBeGreaterThan(1);
+    }
     await expect(page.locator('link[rel="preload"][as="image"][media]')).toHaveCount(0);
 
     const firstImagePath = await cards.first().locator('img').evaluate((image) => new URL((image as HTMLImageElement).currentSrc).pathname);

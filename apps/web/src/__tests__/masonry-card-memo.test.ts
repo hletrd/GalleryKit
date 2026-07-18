@@ -21,7 +21,7 @@
  *     wrapped, and that the parent passes it the exact prop set documented
  *     below (not a derived/cloned object).
  *  2. A value-level behavioral test that builds the REAL per-card props via
- *     the exported pure helpers `computeIsAboveFold` / `resolveTopicLabel`
+ *     the exported pure helpers `isUniversalPriorityCard` / `resolveTopicLabel`
  *     (the same functions home-client.tsx calls) and a literal replica of
  *     home-client.tsx's `setAllImages(prev => [...prev, ...newImages])`
  *     append, then applies `shallowEqual` — the same single-level
@@ -35,7 +35,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { computeIsAboveFold, computeShouldEagerLoad, resolveTopicLabel } from '@/components/home-client';
+import { isUniversalPriorityCard, resolveTopicLabel } from '@/components/home-client';
 
 const readSrc = (rel: string) => readFileSync(resolve(__dirname, '..', rel), 'utf8');
 
@@ -64,7 +64,6 @@ interface FixtureImage {
 function buildCardProps(
     image: FixtureImage,
     index: number,
-    columnCount: number,
     itemCount: number,
     estimatedCardWidth: number,
     topicsMap: Record<string, string>,
@@ -74,8 +73,7 @@ function buildCardProps(
     return {
         image,
         estimatedCardWidth,
-        isAboveFold: computeIsAboveFold(index, columnCount, itemCount),
-        shouldEagerLoad: computeShouldEagerLoad(index, columnCount, itemCount, true),
+        isPriority: isUniversalPriorityCard(index, itemCount),
         topicLabel: resolveTopicLabel(image.topic, topicsMap),
         imageSizes,
         onLinkClick,
@@ -104,8 +102,7 @@ describe('C2-19 MasonryCard memoization contract', () => {
         // The `image` prop is the loop element itself, not a spread/derived copy.
         expect(mapCall).toContain('image={image}');
         expect(mapCall).toContain('estimatedCardWidth={estimatedCardWidth}');
-        expect(mapCall).toContain('isAboveFold={computeIsAboveFold(index, columnCount, itemCount)}');
-        expect(mapCall).toContain('shouldEagerLoad={computeShouldEagerLoad(index, columnCount, itemCount, viewportWidth > 0)}');
+        expect(mapCall).toContain('isPriority={isUniversalPriorityCard(index, itemCount)}');
         expect(mapCall).toContain('topicLabel={resolveTopicLabel(image.topic, topicsMap)}');
         // imageSizes is passed by reference, not spread into a new array.
         expect(mapCall).toContain('imageSizes={imageSizes}');
@@ -149,12 +146,11 @@ describe('C2-19 MasonryCard memoization contract', () => {
         expect(nextImages[0]).toBe(imgA);
         expect(nextImages[1]).toBe(imgB);
 
-        const columnCount = 3;
         const estimatedCardWidth = 300;
 
         for (const index of [0, 1]) {
-            const before = buildCardProps(prevImages[index], index, columnCount, prevImages.length, estimatedCardWidth, topicsMap, imageSizes, onLinkClick);
-            const after = buildCardProps(nextImages[index], index, columnCount, nextImages.length, estimatedCardWidth, topicsMap, imageSizes, onLinkClick);
+            const before = buildCardProps(prevImages[index], index, prevImages.length, estimatedCardWidth, topicsMap, imageSizes, onLinkClick);
+            const after = buildCardProps(nextImages[index], index, nextImages.length, estimatedCardWidth, topicsMap, imageSizes, onLinkClick);
             expect(shallowEqual(before, after), `card at index ${index} should have unchanged props after append`).toBe(true);
         }
     });
@@ -165,41 +161,18 @@ describe('C2-19 MasonryCard memoization contract', () => {
         const imageSizes = [640, 1536, 2048];
         const onLinkClick = () => {};
 
-        const atWidth300 = buildCardProps(imgA, 0, 3, 2, 300, topicsMap, imageSizes, onLinkClick);
-        const atWidth420 = buildCardProps(imgA, 0, 3, 2, 420, topicsMap, imageSizes, onLinkClick);
+        const atWidth300 = buildCardProps(imgA, 0, 2, 300, topicsMap, imageSizes, onLinkClick);
+        const atWidth420 = buildCardProps(imgA, 0, 2, 420, topicsMap, imageSizes, onLinkClick);
         expect(shallowEqual(atWidth300, atWidth420)).toBe(false);
-    });
-
-    it('a column-count change does not invent new explicit-priority cards', () => {
-        const imgA: FixtureImage = { id: 1, topic: 'travel' };
-        const topicsMap = { travel: 'Travel' };
-        const imageSizes = [640, 1536, 2048];
-        const onLinkClick = () => {};
-
-        const atColumns3 = buildCardProps(imgA, 2, 3, 5, 300, topicsMap, imageSizes, onLinkClick);
-        const atColumns2 = buildCardProps(imgA, 2, 2, 5, 300, topicsMap, imageSizes, onLinkClick);
-        expect(atColumns3.isAboveFold).toBe(false);
-        expect(atColumns2.isAboveFold).toBe(false);
-        expect(shallowEqual(atColumns3, atColumns2)).toBe(true);
     });
 });
 
-describe('C2-19 computeIsAboveFold / resolveTopicLabel pure helpers', () => {
-    it('computeIsAboveFold flags only the universal first CSS-column item', () => {
-        expect(computeIsAboveFold(0, 3, 5)).toBe(true);
-        expect(computeIsAboveFold(2, 3, 5)).toBe(false);
-        expect(computeIsAboveFold(3, 3, 5)).toBe(false);
-        expect(computeIsAboveFold(1, 5, 2)).toBe(false);
-        expect(computeIsAboveFold(2, 5, 2)).toBe(false);
-        expect(computeIsAboveFold(0, 5, 0)).toBe(false);
-    });
-
-    it('keeps the unmeasured SSR eager set mobile-safe', () => {
-        expect(computeShouldEagerLoad(0, 1, 10, false)).toBe(true);
-        expect(computeShouldEagerLoad(1, 1, 10, false)).toBe(false);
-        expect(computeShouldEagerLoad(4, 5, 10, false)).toBe(false);
-        expect(computeShouldEagerLoad(1, 2, 10, true)).toBe(false);
-        expect(computeShouldEagerLoad(2, 2, 10, true)).toBe(false);
+describe('C2-19 priority / topic-label pure helpers', () => {
+    it('flags only the universal first CSS-column item for explicit priority', () => {
+        expect(isUniversalPriorityCard(0, 5)).toBe(true);
+        expect(isUniversalPriorityCard(2, 5)).toBe(false);
+        expect(isUniversalPriorityCard(1, 2)).toBe(false);
+        expect(isUniversalPriorityCard(0, 0)).toBe(false);
     });
 
     it('resolveTopicLabel prefers the resolved label, falling back to the raw slug', () => {

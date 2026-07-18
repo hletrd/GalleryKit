@@ -25,8 +25,9 @@ const VIEWPORT_WIDTH_BUCKET_PX = 48;
 
 function useColumnCount() {
     // SSR cannot know the viewport. Start at the mobile-safe one-column floor;
-    // media-qualified preloads below cover additional desktop first-row cards
-    // before hydration without making mobile download them.
+    // this state is used only to estimate each rendered card's intrinsic size.
+    // Explicit image priority belongs only to the universal first card because
+    // browser-balanced CSS columns do not expose later visual leaders here.
     const [count, setCount] = useState(1);
     // DES-R5C3-04 (plan-315 item 26): also track the viewport width so callers
     // can derive a per-card width estimate (container width / column count) for
@@ -42,11 +43,7 @@ function useColumnCount() {
         // AGG1L-LOW-02 / plan-301-B: thresholds mirror the Tailwind
         // breakpoints used in the masonry container's class string
         // (`columns-1 sm:columns-2 md:columns-3 xl:columns-4 2xl:columns-5`),
-        // so the above-the-fold image priority logic stays in sync with
-        // the actual column count rendered by the browser. Without this
-        // mirror, a 5-column 2xl viewport would only flag the first 4
-        // images as `loading="eager"` / `fetchPriority="high"` and the
-        // 5th slot would lazy-load (LCP regression).
+        // so intrinsic-size estimation stays aligned with browser layout.
         const update = () => {
             if (!mountedRef.current) return;
             const w = window.innerWidth;
@@ -124,24 +121,10 @@ function getClientImageListCursor(image: Pick<ImageListCursorInput, 'capture_dat
 // orderedImages.map JSX so MasonryCard's memoized bail-out can be unit-tested
 // without a DOM renderer, and so the values passed as props are computed
 // once per card rather than inline in JSX.
-export function computeIsAboveFold(index: number, columnCount: number, itemCount: number): boolean {
+export function isUniversalPriorityCard(index: number, itemCount: number): boolean {
     // CSS multi-column layout balances items top-to-bottom, so DOM indices
-    // 1..columnCount are not the visual leaders of columns 2..N. Only the
-    // first item is invariantly above the fold before browser layout.
-    void columnCount;
-    return itemCount > 0 && index === 0;
-}
-
-export function computeShouldEagerLoad(
-    index: number,
-    columnCount: number,
-    itemCount: number,
-    hasMeasuredViewport: boolean,
-): boolean {
-    // Viewport measurement reveals only the column count, not CSS column
-    // breaks. Keep explicit eager ownership to the universal first card.
-    void columnCount;
-    void hasMeasuredViewport;
+    // after 0 cannot identify the visual leaders of columns 2..N. Only the
+    // first item is invariantly a top-edge leader before browser layout.
     return itemCount > 0 && index === 0;
 }
 
@@ -341,8 +324,7 @@ export function HomeClient({ images, tags, topics, currentTags, topicSlug, smart
                         key={image.id}
                         image={image}
                         estimatedCardWidth={estimatedCardWidth}
-                        isAboveFold={computeIsAboveFold(index, columnCount, itemCount)}
-                        shouldEagerLoad={computeShouldEagerLoad(index, columnCount, itemCount, viewportWidth > 0)}
+                        isPriority={isUniversalPriorityCard(index, itemCount)}
                         topicLabel={resolveTopicLabel(image.topic, topicsMap)}
                         imageSizes={imageSizes}
                         onLinkClick={saveScrollPosition}

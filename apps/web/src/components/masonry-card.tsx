@@ -25,12 +25,9 @@ interface MasonryCardProps {
     // DES-R5C3-04-derived estimate of the rendered card width; changes when
     // the viewport/column-count bucket changes (must force a re-render).
     estimatedCardWidth: number;
-    // First N cards for the current column count; must force a re-render
-    // when the column count or item count changes.
-    isAboveFold: boolean;
-    // The SSR-safe initial eager window can be wider than isAboveFold so a
-    // five-column desktop's first row starts loading before hydration.
-    shouldEagerLoad: boolean;
+    // Only the first DOM card is a universal visual leader in balanced CSS
+    // columns, so it alone owns explicit eager/high scheduling.
+    isPriority: boolean;
     // Pre-resolved (image.topic && topicsMap[image.topic]) || image.topic so
     // the card doesn't need the whole topicsMap object as a prop.
     topicLabel?: string;
@@ -40,7 +37,7 @@ interface MasonryCardProps {
     onLinkClick: () => void;
 }
 
-function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, shouldEagerLoad, topicLabel, imageSizes, onLinkClick }: MasonryCardProps) {
+function MasonryCardImpl({ image, estimatedCardWidth, isPriority, topicLabel, imageSizes, onLinkClick }: MasonryCardProps) {
     const { t, locale } = useTranslation();
 
     // F-5 / F-18 / AGG1L-LOW-01: underscore normalization is now baked into
@@ -118,9 +115,9 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, shouldEagerLo
                                         width={image.width}
                                         height={image.height}
                                         className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-105"
-                                        loading={shouldEagerLoad ? "eager" : "lazy"}
+                                        loading={isPriority ? "eager" : "lazy"}
                                         decoding="async"
-                                        fetchPriority={isAboveFold ? "high" : "auto"}
+                                        fetchPriority={isPriority ? "high" : "auto"}
                                     />
                                 );
                             }
@@ -140,8 +137,8 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, shouldEagerLo
                                     // thread during masonry scroll. next/image forwards the
                                     // attribute through to the underlying <img>.
                                     decoding="async"
-                                    loading={shouldEagerLoad ? "eager" : "lazy"}
-                                    fetchPriority={isAboveFold ? "high" : "auto"}
+                                    loading={isPriority ? "eager" : "lazy"}
+                                    fetchPriority={isPriority ? "high" : "auto"}
                                 />
                             );
                         })()}
@@ -178,7 +175,7 @@ function MasonryCardImpl({ image, estimatedCardWidth, isAboveFold, shouldEagerLo
 // C2-19 (run-10 c2): React.memo with the default shallow-props comparator —
 // image keeps referential identity across allImages appends (home-client's
 // setAllImages(prev => [...prev, ...newImages]) spreads, never clones,
-// existing entries), estimatedCardWidth/isAboveFold/topicLabel/imageSizes are
+// existing entries), estimatedCardWidth/isPriority/topicLabel/imageSizes are
 // primitives or parent-stable references, and onLinkClick is a useCallback
 // keyed only on scrollKey. So an append, a viewport-bucket change that
 // doesn't affect this card, or an unrelated state flip (showBackToTop) all
