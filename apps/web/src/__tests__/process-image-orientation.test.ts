@@ -42,6 +42,9 @@ afterAll(async () => {
         fs.unlink(path.join(UPLOAD_DIR_AVIF, `${id}_8.avif`)).catch(() => {}),
         fs.unlink(path.join(UPLOAD_DIR_WEBP, `${id}_8.webp`)).catch(() => {}),
         fs.unlink(path.join(UPLOAD_DIR_JPEG, `${id}_8.jpg`)).catch(() => {}),
+        fs.unlink(path.join(UPLOAD_DIR_AVIF, `${id}_16.avif`)).catch(() => {}),
+        fs.unlink(path.join(UPLOAD_DIR_WEBP, `${id}_16.webp`)).catch(() => {}),
+        fs.unlink(path.join(UPLOAD_DIR_JPEG, `${id}_16.jpg`)).catch(() => {}),
     ]));
 });
 
@@ -128,5 +131,38 @@ describe('EXIF Orientation handling (CM-HIGH-4)', () => {
         const h = meta.height ?? 0;
         // Orientation=1 = no rotation; 4w×8h source should stay portrait.
         expect(h).toBeGreaterThan(w);
+    });
+
+    it('reports the largest delivered derivative rather than a wider source ceiling', async () => {
+        const srcPath = path.join(tmpDir, 'wide-source.jpg');
+        await sharp({
+            create: { width: 32, height: 16, channels: 3, background: { r: 90, g: 120, b: 150 } },
+        }).jpeg({ quality: 90 }).toFile(srcPath);
+
+        const id = trackId('delivered-max-width');
+        const result = await processImageFormats(
+            srcPath,
+            `${id}.webp`,
+            `${id}.avif`,
+            `${id}.jpg`,
+            32,
+            { webp: 80, avif: 80, jpeg: 90 },
+            [8, 16],
+            null,
+        );
+
+        expect(result.derivativeMaxWidth).toBe(16);
+        for (const [ext, dir] of [
+            ['avif', UPLOAD_DIR_AVIF],
+            ['webp', UPLOAD_DIR_WEBP],
+            ['jpg', UPLOAD_DIR_JPEG],
+        ] as const) {
+            const [baseMeta, largestMeta] = await Promise.all([
+                sharp(path.join(dir, `${id}.${ext}`)).metadata(),
+                sharp(path.join(dir, `${id}_16.${ext}`)).metadata(),
+            ]);
+            expect(baseMeta.width).toBe(16);
+            expect(largestMeta.width).toBe(16);
+        }
     });
 });

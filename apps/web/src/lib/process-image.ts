@@ -1044,6 +1044,14 @@ export async function processImageFormats(
     // Ensure sizes are sorted ascending so the last element is always the largest,
     // which is used as the "base" filename for backward compatibility.
     const sortedSizes = [...sizes].sort((a, b) => a - b);
+    const largestConfiguredSize = sortedSizes[sortedSizes.length - 1];
+    if (
+        sortedSizes.length === 0
+        || sortedSizes.some((size) => !Number.isInteger(size) || size <= 0)
+        || !Number.isInteger(largestConfiguredSize)
+    ) {
+        throw new Error('At least one positive integer derivative size is required');
+    }
     // R10-M4: tracks whether the AVIF encode used 10-bit depth. Set when
     // the wide-gamut path successfully encodes with bitdepth:10; remains
     // false for 8-bit AVIF (sRGB sources or 10-bit probe/fallback failure).
@@ -1459,10 +1467,15 @@ export async function processImageFormats(
         }
     }
 
+    // C11-01: `processingBaseWidth` is the source/WI-15 ceiling, not
+    // necessarily the largest width we delivered. The encoder only renders
+    // configured sizes and the unsuffixed base file aliases the largest one,
+    // so a 10,000 px source under a 7,680 px ladder delivers at most 7,680 px.
+    // Persist the actual derivative maximum promised by the public field.
     return {
         wasDownscaled: processingInputPath !== inputPath,
         avif10bit,
-        derivativeMaxWidth: processingBaseWidth,
+        derivativeMaxWidth: Math.min(processingBaseWidth, largestConfiguredSize),
     };
 }
 
