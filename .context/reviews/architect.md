@@ -1,58 +1,26 @@
-# Architect — Cycle 5 Provenance
+# Architect — Cycle 6 Provenance
 
-Review target: `4926a3e4`. The architecture inventory covered all App Router
-files, libraries, components, DB/schema/migration/reconcile paths, scripts/jobs,
-tests, runtime/build/deploy/PWA assets, and governing/current/deferred docs. The
-sweep emphasized ownership, coupling, config lifetime, persistence, concurrency,
-privacy, caches, and image delivery.
+Review target: `6e4c25c8`. The inventory covered App Router surfaces, data/lib/component ownership, schema/migration/reconcile, scripts/jobs, tests, runtime/build/deploy/PWA assets, and governing/current/deferred documentation. I traced config lifetime, persistence, concurrency, privacy, cache, and image-delivery ownership.
 
-## New findings
+## NEW Cycle 6 finding
 
-### ARCH-C5-01 — Column layout and responsive-image policy have multiple unsynchronized owners
+### ARCH-C6-01 — Responsive masonry now has aligned source policy but divergent geometry policy
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed architecture defect with live performance impact**
-- Regions: layout policy in `home-client.tsx:247-271`, `timeline/page.tsx:229`, `year/[year]/page.tsx:191`, `g/[key]/page.tsx:187`; duplicated image policy in `masonry-card.tsx:21`, `timeline/page.tsx:264-274`, `year/[year]/page.tsx:223-233`, `g/[key]/page.tsx:223-233`
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed live geometry mismatch; visible relayout manual-validation**
+- Regions: `apps/web/src/lib/responsive-masonry.ts:1-42`; `apps/web/src/components/home-client.tsx:27-79,231-274`; `apps/web/src/components/masonry-card.tsx:52-77`
 
-The same breakpoint-to-column relationship is independently encoded in Tailwind
-class strings and four responsive-image literals. They already disagree: exact
-main/archive breakpoints select the previous slot, and the shared-group literal
-does not model `lg` or four-column `xl` correctly.
+The new helper makes source sizes item-count-aware, but effective columns still have three owners: raw viewport count in `useColumnCount`, item-capped Tailwind classes in `HomeClient`, and sizes in `responsive-masonry.ts`. Production demonstrated the consequence: a two-column 744 px card received a five-column-derived 196 px intrinsic-height hint instead of its 496 px rendered height.
 
-Concrete failure: a common 768px DPR-2 home viewport fetches 1536w instead of
-640w; future layout changes can silently widen the drift across every copied
-surface.
+Concrete failure: an offscreen sparse grid can reserve the wrong document extent and relayout when activated. More broadly, a future breakpoint change can update one owner while the other two remain internally plausible.
 
-Suggested fix: create client-safe layout policy constants/helpers that produce or
-co-locate both approved class mappings and `sizes` strings for the main/archive
-and shared-grid variants. Pin the ownership with browser boundary tests.
-
-### ARCH-C5-02 — Release state still has unreconciled Git and ledger owners
-
-- Severity / confidence: **Low / High**
-- Status: **Confirmed** for implementation and remote state; deploy SHA manual-validation
-- Regions: `.context/plans/cycle-4-2026-07-18-plan.md:5,40-42,61-69`; `.context/plans/README.md:34-38`
-
-The plan owns recovery state but is written before terminal Git/deploy operations
-and is not reconciled afterward. Git proves signed remote publication through
-`4926a3e4`; the plan still says implementation and push are pending.
-
-Concrete failure: the next cycle must reconstruct the frontier from multiple
-systems and can repeat release work.
-
-Suggested fix: make terminal ledger reconciliation a required post-push step and
-record deploy identity in a machine-verifiable way (or explicitly mark it
-unverified instead of pending implementation).
+Fix: introduce one client-safe responsive masonry policy that returns breakpoint maximum, item-capped effective columns, source-size value, and approved class token; use container observation for width where possible. Timeline/year/shared grids should consume the same named policy variants.
 
 ## Revalidated carry-forward
 
-Shared DB background admission, warn-only single-instance enforcement, SQL/file
-restore generations, and failed-release rollback remain open architecture risks
-with existing provenance. They are not new Cycle 5 findings.
+Cycle 5's `ARCH-C5-01` is only partially closed: responsive size literals are centralized, but layout and size ownership are not. That residual is explicitly carry-forward context; `ARCH-C6-01` is the newly confirmed sibling failure, not a relabeling. Shared background DB admission, warn-only single-instance enforcement, DB/file restore generation, and rollback remain existing architecture risks with unchanged exit criteria.
 
-## Final architecture sweep
+## Final architecture sweep and coverage
 
-All persistence mounts, build/runtime config ownership, schema/reconcile paths,
-writers versus restore fences, file lifecycle, process-local coordination,
-caches, color delivery, and promotion were rechecked. No further fresh break
-survived.
+I rechecked persistence mounts, build/runtime config ownership, schema/journal/reconcile, writers versus restore fences, file lifecycle, process-local coordination, caches, color/semantic delivery, image fallback, release promotion, and governing docs. No further fresh architectural break survived.

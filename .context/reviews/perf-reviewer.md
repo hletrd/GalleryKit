@@ -1,48 +1,26 @@
-# Performance Reviewer — Cycle 5 Provenance
+# Performance Reviewer — Cycle 6 Provenance
 
-Review target: `4926a3e4`, 2026-07-18 KST. Review only.
+Review target: `6e4c25c8`. I inventoried SSR/data queries, public/admin routes, components, image/Sharp/color/CLIP work, DB pool/indexes, background jobs, PWA caching, uploads/restores, and deploy/runtime assets. The recent masonry diff was traced into CSS containment and runtime candidate selection, not reviewed in isolation.
 
-## Inventory and method
+## NEW Cycle 6 finding
 
-The complete performance surface was inventoried: SSR/data queries, public and
-admin routes, 61 components, image/Sharp/color/CLIP pipelines, queue/backfill and
-maintenance writers, DB pool/indexes, pagination/cardinality, PWA caching,
-uploads/restores, and deploy/runtime assets. I reviewed all recent changes and
-swept CPU, memory, DB occupancy, I/O, hydration, layout, image selection, and
-listener/timer lifecycles. Prior performance findings and the consolidated
-deferred register were used for deduplication.
-
-## New finding
-
-### PERF-C5-01 — Breakpoint-misaligned `sizes` fetches oversized masonry derivatives
+### PERF-C6-01 — Item-count-capped columns do not cap `contain-intrinsic-size`
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed live** for the main gallery; **likely/source-confirmed** for duplicated archive/share rules
-- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:229,259-285`; `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:191,218-244`; `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:187,218-244`
+- Status: **Confirmed live hint mismatch; visible shift likely/manual-validation**
+- Regions: `apps/web/src/components/home-client.tsx:231-274`; `apps/web/src/components/masonry-card.tsx:52-77`; `apps/web/src/app/[locale]/globals.css:231-235`
 
-The CSS columns use inclusive min-width Tailwind breakpoints, while the responsive
-image hints use inclusive max-width ranges that assign the previous, wider slot
-at 640/768/1280 px. The shared-group rules also miss its `lg` and four-column
-`xl` widths over broad ranges.
+The actual classes cap columns to `itemCount`, but `estimatedCardWidth` uses the raw breakpoint count. Live production at 1,536 px with two filtered photos showed `column-count: 2`, 744×496 cards, correct `50vw` source hints, and `contain-intrinsic-size: auto 196px`. The hint is about 60% shorter than the rendered card because it assumes five columns.
 
-Concrete failure: on a fresh DPR-2 Chromium load at exactly 768 px, production
-rendered a 234.66 px three-column card but advertised a 384 px slot and selected
-the 1,536w AVIF. A fresh 769 px load with the same card geometry selected 640w.
-This wastes transfer, decode memory, and image work at a common tablet width.
+Concrete failure: if those cards start beyond the content-visibility relevance window, initial multicolumn/scroll extent is under-reserved and expands as the browser activates them. The normal tall-viewport sparse page renders the first row immediately, so CLS magnitude needs a deliberately short viewport or trace before being called universally user-visible.
 
-Suggested fix: align `sizes` to the exact min-width column policy, centralize the
-main/archive and shared-grid variants, and browser-test candidate selection at
-every boundary with a high-DPR context.
+Fix: compute width from `min(itemCount, breakpointMaximum)` or observe the grid/card container. Reuse the same effective-column policy for classes, source sizes, and containment hints.
 
 ## Revalidated, not new
 
-The shared image-queue/admin-backfill DB-pool budget, large-map hydration, and
-repeated semantic-vector scan costs remain authoritative carry-forward items.
-Their exit criteria did not fire in this review.
+The Cycle 5 `sizes` breakpoint issue is closed: fresh DPR-2 browser checks selected 640w at 768 px for a 234.66 px three-column home card; DPR-2 at 1,536 px selected 640w for a 288 px five-column card. The shared queue/backfill pool budget, large-map hydration, semantic scan cost, and SW/storage long-tail items remain existing carry-forward work.
 
-## Final sweep
+## Evidence and final sweep
 
-Query/index alignment, pagination bounds, Sharp/CLIP concurrency, combined pool
-occupancy, service-worker accounting, currentSrc selection, state growth, and
-cleanup paths were rechecked. No other new performance issue survived.
+Full Vitest, typecheck, lint gates, and production audit passed. Browser evidence covered 393/768/1024/1536 plus the two-photo filtered state. I rechecked pagination/query/index alignment, Sharp/CLIP concurrency, pool overlap, image ladders, hydration/memo invalidation, service-worker accounting, timers/listeners, and cleanup paths. No second new performance finding survived.

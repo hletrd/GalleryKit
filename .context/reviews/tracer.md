@@ -1,31 +1,27 @@
-# Tracer — Cycle 5 Provenance
+# Tracer — Cycle 6 Provenance
 
-Review target: `4926a3e4`. The inventory and causal sweep followed
-request→guard→mutation→DB, upload→queue→derivatives, delete→durable cleanup,
-restore→locks/barrier/import, migration→journal/postcondition, SSR→picture
-sources→CSS columns→candidate request, navigation→focus/collapse, and
-commit→remote→plan→deploy evidence across the full maintained tree.
+Review target: `6e4c25c8`; review only.
 
-## New findings
+## End-to-end traces
 
-### TRC-C5-01 — Layout and image-selection traces fork at their breakpoint boundary
+### NEW TRC-C6-01 — Sparse home geometry splits at `itemCount`
 
 - Severity / confidence: **Medium / High**
-- Status: **Confirmed live** for the home flow; sibling traces are likely/source-confirmed
-- Trace/regions: column classes in `home-client.tsx:247-271`, `timeline/page.tsx:229`, `year/[year]/page.tsx:191`, and `g/[key]/page.tsx:187` → independent size declarations in `masonry-card.tsx:21`, `timeline/page.tsx:264-274`, `year/[year]/page.tsx:223-233`, and `g/[key]/page.tsx:223-233` → browser currentSrc
-- Failure: at 768px/DPR2 the layout trace enters three columns while the image trace remains in the prior 50vw branch, fetching 1536w for a 234.66px card. The shared-group trace has broader 1024–1200 and 1280+ divergence.
-- Fix: give layout and responsive-image selection one shared breakpoint policy per grid variant, then trace it with browser boundary tests.
+- Status: **Confirmed live mismatch; visible relayout manual-validation**
+- Regions: `home-client.tsx:27-79,231-274` → `masonry-card.tsx:52-77` → `globals.css:231-235`
+- Trace: route loads two filtered rows → `allImages.length=2` → class policy emits two effective columns and `getMainMasonrySizes(2)` emits `50vw` → `useColumnCount(1536)` independently reports five → intrinsic estimate uses five-column width → live card computes `744×496` but `contain-intrinsic-size:auto 196px`.
+- Failure: a deferred/offscreen sparse grid initially contributes the undersized stand-in to document geometry and grows when activated.
+- Fix: carry one effective-column result through classes, sizes, and containment; optionally replace viewport math with grid `ResizeObserver` evidence.
 
-### TRC-C5-02 — Cycle 4's implementation trace reaches the remote but stops before its ledger
+### NEW TRC-C6-02 — Cycle 5 terminal state stops before its pushed HEAD
 
 - Severity / confidence: **Low / High**
-- Status: **Confirmed** through signed remote publication; deployment SHA is manual-validation
-- Trace/regions: checked work/gates at `.context/plans/cycle-4-2026-07-18-plan.md:18-39,63-67` → signed commits `b72bb0cd`, `ff5d4cd6`, `4926a3e4` → `master == origin/master` → stale status/tasks at plan lines `5,40-42,68-69` and active index `.context/plans/README.md:34-38`
-- Failure: recovery follows a frontier behind actual implementation and remote state.
-- Fix: reconcile the ledger after terminal operations and record deploy evidence independently.
+- Status: **Confirmed signed push; exact deploy SHA manual-validation**
+- Regions: `.context/plans/cycle-5-2026-07-18-plan.md:3-5,47-49,70-78`; `.context/plans/README.md:34-40`; Git refs/commits `baec70b5`, `45a9417f`, `6e4c25c8`
+- Trace: implementation/test commits are signed → docs commit records “signed release pending” → `master == origin/master == 6e4c25c8` and all three signatures verify → production serves the new `sizes` string → plan/index still present Cycle 5 as active with push/deploy unchecked.
+- Failure: recovery treats already-published work as pending and may repeat release actions.
+- Fix: reconcile signed push after publication, record live verification separately from unavailable exact deploy identity, archive Cycle 5, and advance the active index.
 
-## Final trace sweep
+## Revalidated traces and final coverage
 
-Writer guards, processing/deletion races, restore sidecars and locks, schema
-application, config→encoder→cache flow, proxy→limiter flow, SW mutations, and
-deploy/prune ordering were rechecked. No further new causal break survived.
+Cycle 5 breakpoint flow now aligns at 640/768/1280/1536, and eager/high scheduling stays first-card-only. I traced public/admin request guards, DB/file upload-delete-restore lifecycles, queue/backfill concurrency, migration/journal/reconcile, cache/PWA/config, image fallback, and release promotion. Existing topology/restore/pool risks retain prior IDs; no additional new trace survived.

@@ -1,30 +1,26 @@
-# Test Engineer — Cycle 5 Provenance
+# Test Engineer — Cycle 6 Provenance
 
-Review target: `4926a3e4`. I inventoried 368 unit-test files, 15 Playwright files,
-the scanner fixtures, type/build scripts, and every source area changed since
-Cycle 4's review baseline. Full Vitest passed: 361 files passed, 2 skipped;
-3,409 tests passed, 4 expected model-weight skips.
+Review target: `6e4c25c8`. Test inventory covered 370 unit-test files, 14 Playwright files, custom auth/origin/rate-limit scanners, typecheck/build configuration, seed/server helpers, and prior gate evidence.
 
-## New findings
+## NEW Cycle 6 finding
 
-### TEST-C5-01 — Masonry priority regression test misses eager-only and high-only regressions
+### TEST-C6-01 — Responsive E2E never executes `HomeClient`'s new item-count policy
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed coverage defect; current runtime is not broken**
-- Region: `apps/web/e2e/masonry-priority.spec.ts:22-49`
-- Concrete miss: `isPriority` is the conjunction of `loading=eager` and `fetchpriority=high`. Card 6 can receive one of those explicit signals and remain absent from `priorityIndices`; `[0]` still passes.
-- Suggested fix/regression: record `{loading, fetchPriority}` per card, assert eager indices exactly `[0]`, high indices exactly `[0]`, and all other cards lazy plus auto/absent. Keep geometry, no-media-preload, and request checks separate.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed coverage gap; current live source-size behavior correct**
+- Regions: `apps/web/e2e/responsive-masonry.spec.ts:4-85`; `apps/web/src/__tests__/responsive-masonry.test.ts:8-42`; `apps/web/src/__tests__/masonry-card-memo.test.ts:99-177`; changed integration at `home-client.tsx:231-234,323-334`
 
-### TEST-C5-02 — No test crosses the CSS-column and `sizes` policies at exact breakpoints
+The E2E covers timeline and shared-group constants, not the home route. Unit tests validate the pure helper and a literal replica/source substring; they do not prove React passes the actual live `itemCount`, the class policy agrees, or the intrinsic estimator is capped.
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed missing regression for a live bug**
-- Regions: responsive strings in `masonry-card.tsx:21`, `timeline/page.tsx:264-274`, `year/[year]/page.tsx:223-233`, and `g/[key]/page.tsx:223-233`; existing viewport list at `apps/web/e2e/masonry-priority.spec.ts:4-7`
-- Concrete miss: the E2E uses 393 and 1536 px only. It cannot detect the 640/768/1280 inclusive-boundary mismatch or the shared grid's missing 1024/1280 slot transitions. Fresh DPR-2 browser proof at 768 versus 769 selected 1536w versus 640w for equivalent three-column geometry.
-- Suggested fix/regression: parameterize boundary-minus-one/boundary/boundary-plus-one at DPR 2 and assert column count, card width, advertised source slot, and selected candidate class. Cover the shared-group layout separately.
+Concrete failure: `const responsiveSizes = useMemo(() => getMainMasonrySizes(5), [])` still satisfies helper tests, archive/shared E2E, and the memo test's `responsiveSizes={responsiveSizes}` substring while reintroducing sparse-gallery softness. The current 196 px versus 496 px live intrinsic mismatch is another regression these tests cannot detect.
 
-## Final missed-test sweep
+Fix: deterministic browser fixtures for 1/2/4/5 home items; assert computed columns, source `sizes`, selected candidate, card dimensions, and `contain-intrinsic-size`. Avoid another source replica. Candidate selection should be asserted only where the seeded ladder makes it deterministic.
 
-I checked skips/suppressions, scanner reach, source-only contracts, mutation guards,
-privacy symmetry, migration fixtures, async cleanup, and recent browser specs. No
-other new unsafe suppression or false-green assertion survived.
+## Results and revalidated carry-forward
+
+All independently run gates listed in the verifier file passed. The strengthened priority E2E correctly separates eager and high states. The broad existing source-contract/behavior-harness backlog remains carry-forward; `TEST-C6-01` is the new concrete occurrence that provides its next actionable fixture.
+
+## Final test sweep and coverage
+
+I reviewed changed and sibling tests, fixture determinism, negative cases, route/action scanners, privacy/touch-target contracts, migrations, queue/restore concurrency coverage, browser matrix, PWA, admin, and CLIP preflight boundaries. No other new test defect survived.

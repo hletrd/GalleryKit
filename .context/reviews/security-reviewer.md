@@ -1,35 +1,21 @@
-# Security Reviewer — Cycle 5 Provenance
+# Security Reviewer — Cycle 6 Provenance
 
-Review target: `4926a3e4`, 2026-07-18 KST. Review only.
+Review target: `6e4c25c8`. Review only.
 
 ## Inventory and validation
 
-I inventoried every security-relevant route/action, all exported server actions,
-session/password/PAT handling, proxy/origin/IP trust, rate limits, public/admin
-projections, upload and backup path containment, restore SQL and child-process
-handling, CSP/JSON-LD sinks, secrets/env validation, migrations, queues/locks,
-and deployment ownership. The Cycle 4-to-HEAD diff changes only public navigation,
-masonry policy/tests, and review ledgers; each was traced to its trust boundary.
+I inventoried all public/admin route handlers, exported server actions, session/password/PAT flows, proxy/origin/IP trust, rate limits, public/admin field projections, upload/backup path containment, SQL restore and child processes, CSP/JSON-LD/OG sinks, env/secrets validation, migrations, locks/queues, and deployment ownership. The Cycle 5 implementation changes responsive image policy and tests only; it introduces no credential, mutation, authorization, or data-projection boundary.
 
-API-auth lint, action-origin plus restore-mutation-barrier lint, public-route
-rate-limit lint, ESLint, typecheck, production audit, and full Vitest passed.
-No credential material or new authorization boundary appeared in the diff.
+API-auth lint, action-origin plus mutation-barrier lint, public-route-rate-limit lint, ESLint, typecheck, production dependency audit, and full Vitest passed. I also manually rechecked exemption comments and public route coverage rather than relying on the green scripts alone.
 
-## New findings
+## NEW Cycle 6 findings
 
-**Zero.** No new security defect was confirmed. The responsive-image and test
-issues recorded by other lanes do not disclose protected data or bypass a guard.
+**Zero.** The sparse containment mismatch and test/ledger issues reported by other roles do not disclose data, bypass authentication, weaken origin validation, or create a new resource-exhaustion primitive.
 
 ## Revalidated, not new
 
-Warn-only single-writer enforcement with process-local coordination remains a
-documented High/High carry-forward risk under any accidental scale-out. The
-single-instance deployment policy and its exit criterion are unchanged, so it is
-not refiled as a new Cycle 5 finding.
+The documented warn-only single-writer/process-local coordination posture remains a High-confidence carry-forward risk if operators scale out. Upload/restore buffering, edge-limit application, DB-only backups, and encrypted-at-rest responsibility remain explicit operator boundaries. None of their exit criteria fired in this image/UI cycle.
 
-## Final missed-issue sweep
+## Final missed-issue sweep and coverage
 
-The final sweep rechecked guard ordering, cookie/session/PAT flows, proxy headers,
-public field projection and `_PrivacySensitiveKeys`, raw SQL/process arguments,
-filesystem containment/symlinks, restore drains and cleanup, CSP, JSON-LD, and
-recent client code. No additional confirmed or likely security issue survived.
+The final sweep covered guard ordering, session/PAT revocation, login/account/IP buckets, trusted proxy headers, `_PrivacySensitiveKeys` and public selects, raw SQL/process arguments, path/symlink containment, restore drains/finalizers, CSP nonces, OG fetch origins, JSON-LD sanitization, analytics disclosure, secrets, and recent client code. No new confirmed or likely security issue survived.

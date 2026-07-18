@@ -1,38 +1,39 @@
-# Verifier — Cycle 5 Provenance
+# Verifier — Cycle 6 Provenance
 
-Review target: `4926a3e4`. Inventory covered all tracked source, tests,
-migrations, scripts, build/deploy configuration, governing docs, and current
-review/plan ledgers. Assertions were checked against gates, Git state, and live
-browser behavior rather than accepted from comments or checkboxes.
+Review target: `6e4c25c8` (`master == origin/master`).
 
-## New findings
+## Independent verification
 
-### VER-C5-01 — Browser evidence disproves responsive candidate alignment at 768 px
+- Good GPG signatures: `baec70b5`, `45a9417f`, `6e4c25c8`.
+- Green now: ESLint; API auth; action origin/mutation barrier; public route rate limit; typecheck; production audit; focused 16-test responsive/memo set; full Vitest 362 passed/2 skipped and 3,415 passed/4 skipped; `git diff --check`.
+- Browser: production 393/768/1024/1536 checks, nav/search interaction, accessibility snapshots, computed styles, currentSrc, and console/errors. No local server was running; exact local full Playwright/build claims remain the prior cycle's recorded evidence, not independently repeated here.
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed**
-- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109`; duplicated archive/share declarations at `timeline/page.tsx:259-275`, `year/[year]/page.tsx:218-235`, and `g/[key]/page.tsx:218-235`
-- Evidence/failure: fresh production Chromium at 768×852, DPR 2 reported three columns, a 234.66px card, the 50vw source-size branch, and currentSrc `_1536.avif`. A separate fresh 769px session reported the same geometry and `_640.avif`. This is an actual excess-candidate selection, not a theoretical media-query concern.
-- Fix: match `sizes` to the min-width column breakpoints and verify each boundary at DPR 2.
+## NEW Cycle 6 findings
 
-### VER-C5-02 — Priority proof conflates two independent attributes
+### VER-C6-01 — Sparse intrinsic-size acceptance is not met
 
 - Severity / confidence: **Medium / High**
-- Status: **Confirmed test-proof defect; live attributes currently correct**
-- Region: `apps/web/e2e/masonry-priority.spec.ts:22-49`
-- Evidence/failure: the predicate requires eager AND high before recording an index. Either attribute can affect scheduling independently, so a one-attribute regression is invisible. Live production currently reports index 0 eager/high and every other card lazy/auto; the defect is in what the test can prove.
-- Fix: derive and assert separate eager and high sets.
+- Status: **Confirmed computed-style mismatch; visible shift manual-validation**
+- Regions: `home-client.tsx:231-274`; `masonry-card.tsx:52-77`; Cycle 5 plan `:24-28,56-64`
+- Scenario: two photos at 1,536 px produce two 744×496 cards and correct 50vw sizes, but only a 196 px intrinsic stand-in because raw columns remain five.
+- Fix: cap/measure effective columns consistently and browser-test the computed hint.
 
-### VER-C5-03 — Plan status is contradicted by repository state
+### VER-C6-02 — Changed home integration lacks a browser verifier
+
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed test-design gap**
+- Regions: `e2e/responsive-masonry.spec.ts:9-85`; `__tests__/responsive-masonry.test.ts:8-42`; `__tests__/masonry-card-memo.test.ts:99-177`
+- Scenario: home passes the wrong count/policy while archive/shared and pure helper tests remain green.
+- Fix: seed sparse home states and assert actual DOM `sizes`, columns, currentSrc, and intrinsic hint.
+
+### VER-C6-03 — Cycle 5 ledger is stale after signed publication
 
 - Severity / confidence: **Low / High**
-- Status: **Confirmed** for implementation/push; exact deploy commit needs manual confirmation
-- Regions: `.context/plans/cycle-4-2026-07-18-plan.md:5,40-42,63-69`; `.context/plans/README.md:34-38`
-- Evidence/failure: all implementation/gate boxes are checked, commits `b72bb0cd`, `ff5d4cd6`, and `4926a3e4` have good GPG signatures, and local/remote refs are identical, while the ledger still says implementation and signed push are pending.
-- Fix: reconcile the terminal ledger and archive it with separately verified deploy evidence.
+- Status: **Confirmed push; exact deployed SHA manual-validation**
+- Regions: `.context/plans/cycle-5-2026-07-18-plan.md:5,47-49,70-78`; `.context/plans/README.md:34-40`
+- Scenario: recovery follows unchecked terminal tasks despite remote equality and live new behavior.
+- Fix: reconcile, archive, and record deploy evidence without overstating exact identity.
 
 ## Final sweep
 
-The configured gates passed, including 3,409 Vitest tests. No new mismatch was
-found in auth, privacy projection, color/HDR, migration application, or persistence
-contracts. Known environment-only proofs remain carry-forward.
+I verified fixes for all four Cycle 5 aggregate items, rechecked prior carry-forward exit criteria, and swept guards, migrations/privacy, runtime concurrency, image/color/PWA behavior, responsive siblings, and release evidence. No further new candidate passed verification.

@@ -1,32 +1,22 @@
-# Debugger — Cycle 5 Provenance
+# Debugger — Cycle 6 Provenance
 
-Review target: `4926a3e4`. Causal debugging covered recent nav/masonry changes,
-SSR/image selection, UI state, routes/actions, queues, restore/migration paths,
-and deployment/recovery state. Competing hypotheses were tested in fresh browser
-sessions where possible.
+Review target: `6e4c25c8`. I debugged recent responsive changes through React state, Tailwind/CSS columns, browser source selection, content visibility, tests, and release state, while checking competing explanations in production.
 
-## New findings
+## NEW Cycle 6 finding
 
-### DBG-C5-01 — One CSS pixel flips the selected image from 1536w to 640w without changing layout
+### DBG-C6-01 — Sparse-card intrinsic height is derived from the wrong column-count branch
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed live**
-- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109`; same literal in `timeline/page.tsx:264-274` and `year/[year]/page.tsx:223-233`; related shared rule at `g/[key]/page.tsx:223-233`
-- Causal chain: Tailwind `md` activates at 768px → grid becomes three columns → `sizes` tests inclusive `max-width:768px` first → advertises 50vw instead of 33vw → DPR-2 target exceeds 640 → browser selects 1536w. At 769px the grid/card geometry is effectively unchanged, but the 33vw branch selects 640w.
-- Fix: use min-width ranges aligned with the CSS breakpoints and test exact boundaries in clean contexts.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed cause and live computed-style mismatch; visible shift manual-validation**
+- Regions: `apps/web/src/components/home-client.tsx:27-79,231-274`; `apps/web/src/components/masonry-card.tsx:52-77`; `apps/web/src/app/[locale]/globals.css:231-235`
 
-### DBG-C5-02 — Partial attribute regressions cannot trip the new priority E2E
+Causal chain: 1,536 px makes `useColumnCount()` return 5 → two loaded items make the CSS policy render 2 columns → `estimatedCardWidth` still computes `(1536 - 4×16) / 5 ≈ 294` → a 3:2 card gets `contain-intrinsic-size: auto 196px` → actual two-column width is 744 and rendered height is 496. The source-size helper independently uses two columns and correctly emits `50vw`, proving this is not stale deployment or a browser `sizes` interpretation issue.
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed latent-regression surface; production state correct**
-- Region: `apps/web/e2e/masonry-priority.spec.ts:22-49`
-- Causal chain: test combines eager and high with AND → a one-attribute regression becomes false/non-priority → filtered index set remains `[0]` → test passes despite changed browser scheduling.
-- Fix: assert the two attributes independently and assert the negative state of every non-first card.
+Concrete failure: when content visibility defers the sparse grid, activation replaces the 196 px stand-in with about 496 px, altering scroll/layout geometry. A normal-height viewport paints the first row immediately, so a visible jump was not claimed without the short-viewport case.
 
-## Competing hypotheses and final sweep
+Fix: cap the estimator with the same effective columns as the CSS and sizes, or measure the actual container/card.
 
-Fresh sessions ruled out cache reuse as the 768/769 explanation. Live production
-reported index 0 eager/high and all other home cards lazy/auto, so the priority
-finding is test-only today. Nav keyboard expansion, Escape restoration, 320px
-overflow, tag disclosure, search focus restoration, errors, async cleanup, locks,
-and current failure fallbacks were swept; no other new runtime bug was confirmed.
+## Negative hypotheses and final sweep
+
+The Cycle 5 one-pixel candidate flip is fixed: 768 px DPR-2 now renders three columns and selects 640w. Independent eager/high attributes are correct in production. I also traced stale requests, memo prop identity, image fallback, resize rAF cleanup, route/action guard failures, restore/queue shutdown, cache invalidation, and deploy state. No additional new debugger finding survived.

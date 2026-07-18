@@ -1,52 +1,29 @@
-# Designer — Cycle 5 Provenance
+# Designer — Cycle 6 Provenance
 
-Review target: `4926a3e4`. I read and used the applicable agent-browser core,
-configuration, query, interaction, visual, and debug skills. Production was
-loaded and interacted with at 320×700 DPR2, 393×852, 768×852 DPR2,
-769×852 DPR2, and 1536×900. Evidence included accessibility snapshots, keyboard
-focus, disclosure/search/theme states, computed geometry, responsive source
-selection/currentSrc, errors, and full/viewport captures.
+Review target: `6e4c25c8`. Web UI review used the required agent-browser core, interact, query, wait, network, visual, debug, state, and config instructions. No local server was running, so I inspected the live production app that exposes the Cycle 5 policy. Evidence came from accessibility snapshots, textual DOM, computed styles/boxes, currentSrc, console/errors, interactions, and ephemeral `/tmp` screenshots; no screenshot was committed.
 
-The UI inventory covered all localized public/admin route files, 61 components,
-global theme/motion CSS, English/Korean messages, all Playwright specs, and the
-touch/focus/ARIA/contrast/i18n source-contract tests. Authenticated protected
-admin workbenches, RTL (no shipped RTL locale), real color/HDR display hardware,
-and exact production build SHA remain manual-validation limits.
+## Browser coverage
 
-## New finding
+- 393×852 DPR 3: one-column 361 px cards, `100vw`, 1536w selected; mobile tag disclosure closed; nav expanded/collapsed with 44×44 control and focus moved into the disclosure; search dialog occupied 393×852, input 285×44, close 44×44, focus on input, body scroll locked.
+- 768×900 DPR 2: three columns, 736 px grid, 234.66 px card, min-width `33vw` policy, 640w selected; only card 0 eager/high.
+- 1,024×900 DPR 2 timeline: three columns, 992 px grid, 320 px card, aligned archive sizes.
+- 1,536×900 DPR 2: five columns, 1,504 px grid, 288 px card, 640w selected. Accessibility tree preserved H1 → hidden H2 → card H3 hierarchy and disambiguated photo link names.
 
-### DES-C5-01 — Common exact-width tablet view downloads a desktop-sized masonry derivative
+## NEW Cycle 6 finding
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed live** on the main gallery; archive/share siblings are likely from source parity
-- Regions: `apps/web/src/components/masonry-card.tsx:21,94-109`; archive duplicates at `timeline/page.tsx:229,259-285` and `year/[year]/page.tsx:191,218-244`; shared-group policy at `g/[key]/page.tsx:187,218-244`
+### DES-C6-01 — Sparse desktop cards reserve the wrong virtualized height
 
-At 768px the rendered gallery is already three columns, but the responsive image
-hint still matches `(max-width: 768px) 50vw`. In a fresh DPR-2 session, the first
-card was 234.66px wide and Chromium selected `_1536.avif`. A separate fresh 769px
-session rendered the same card width/three-column layout, matched 33vw, and
-selected `_640.avif`. The shared gallery similarly advertises slots wider than
-its 3/4-column geometry over broad desktop ranges.
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed computed-style mismatch; visible jump likely/manual-validation**
+- Regions: `apps/web/src/components/home-client.tsx:231-274`; `apps/web/src/components/masonry-card.tsx:52-77`; `apps/web/src/app/[locale]/globals.css:231-235`
 
-Concrete failure: an iPad-class visitor waits for and decodes substantially more
-image data at exactly 768 CSS pixels without receiving more visible detail,
-hurting perceived gallery paint on constrained networks.
+On a production filter with exactly two photos at 1,536 px, DOM/computed-style evidence showed two columns, a 1,504 px grid, 744×496 cards, correct `50vw` sources and 1536w candidates, but `content-visibility:auto` with `contain-intrinsic-size:auto 196px`. The visual card is correct once rendered; the virtualized stand-in is not.
 
-Suggested fix: align `sizes` with the inclusive Tailwind min-width breakpoints,
-centralize the main/archive and shared variants, and add high-DPR breakpoint
-visual/network regressions.
+Concrete failure: in a short-height viewport or a layout where the grid begins beyond the relevance region, the page can reserve around 300 px too little per 3:2 card and shift scroll geometry as the cards become relevant. The common 900 px viewport painted them immediately, so I did not claim an observed jump there.
 
-## Live UX sweep and final missed-issue pass
+Fix: derive intrinsic width from the item-capped effective columns or observed grid width, and add short-viewport sparse browser coverage.
 
-- At 320px there was no horizontal overflow; nav and first-card geometry stayed
-  inside the viewport.
-- Mobile tag disclosure was absent while closed and flowed correctly when open.
-- Keyboard activation of the menu focused the first revealed link; Escape
-  collapsed and restored the toggle.
-- Search exposed a named dialog/combobox and restored the search button after
-  Escape. Desktop/mobile landmarks and control names were coherent.
-- No page errors were captured. Full-page desktop/mobile captures showed no new
-  overlap, clipping, empty-state, focus-order, or theme defect.
+## Revalidated and final UI sweep
 
-No additional fresh IA, WCAG, responsive, theme, i18n, or interaction issue
-survived the closing sweep.
+The Cycle 5 responsive download defect is visibly/runtime closed. Mobile navigation, search focus/scroll lock, touch targets, headings, link names, theme/language controls, tag disclosure containment, and first-card scheduling behaved correctly; page error buffers were empty. Prior mobile-admin/product redesign and browser-matrix items remain carry-forward. No second new designer finding survived.
