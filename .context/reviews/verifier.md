@@ -1,55 +1,61 @@
-# Cycle 7 Verifier Review
+# Verifier Review — Cycle 8
 
 Date: 2026-07-18 KST
-Review HEAD: `ec7fc46f`
+Review HEAD: `ff8c5f48`
 
-## Inventory
+## Inventory and verification method
 
-I traced the Cycle 6 claims from `responsive-masonry.ts` through
-`home-client.tsx`, `masonry-card.tsx`, public layout padding, CSS containment,
-unit/E2E tests, Git signatures/remote state, and the deployed public app. I
-also checked the maintained route/action/schema/script surfaces and current
-deferred register for contradictions or silently reopened invariants.
+I verified Cycle 7 claims from `responsive-masonry.ts` through `HomeClient`,
+the ref-bearing grid boundary, `MasonryCard`, public container/CSS, unit and
+browser tests, commit signatures, remote state, current plan index, and prior
+findings. I also sampled every maintained route/action/schema/script boundary
+and checked the consolidated deferred register for reopened invariants.
 
-## Evidence-backed results
+Focused responsive tests passed 34/34. API-auth, action-origin/mutation-barrier,
+and public-route-rate-limit lints passed. Production dependency audit found
+zero vulnerabilities. All Cycle 7 commits are GPG-good and local/remote master
+both resolve to `ff8c5f48`.
 
-### VER-01 — Item-count alignment is correct, but rendered-width alignment fails outside the container boundary
+## Evidence-backed findings
 
-- Severity / confidence / status: **Medium / High / Confirmed**
-- Regions: `apps/web/src/components/home-client.tsx:231-249`;
-  `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`;
-  `apps/web/src/components/masonry-card.tsx:60-76`
-- Verified good: at 1,536 px production renders five columns for the normal
-  gallery, uses matching `20vw` source hints, and selects the 640w candidate.
-  The two-item seeded contract is covered at the same breakpoint.
-- Verified failure: at 320 px production the gallery content box is 288 px,
-  while the estimator uses the 336 px quantized viewport. Computed values were
-  224 px intrinsic versus 192.05 px rendered for landscape and 504 px versus
-  431.75 px for portrait (16.7% high). At 2,560 px, a live two-photo filter
-  rendered a 1,504 px grid and 744x496 cards while the viewport estimator
-  emitted `auto 843px` (70% high). This disproves the effective claim that
-  `estimatedCardWidth` estimates rendered card width.
-- Failure scenario: these lengths are the cold fallback for
-  `content-visibility:auto`; browsers may retain actual size after rendering,
-  but first-time skipped geometry is still materially oversized and contracts
-  when activated.
-- Suggested fix: drive the estimate from measured container width and add 320
-  px plus above-container-cap browser assertions.
+### VER-C8-01 — Container-owned intrinsic geometry is fixed, but source-candidate alignment is not
 
-### VER-02 — Cycle 6 release-state claims are stale
+- Severity / confidence / status: **Medium / High / Partially verified acceptance; confirmed residual defect**
+- Regions: `apps/web/src/components/home-client.tsx:69-105,257-272,350-360`;
+  `apps/web/src/lib/responsive-masonry.ts:24-35,42-57`;
+  `apps/web/src/components/masonry-card.tsx:91-110`;
+  `apps/web/e2e/responsive-masonry.spec.ts:11-55,57-95`
+- Verified good: one `ResizeObserver` owns the grid width, schedules a
+  quantized update, disconnects/cancels on unmount, and feeds item-capped card
+  geometry. Unit cases cover invalid/unmeasured, 288 px mobile, and 1,488 px
+  multi-column values; browser cases exercise 320, 1,536, and 2,560 px.
+- Verified failure: `getMainMasonrySizes()` still emits `20vw`/`33vw` based on
+  the uncapped viewport. At 2,560 px, the real five-column card is 288 px; DPR
+  2 requires 576 source pixels, while `20vw` declares a 512 px slot and asks
+  for about 1,024, selecting 1536w rather than sufficient 640w. The only
+  ultrawide E2E uses two 744 px cards, for which 1536w is legitimately needed,
+  so its passing result cannot verify normal-gallery candidate alignment.
+- Suggested fix: emit a container-capped sizes expression and add an ultrawide
+  full five-column candidate assertion.
 
-- Severity / confidence / status: **Low / High / Confirmed**
-- Regions: `.context/plans/cycle-6-2026-07-18-plan.md:5,43-45,65-73`;
+### VER-C8-02 — Cycle 7 release-state claims are stale at least for signature/push
+
+- Severity / confidence / status: **Low / High / Confirmed; deploy remains unverified**
+- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:5,48-50,73-82`;
   `.context/plans/README.md:34-40`
-- Evidence: `git verify-commit` reports good signatures for `fcbce386`,
-  `03a96a3d`, and `ec7fc46f`; local and remote master both resolve to
-  `ec7fc46f`; production serves the item-count-capped code behavior. The plan
-  nevertheless records push/deploy as pending.
-- Suggested fix: archive the reconciled plan and move Cycle 7 to the active
-  frontier, preserving the normal caveat that production does not expose an
-  exact Git SHA.
+- Evidence: `git verify-commit` reports good signatures for `498e5122`,
+  `90a3bc07`, and `ff8c5f48`; `master` and `origin/master` both resolve to
+  `ff8c5f48`. The plan still records signed commits/push as pending. This
+  review did not establish a production SHA or per-cycle deploy outcome.
+- Suggested fix: mark signed publication complete from the evidence above,
+  preserve deploy as pending unless terminal evidence exists, and advance the
+  plan only under the repository's truthful release-ledger convention.
 
-## Final sweep
+## Revalidated carry-forward and final sweep
 
-I rechecked source assertions against behavior rather than trusting comments
-or tests. No further candidate had enough evidence to report as a new issue.
+The observer fix does not trigger existing topology, shared DB-budget,
+restore-generation, large-map/vector, upload-RSS, environment, or browser-test
+infrastructure exit criteria. The final sweep rechecked implementation claims
+against source behavior rather than comments/tests alone, plus guard gates,
+privacy, migrations, persistence races, caches, and release history. No third
+distinct verifier finding survived validation.

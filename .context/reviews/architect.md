@@ -1,41 +1,41 @@
-# Architect — Cycle 7 Provenance
+# Architect — Cycle 8 Provenance
 
-Review target: `ec7fc46f`. Review only.
+Review target: `ff8c5f48`. Review only.
 
-## Inventory and validation
+## Inventory and architecture sweep
 
-I inventoried App Router surfaces, data/lib/component ownership, schema/migration/reconcile, jobs/scripts, tests, and build/runtime/deploy assets, then traced configuration lifetime, persistence, concurrency, privacy, cache, and responsive-layout ownership. The full maintained inventory was 671 TS/JS files, 31 migration SQL files, 364 unit-test files, and 13 Playwright specs. Fresh lint/typecheck/audit/full-unit gates passed.
+I inventoried the full 671-file maintained TS/JS surface, 364 Vitest files plus one test stub, 14 Playwright files, 31 migrations with journal/reconcile, and the package/build/PWA/Docker/deploy boundaries, then reviewed configuration lifetime, persistence, concurrency, privacy, cache, and responsive-layout ownership across the relevant files. `AGENTS.md`, all of `CLAUDE.md`, the Cycle 7 plan, aggregate, role reports, and the carry-forward register were read to separate current breaks from accepted/deferred architecture.
 
-## New Cycle 7 findings
+## Current findings
 
-### ARCH-C7-01 — Responsive geometry has a shared column policy but no shared measurement boundary
+### ARCH-C8-01 — Responsive geometry now has two authorities at the container cap
 
 - Severity: **Medium**
 - Confidence: **High**
-- Classification: **Confirmed architectural invariant violation; visible symptom manual-validation**
-- Regions: `apps/web/src/lib/responsive-masonry.ts:1-48`; `apps/web/src/components/home-client.tsx:21-79,231-275`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-19`; `apps/web/src/components/masonry-card.tsx:58-77`; `apps/web/e2e/responsive-masonry.spec.ts:11-49`
+- Status: **Confirmed architectural invariant split; bandwidth symptom manual-validation**
+- Regions: `apps/web/src/lib/responsive-masonry.ts:1-7,24-54`; `apps/web/src/components/home-client.tsx:257-273,349-359`; `apps/web/src/components/masonry-card.tsx:91-110`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`
 
-Cycle 6 centralized item-count capping but left measurement ownership in `useColumnCount`: the layout boundary is the `.container`, while the policy consumes `window.innerWidth`. Thus one "effective column" abstraction combines a viewport-domain numerator with a container-domain rendered layout.
+Cycle 7 established the masonry element as the measurement boundary for intrinsic layout, but responsive resource selection remains owned by viewport percentages in `SLOT_SIZE_BY_COLUMNS`. Thus a single card has container-domain geometry and viewport-domain loading policy. Above the container cap they cannot both describe the rendered slot.
 
-Concrete failure: at 2,560 px with two items the policy hands cards a 1,264 px estimated width although the capped grid renders about 744 px. The architecture is internally consistent only at or below the 1,536 px container cap; the new browser test is located exactly at that accidental equality.
+Concrete failure: for three items at 2,560 px/DPR 1, the container authority says about 491 px while the source authority says about 845 px. With the deliberately coarse 640w/1536w thumbnail ladder, those values land on different candidates, so the split creates a real large-file fetch rather than harmless rounding.
 
-Suggested fix: make the masonry grid own its measured content width and expose one responsive-geometry value object (observed width, effective columns, estimated card width, source-size policy). Keep viewport breakpoints only for choosing the maximum columns; do not use viewport width as container width.
+Fix: expose one responsive geometry policy that covers effective columns, capped slot width, and `sizes`; keep live observation for `contain-intrinsic-size`, while making the server-rendered source hint encode the same public-container cap. Prove the shared policy at a three-item ultrawide DPR-1 boundary.
 
-This drains the concrete consequence of the prior review's optional container-observation note; it is not a duplicate of the fixed raw-column defect.
+The old review about a missing `2xl` column was closed by adding five-column policy. This finding concerns the still-duplicated measurement domain after the new observer landed.
 
-### ARCH-C7-02 — Release workflow state is reconstructed one cycle late
+### ARCH-C8-02 — Release state still requires the next cycle to repair the previous cycle
 
 - Severity: **Low**
 - Confidence: **High**
-- Classification: **Confirmed state-model drift; exact production identity manual-validation**
-- Regions: `.context/plans/cycle-6-2026-07-18-plan.md:3-5,43-45,65-73`; `.context/plans/README.md:34-41`
+- Status: **Confirmed workflow-state drift; production identity manual-validation**
+- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:3-5,48-50,73-82`; `.context/plans/README.md:34-40`
 
-The current plan is committed in a pre-publication state, while publication and deployment happen after that commit. The next review must therefore rediscover and repair the terminal state every cycle; Cycle 5 was just archived for the same reason.
+The active plan is necessarily committed before its own final publication, but no terminal state artifact follows the push. Consequently the repo again records a published signed cycle as pending, now through `ff8c5f48`; Cycle 7 had to repair the identical Cycle 6 state.
 
-Concrete failure: the repository's authoritative recovery state is stale immediately after a successful cycle, despite Git already proving signed remote publication through `ec7fc46f`.
+Concrete failure: repository recovery chooses a stale frontier and may repeat terminal work.
 
-Suggested fix: add a terminal reconciliation artifact or post-push ledger update that can record signature/remote/deploy evidence without rewriting a published commit. At minimum, reconcile and archive Cycle 6 now.
+Fix: reconcile/archive Cycle 7 now and introduce a post-push/deploy terminal record or a clearly documented next-cycle reconciliation invariant so the authoritative state does not claim that remote work is pending after remote equality is observable.
 
-## Revalidated architecture risks and final sweep
+## Final missed-issue sweep
 
-I rechecked module boundaries, cache/config lifetime, DB/file dual-write flows, restore fences, process-local coordination, background pool overlap, migration ownership, storage quarantine, and PWA/runtime boundaries. Existing broad risks retain their carry-forward IDs and exit criteria. No third fresh architectural break survived.
+I rechecked module ownership, DB/file dual writes, restore fences, advisory-lock discipline, process-local coordination, pool overlap, migrations, storage quarantine, PWA/runtime boundaries, and source/test symmetry. Existing broad risks remain in the carry-forward register; no third fresh architecture break survived.

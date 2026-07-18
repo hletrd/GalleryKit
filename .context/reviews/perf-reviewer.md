@@ -1,30 +1,73 @@
-# Performance Reviewer — Cycle 7 Provenance
+# Performance Reviewer — Cycle 8 Provenance
 
-Review target: `ec7fc46f`. Review only.
+Review target: `ff8c5f48`. Review only.
 
 ## Inventory and validation
 
-I inventoried SSR/data queries, route handlers, React components, image/Sharp/color/CLIP work, DB pool/indexes, background consumers, uploads/restores, service-worker caching, and runtime/deploy assets across the full maintained tree. I traced the Cycle 6 masonry change through the public layout container, Tailwind defaults, card containment, source policy, and browser coverage. Fresh ESLint, typecheck, audit, and full Vitest passed.
+I inventoried SSR/data queries and indexes, public/admin routes and actions,
+React rendering and hydration, image/Sharp/color/CLIP paths, DB-pool and
+background consumers, upload/restore memory, service-worker caches, build and
+runtime configuration, 369 unit-test files, and 16 browser files. I traced the
+Cycle 7 width fix through the public container, `ResizeObserver`, width
+quantization, effective columns, MasonryCard containment, responsive `sizes`,
+the two-candidate grid `srcset`, and all responsive browser cases.
 
-## New Cycle 7 finding
+Fresh focused tests passed 34/34, the three route/action security-performance
+guard lints passed, the production audit reported zero vulnerabilities, and
+`git diff --check ec7fc46f..ff8c5f48` passed.
 
-### PERF-C7-01 — Ultrawide sparse galleries over-reserve virtual card height
+## New Cycle 8 finding
+
+### PERF-C8-01 — Ultrawide `sizes` still describes the viewport after geometry moved to the capped container
 
 - Severity: **Medium**
 - Confidence: **High**
-- Classification: **Confirmed performance/geometry mismatch; user-visible CLS/scroll effect needs browser validation**
-- Regions: `apps/web/src/components/home-client.tsx:21-79,231-249`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-19`; `apps/web/src/components/masonry-card.tsx:58-77`; `apps/web/src/app/[locale]/globals.css:231-235`; `apps/web/e2e/responsive-masonry.spec.ts:11-49`
+- Status: **Confirmed current bandwidth/candidate-selection defect; new Cycle 8 finding**
+- Regions: `apps/web/src/lib/responsive-masonry.ts:1-6,42-57`;
+  `apps/web/src/components/home-client.tsx:257-272,350-360`;
+  `apps/web/src/components/masonry-card.tsx:91-110`;
+  `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`
 
-`estimatedCardWidth` now uses the correct sparse column count, but still divides quantized viewport width rather than the capped grid width. The public `.container` stops growing at Tailwind's default 1,536 px while `window.innerWidth` grows indefinitely.
+Cycle 7 correctly moved intrinsic geometry to the observed, capped grid width,
+but image candidate selection still advertises fixed viewport fractions such
+as `33vw` and `20vw`. The public container stops at 1,536 px and its horizontal
+padding leaves a 1,504 px content box, so those declarations increasingly
+overstate actual card width above the cap.
 
-Concrete failure: at 2,560 px, a two-column sparse gallery estimates 1,264 px cards while rendering about 744 px cards after the container padding and 16 px gap. The intrinsic height is consequently about 70% too large for every aspect ratio. When `content-visibility:auto` skips one of those cards, the virtual scroll extent is over-reserved and contracts on activation; even when the card is immediately relevant, every viewport-width bucket change invalidates all `MasonryCard` props using a value disconnected from actual layout.
+Concrete failure with the default two-candidate masonry ladder (640w/1536w):
 
-Suggested fix: observe and bucket the grid's content width, then derive card width from that single value and effective columns. Add an ultrawide sparse Playwright case; the current 1,536 px case sits exactly where the estimator accidentally agrees with the container and cannot catch the defect.
+- At a 2,560 px viewport with five columns, the real card is
+  `(1504 - 4*16) / 5 = 288` CSS px. A DPR-2 display needs 576 source pixels, so
+  640w is sufficient. `20vw` instead declares 512 CSS px and asks for about
+  1,024 source pixels, selecting 1536w.
+- With three columns at DPR 1, the real card is about 491 px and needs 640w;
+  `33vw` declares about 845 px and selects 1536w.
+
+Thus the layout/containment fix can be visually correct while each affected
+tile downloads the much larger derivative. AVIF/WebP/JPEG byte ratios vary by
+photo, but the selected pixel area can be roughly 5.8 times the 640w candidate.
+
+Suggested fix: make `sizes` model the capped/padded container, using a
+server-emittable CSS expression such as `calc()`/`min()` for each effective
+column count and gap, rather than waiting for the client observer. Reuse that
+policy for archives and shared groups where their containers match. Add an
+ultrawide full-grid browser assertion that proves the 640w candidate on DPR 2;
+the current sparse two-item case legitimately needs 1536w and cannot expose
+this defect.
 
 ## Revalidated, not new
 
-The prior raw-five-column sparse under-reservation is fixed at the tested 1,536 px boundary. Shared queue/backfill pool contention, large-map hydration, semantic-vector scanning, upload RSS, and service-worker long-tail items remain explicitly deferred with unchanged exit criteria; none was re-filed.
+The Cycle 7 intrinsic-size fix itself is correct: measured width is owned by one
+grid observer, quantized once, divided by item-capped effective columns, and
+cleaned up on unmount. Shared queue/backfill DB saturation, map scale, semantic
+vector scans, upload RSS, and service-worker long-tail items remain explicitly
+deferred with unchanged exit criteria and were not re-filed.
 
 ## Final missed-issue sweep
 
-I rechecked pagination/query/index alignment, N+1/fan-out patterns, connection-hold times, queue overlap, Sharp and CLIP concurrency, image ladders, hydration/memo invalidation, cache accounting, abort/listener cleanup, and current responsive siblings. No second new performance defect survived validation.
+The final sweep revisited query/index alignment, N+1 and fan-out shapes,
+connection hold time, background-worker overlap, Sharp/CLIP concurrency,
+responsive image ladders, hydration/memo invalidation, observer cleanup,
+containment/CLS, cache accounting, listener/abort cleanup, and deploy/runtime
+assets. No second distinct current performance defect survived history and
+source validation.

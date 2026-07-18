@@ -1,93 +1,123 @@
-# Cycle 7 Aggregate Review
+# Cycle 8 Aggregate Review
 
 Date: 2026-07-18 KST
-Review HEAD: `ec7fc46f`
+Review HEAD: `ff8c5f48`
 
 ## Agent coverage
 
 Completed and preserved provenance reviews: code-reviewer, perf-reviewer,
 security-reviewer, critic, verifier, test-engineer, tracer, architect,
-debugger, document-specialist, and designer. The global thread limit exposed
-one child review slot. Six technical lenses ran in the first worker; the
-initial product-worker launch was rejected by that limit, then the required
-retry independently validated the five locally produced product/UX reports.
-The aggregate applied the retry's material ultrawide and cold-fallback wording
-corrections consistently across those files.
+debugger, document-specialist, and designer. The environment exposed generic
+workers rather than named reviewer registrations, and the global four-thread
+limit rejected one initial batch launch; the required retry used the existing
+review worker and completed successfully. No repository-local custom reviewer
+definition was present.
 
-The review inventory covered all maintained TypeScript/JavaScript application
-and script files, 31 migration SQL files plus journal/reconcile, 370 unit-test
-files, 14 Playwright files, public/admin route and action boundaries,
-PWA/build/deploy assets, governing documentation, current plans, and the
-consolidated deferred register. The Cycle 6 diff was an entry point, not a
-scope boundary. Designer coverage used the required agent-browser skill
-family and live DOM/accessibility/computed-style evidence at 320, 393, 1,536,
-and 2,560 CSS pixels.
+Each lane inventoried the maintained repository before reviewing its specialty:
+671 TypeScript/JavaScript files, 31 migrations plus journal/reconcile, 365+
+unit-test files, 14+ Playwright files, App Router routes/actions, public/admin
+components, scripts, PWA/build/deploy assets, governing documentation, and the
+consolidated deferred register. The Cycle 7 diff was an entry point rather than
+a scope boundary. The designer read and used the required agent-browser skill
+family, then exercised production at 320, 1,536, and 2,560 CSS pixels with DOM,
+accessibility, computed-style, candidate-selection, theme, keyboard, and
+performance evidence.
 
 ## New deduplicated findings
 
-### C7-01 — Intrinsic masonry geometry uses viewport width instead of its capped container
+### C8-01 — Responsive image hints remain viewport-owned after geometry became container-owned
 
 - Severity / confidence: **Medium / High**
-- Status: **Confirmed live fallback-geometry mismatch**
-- Agreement: code-reviewer, perf-reviewer, critic, verifier, tracer,
-  architect, debugger, document-specialist, designer
-- Regions: `apps/web/src/components/home-client.tsx:21-79,231-249`;
-  `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`;
-  `apps/web/tailwind.config.ts:21-22`;
-  `apps/web/src/components/masonry-card.tsx:23-25,52-76`;
-  `apps/web/src/app/[locale]/globals.css:231-235`
-- Failure: Cycle 6 corrected the item-count divisor but retained a 48
-  px-quantized `window.innerWidth` numerator. The gallery is inside `px-4` and
-  Tailwind's 1,536 px-capped `.container`. At 320 px, live production rendered
-  a 288x192 landscape card with `contain-intrinsic-size:auto 224px` (16.7%
-  high). At 2,560 px, a live two-photo filter rendered a 1,504 px grid and two
-  744x496 cards while the 2,544 px viewport bucket emitted `auto 843px` (70%
-  high). These lengths are the cold fallback for `content-visibility:auto`;
-  browsers may retain actual dimensions after rendering, but first-time
-  skipped geometry is materially oversized and contracts when activated.
-- Fix: measure the actual masonry content width, bucket that observed width if
-  rerender throttling remains necessary, and derive the item-capped card width
-  from that single layout-domain value. Avoid duplicating Tailwind's cap or
-  padding in an unexplained arithmetic clamp.
-
-### C7-02 — Responsive tests execute intrinsic geometry only at the accidental equality point
-
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed test-design gap with live counterexamples**
+- Status: **Confirmed live runtime bandwidth defect on main and archive;
+  source-confirmed conditional impact on shared groups**
 - Agreement: code-reviewer, perf-reviewer, critic, verifier, test-engineer,
-  tracer, architect, debugger, designer
-- Regions: `apps/web/e2e/responsive-masonry.spec.ts:11-49`;
-  `apps/web/src/__tests__/responsive-masonry.test.ts:9-53`;
-  `apps/web/src/components/home-client.tsx:21-79,231-249`
-- Failure: the only main-gallery geometry E2E runs at exactly 1,536 px, where
-  viewport and container nearly coincide, and permits ±15% error. Unit tests
-  cover column/source helpers but no measured-width/card-width boundary.
-  Consequently both the current 320 px 16.7% error and 2,560 px 70% error pass
-  every focused Cycle 6 test.
-- Fix: add seeded main-gallery browser cases at 320 px and above the container
-  cap (2,560 px), comparing computed intrinsic height with the real card box.
-  Retain the existing sparse 1,536 px case because it protects item-count and
-  source-selection invariants. Add focused helper coverage for invalid/empty
-  measured widths if width arithmetic is extracted.
+  tracer, architect, debugger, document-specialist, designer
+- Regions: `apps/web/src/lib/responsive-masonry.ts:1-7,37-65`;
+  `apps/web/src/components/home-client.tsx:257-273,349-359`;
+  `apps/web/src/components/masonry-card.tsx:91-110`;
+  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:230-285`;
+  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:192-245`;
+  `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:180-245`;
+  `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`
+- Failure: Cycle 7 correctly moved intrinsic card geometry to the observed,
+  capped masonry container, but `sizes` still advertises `20vw`, `25vw`,
+  `33vw`, and related viewport fractions. At 2,560 px/DPR 2 the public grid
+  remains 1,504 px wide and a five-column card remains 288 px, so 640w covers
+  its 576 device pixels; `20vw` instead advertises 512 CSS px and selects the
+  1536w derivative. Production browser evidence reproduced `_640.avif` at
+  1,536 px and `_1536.avif` for the same 288 px Timeline cards at 2,560 px;
+  main-gallery cards after Load more reproduced the same selection. Three-item
+  DPR-1 main galleries and sufficiently wide shared grids cross analogous
+  640w/1536w boundaries. The selected pixel area can be roughly 5.8 times
+  larger without visible-detail benefit.
+- Fix: generate server-emittable source sizes from Tailwind's capped container
+  widths, accumulated horizontal padding, column gaps, and effective columns.
+  Reuse the policy for main, archive/year, and the nested shared-group variant;
+  do not wait for hydration to downgrade an already-started resource.
 
-### C7-03 — Cycle 6 remains active and “signed release pending” after publication
+### C8-02 — Browser coverage samples only candidate-equivalent ultrawide shapes
+
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed test-design gap with independent Chromium counterexamples**
+- Agreement: critic, verifier, test-engineer, debugger, document-specialist,
+  designer
+- Regions: `apps/web/e2e/responsive-masonry.spec.ts:4-133`;
+  `apps/web/src/__tests__/responsive-masonry.test.ts:11-77`;
+  `apps/web/scripts/seed-e2e.ts:31-82,250-304`
+- Failure: the only 2,560 px main case has two 744 px cards at DPR 2, where
+  both accurate and inflated hints legitimately select the maximum 1536w
+  candidate. Archive coverage stops at 1,536 px, and shared coverage stops at
+  1,280 px. Unit tests lock the faulty literal viewport strings. Thus all 34
+  focused tests pass while a three-item 2,560/DPR-1 main grid, five-column
+  2,560/DPR-2 archive grid, and sufficiently wide shared grid each expose a
+  1536w-versus-640w mismatch.
+- Fix: retain the existing two-item geometry cases, seed/filter an independent
+  normal or three-item main shape, and add exact post-cap `currentSrc`, card
+  width, column, and `sizes` assertions for main/archive and shared variants.
+  Unit expectations must lock the capped container policy rather than the old
+  viewport fractions.
+
+### C8-03 — `MasonryCard` comments describe the removed viewport-width bucket
 
 - Severity / confidence: **Low / High**
-- Status: **Confirmed signed push and live policy; exact deployed SHA remains manual-validation**
+- Status: **Confirmed source-documentation drift; no current runtime failure**
+- Agreement: code-reviewer, document-specialist
+- Regions: `apps/web/src/components/masonry-card.tsx:16-25,176-185`;
+  replacement ownership at `apps/web/src/components/home-client.tsx:69-105,
+  257-273`
+- Failure: the nearest prop contract still says `estimatedCardWidth` changes
+  with a viewport bucket and implies a width-bucket change may bail out. Cycle
+  7 removed that state: a shared `ResizeObserver` owns a container-width
+  bucket, and any changed numeric width prop intentionally re-renders all
+  existing cards. A maintainer following the stale contract can regress to
+  window-only invalidation or expect a shallow-comparison bailout that cannot
+  occur.
+- Fix: name the observed container-width bucket and state the real memo
+  invariant: unchanged bucket observations and unrelated parent state bail
+  out; changed `estimatedCardWidth` intentionally re-renders cards.
+
+### C8-04 — Cycle 7's active ledger contradicts its signed remote publication
+
+- Severity / confidence: **Low / High**
+- Status: **Confirmed repository-state mismatch; exact deployed SHA remains
+  manual-validation**
 - Agreement: code-reviewer, critic, verifier, tracer, architect, debugger,
   document-specialist
-- Regions: `.context/plans/cycle-6-2026-07-18-plan.md:3-5,43-45,65-73`;
-  `.context/plans/README.md:34-40`; commits `fcbce386`, `03a96a3d`,
-  `ec7fc46f`
-- Failure: all three commits have good GPG signatures and
-  `master == origin/master == ec7fc46f`; production exposes the Cycle 6
-  responsive policy. The authoritative plan nevertheless leaves signed push
-  and deploy unchecked and remains active, so recovery can repeat terminal
-  work or select the wrong frontier.
-- Fix: reconcile observable signed-push and production-policy evidence without
-  claiming an unavailable exact deployed SHA, archive Cycle 6, and advance the
-  plan index. A future terminal-reconciliation artifact could avoid repeating
-  this one-cycle-late bookkeeping pattern.
+- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:3-5,35-50,58-66,
+  73-93`; `.context/plans/README.md:34-40`; commits `498e5122`, `90a3bc07`,
+  `ff8c5f48`
+- Failure: all three Cycle 7 commits have good GPG signatures and
+  `master == origin/master == ff8c5f48`, but the authoritative plan still says
+  signed release pending, leaves publication/deploy unchecked, and overstates
+  its 2,560 px proof as matching source-size hints when it proved intrinsic
+  geometry only. Recovery can repeat terminal work or select the wrong
+  frontier. The review did not establish an exact deployed SHA, so that state
+  must not be invented.
+- Fix: qualify the Cycle 7 validation as intrinsic-geometry coverage, record
+  observable signature/remote equality, archive the plan, and advance the
+  index. Record deploy evidence only when independently available; document a
+  terminal reconciliation convention so the same drift is not silently
+  reconstructed.
 
 ## Revalidated carry-forward findings
 
@@ -102,19 +132,20 @@ reviewer reported zero new security issues.
 ## Baseline evidence and final sweep
 
 Fresh review baselines passed ESLint, API-auth lint, action-origin/mutation-
-barrier lint, public-route-rate-limit lint, typecheck, production dependency
-audit (zero vulnerabilities), full Vitest (362 files passed, 2 skipped; 3,421
-tests passed, 4 expected skips), and `git diff --check` before review artifacts
-were updated. Prompt 3 must still run every configured gate, including build
-and full Playwright because browser-flow coverage is required.
+barrier lint, public-route-rate-limit lint, production dependency audit, 34/34
+focused responsive tests, and `git diff --check`. Independent Chromium proofs
+and the live designer pass confirmed the source-candidate mismatch rather than
+trusting the current tests. Prompt 3 must still run every configured gate,
+including build, full Vitest, and full Playwright because browser-flow coverage
+is required.
 
 The final aggregate sweep rechecked responsive siblings, memo invalidation,
 route/action guards, privacy projections, migration/journal/reconcile,
 upload/delete/restore races, background consumers, caches, PWA/build/runtime
-configuration, deploy scripts, tests, and release ledgers. No fourth fresh
-finding survived validation.
+configuration, deploy scripts, tests, design states, and release ledgers. No
+fifth fresh finding survived validation.
 
 ## AGENT FAILURES
 
-None. The initial product-review launch was rejected by the global thread
-limit; its required retry completed independent validation of all five files.
+None. One initial worker launch was rejected by the global thread limit; the
+required retry completed all assigned provenance files.

@@ -1,31 +1,31 @@
-# Tracer — Cycle 7 Provenance
+# Tracer — Cycle 8 Provenance
 
-Review target: `ec7fc46f`; review only.
+Review target: `ff8c5f48`; review only.
 
 ## Inventory and causal traces
 
-I inventoried the full maintained source/test/runtime surface and traced request admission, DB/file lifecycles, queue/restore interactions, responsive rendering, cache/PWA behavior, and release promotion across file boundaries. Fresh lint/security-lint/typecheck/audit/full-unit gates passed.
+I inventoried all 671 maintained TS/JS files, 31 migrations plus journal/reconcile, route/action surfaces, tests, runtime/build/deploy assets, and the governing docs before tracing request admission, DB/file ownership, queue/restore interactions, responsive rendering, image selection, cache/PWA behavior, and release promotion. Historical findings were checked at HEAD and omitted when fixed or already represented in the carry-forward register. Focused responsive tests passed 34/34; standalone Chromium at 2,560 px/DPR 1 selected 1536w for `33vw` and 640w for `491px` against the same candidate pair.
 
-### TRC-C7-01 — Sparse width trace crosses coordinate systems above 1,536 px
+### TRC-C8-01 — Container geometry and source selection split after the Cycle 7 fix
 
 - Severity / confidence: **Medium / High**
-- Classification: **Confirmed causal mismatch; visible shift manual-validation**
-- Regions: `home-client.tsx:21-79,231-249` -> `app/[locale]/(public)/layout.tsx:17-19` -> `masonry-card.tsx:58-77` -> `globals.css:231-235`; coverage at `e2e/responsive-masonry.spec.ts:11-49`
-- Trace: viewport 2,560 -> width bucket 2,544 -> raw breakpoint count 5 -> two items cap effective count to 2 -> estimator computes 1,264 px -> public Tailwind container caps at 1,536 and `px-4` leaves 1,504 px -> real two-column card is about 744 px -> `MasonryCard` converts both widths through the same aspect ratio -> `contain-intrinsic-size` is about 1.70x real height -> `content-visibility:auto` uses the oversized stand-in when skipped.
-- Concrete failure: a deferred sparse card collapses its virtual height when activated, altering scroll/layout geometry. The 1,536 px E2E observes the one point where the two coordinate systems nearly match and therefore passes.
-- Suggested fix: feed observed grid content width, not viewport width, into the shared effective-column calculation; add an above-cap browser case.
+- Status: **Confirmed end-to-end selection trace; byte delta manual-validation**
+- Regions: `lib/responsive-masonry.ts:1-7,37-54` -> `components/home-client.tsx:257-273,349-359` -> `components/masonry-card.tsx:91-110` -> `app/[locale]/(public)/layout.tsx:17-20`; coverage at `e2e/responsive-masonry.spec.ts:8-55`
+- Trace: 2,560 px viewport, DPR 1 -> Tailwind parent caps at 1,536 px -> `px-4` leaves about 1,504 px -> three item-capped columns and two 16 px gaps render about 491 px per card -> the new observer correctly feeds about 491 px into intrinsic geometry -> `getMainMasonrySizes(3)` separately emits `33vw` -> browser evaluates about 845 px -> the card's 640w/1536w `srcset` advances to 1536w instead of sufficient 640w.
+- Concrete failure: an ultrawide desktop visitor opening a three-photo topic/filter result downloads the large thumbnail candidate for every card even though the rendered slots fit the small candidate.
+- Fix: derive the `2xl` `sizes` branch from the capped container geometry, and cover three items at 2,560 px/DPR 1. Keep the current two-photo/DPR-2 test for its distinct geometry invariant.
 
-Cycle 6's optional `ResizeObserver` suggestion was not implemented or tracked as a confirmed finding. The item-capped divisor now makes the above-cap branch a concrete current regression rather than a duplicate of the fixed five-column under-reservation.
+This is not the fixed Cycle 5 missing-five-column issue: five-column declarations now exist. It is the remaining max-container boundary revealed by Cycle 7's measured-width ownership.
 
-### TRC-C7-02 — Cycle 6 terminal state stops before its published HEAD
+### TRC-C8-02 — Cycle 7's trace terminates at implementation while Git continues through publication
 
 - Severity / confidence: **Low / High**
-- Classification: **Confirmed signed-push mismatch; deploy SHA manual-validation**
-- Regions: `.context/plans/cycle-6-2026-07-18-plan.md:3-5,43-45,65-73`; `.context/plans/README.md:34-41`; commits `fcbce386`, `03a96a3d`, `ec7fc46f`
-- Trace: implementation/test/docs commits are all GPG-good -> `master == origin/master == ec7fc46f` -> plan still says signed release pending and leaves push/deploy unchecked -> index keeps Cycle 6 active.
-- Concrete failure: recovery can repeat publication/deploy work or start from an obsolete frontier.
-- Suggested fix: reconcile signatures and remote equality, record only observable deploy evidence, archive Cycle 6, and advance the index.
+- Status: **Confirmed signed-push mismatch; deploy identity manual-validation**
+- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:3-5,48-50,73-82`; `.context/plans/README.md:34-40`; signed commits `498e5122`, `90a3bc07`, `ff8c5f48`
+- Trace: source fix committed with a good signature -> tests committed with a good signature -> review/plan committed with a good signature -> local and remote refs both equal `ff8c5f48` -> active ledger still says signed release pending and leaves publication unchecked.
+- Concrete failure: recovery replays a completed push/deploy step or treats `ec7fc46f` as the current boundary.
+- Fix: reconcile remote/signature evidence, qualify deploy evidence honestly, archive Cycle 7, and move the active frontier.
 
 ## Final missed-issue sweep
 
-I traced the competing explanations for the wide mismatch (breakpoint drift, source `sizes`, bad aspect ratio, stale deployment, and bucket rounding); none explains the deterministic container/viewport divergence. I also re-traced auth/rate-limit admission, upload-delete-restore ordering, background jobs, migration promotion, cache invalidation, and release state. No third new trace survived.
+I retraced alternative explanations for the image candidate (DPR, gap rounding, width bucketing, image-size configuration, and browser fallback). The 640w-to-1536w transition remains deterministic for the default ladder at DPR 1. Auth, restore, queue, migration, cache, and cleanup traces produced no additional non-duplicate finding.
