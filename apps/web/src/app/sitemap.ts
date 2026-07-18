@@ -1,15 +1,12 @@
 import { getImageIdsForSitemap, getLatestImageUpdatedAt, getTopicsWithLatestUpdate } from '@/lib/data';
 import { MetadataRoute } from 'next';
+import { unstable_cache } from 'next/cache';
 
-// AGG8F-02 / plan-234: drop `force-dynamic` so the existing `revalidate = 3600`
-// actually takes effect. The previous combination silently disabled the
-// revalidate value (force-dynamic overrides it), leaving every crawler hit to
-// rerun the full sitemap query against the live DB. ISR with hourly
-// revalidation keeps freshness within the bound expected by Googlebot for
-// content this stable and protects the DB from sustained crawler bursts.
-// Image lastModified comes from persisted row timestamps, not request time, so
-// cached responses do not lie about freshness.
-export const revalidate = 3600;
+// C2-01: the production image build intentionally has no DB access. Keep the
+// route itself dynamic so that build cannot seal its fallback response into a
+// fresh ISR artifact. The successful DB payload is cached separately below for
+// one hour; failed loads throw before unstable_cache can persist a value.
+export const dynamic = 'force-dynamic';
 
 import siteConfig from "@/site-config.json";
 import { LOCALES } from '@/lib/constants';
@@ -33,49 +30,44 @@ function getStaticPublicPaths(config: { showTimelineNav: boolean; showMapNav: bo
   ] as const;
 }
 
+const getCachedSitemapData = unstable_cache(async () => {
+  const [topics, homepageLastModified, galleryConfig] = await Promise.all([
+    getTopicsWithLatestUpdate(),
+    getLatestImageUpdatedAt(),
+    getGalleryConfig(),
+  ]);
+  const staticPublicPaths = getStaticPublicPaths(galleryConfig);
+  const reservedNonImageUrls =
+    LOCALES.length * (1 + staticPublicPaths.length + topics.length) + 1 + LOCALES.length * topics.length;
+  const imageBudget = Math.max(
+    0,
+    Math.floor((MAX_SITEMAP_URLS - reservedNonImageUrls) / LOCALES.length),
+  );
+  const images = imageBudget > 0 ? await getImageIdsForSitemap(imageBudget) : [];
+
+  return { topics, homepageLastModified, staticPublicPaths, images };
+}, ['public-sitemap-data-v1'], { revalidate: 3600 });
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  // AGG8F-02 / plan-234 follow-up: when this route is prerendered at build
-  // time the DB is intentionally not reachable (Docker build stage has no DB
-  // network). Tolerate that failure and emit a minimal homepage-only sitemap;
-  // ISR will replace it with the real one on the first runtime hit. We do
-  // not swallow runtime errors silently — at runtime a DB outage already
-  // surfaces via /api/health and observability, so the same fallback there
-  // is preferable to a 5xx on /sitemap.xml that would teach crawlers to back off.
+  // Runtime DB outages still return a bounded discovery fallback rather than a
+  // 5xx. Because getCachedSitemapData caches only successful resolutions, this
+  // fallback never becomes the one-hour cached truth.
   let topics: Awaited<ReturnType<typeof getTopicsWithLatestUpdate>> = [];
   let images: Awaited<ReturnType<typeof getImageIdsForSitemap>> = [];
   let staticPublicPaths = getStaticPublicPaths({ showTimelineNav: true, showMapNav: true });
   // R18-M1: site-wide `MAX(images.updated_at)` for the homepage entries'
   // `<lastmod>`. Googlebot uses lastmod as a published crawl-prioritization
-  // signal ("We use lastmod to detect fresh content"). Cached via the route's
-  // `revalidate = 3600` ISR window.
+  // signal ("We use lastmod to detect fresh content"). Cached with the
+  // successful sitemap data payload for 3,600 seconds.
   let homepageLastModified: Date | null = null;
   try {
-    const [resolvedTopics, resolvedHomepageLastModified, galleryConfig] = await Promise.all([
-      getTopicsWithLatestUpdate(),
-      getLatestImageUpdatedAt(),
-      getGalleryConfig(),
-    ]);
-    topics = resolvedTopics;
-    homepageLastModified = resolvedHomepageLastModified;
-    staticPublicPaths = getStaticPublicPaths(galleryConfig);
-    // WP18 (C2-29/CRIT-02, run-10 cycle-2): reserve budget for EVERY non-image
-    // row appended below, not just homepage + topic pages. homepageEntries +
-    // staticPublicEntries + topicEntries reserve
-    // `LOCALES.length * (1 + STATIC_PUBLIC_PATHS.length + topics.length)`;
-    // feedEntry is a single global (non-localized) URL (+1);
-    // topicFeedEntries reserves one localized row per topic
-    // (`LOCALES.length * topics.length`). Previously only the first term was
-    // reserved, so feedEntry and topicFeedEntries could push the total past
-    // MAX_SITEMAP_URLS uncounted.
-    const reservedNonImageUrls =
-      LOCALES.length * (1 + staticPublicPaths.length + topics.length) + 1 + LOCALES.length * topics.length;
-    const imageBudget = Math.max(
-      0,
-      Math.floor((MAX_SITEMAP_URLS - reservedNonImageUrls) / LOCALES.length),
-    );
-    images = imageBudget > 0 ? await getImageIdsForSitemap(imageBudget) : [];
+    const resolved = await getCachedSitemapData();
+    topics = resolved.topics;
+    homepageLastModified = resolved.homepageLastModified;
+    staticPublicPaths = resolved.staticPublicPaths;
+    images = resolved.images;
   } catch (err) {
-    console.warn('[sitemap] falling back to homepage-only sitemap:', err);
+    console.warn('[sitemap] data unavailable; returning static discovery fallback:', err);
     topics = [];
     images = [];
     homepageLastModified = null;

@@ -20,6 +20,9 @@ const galleryConfigMocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/data', () => dataMocks);
 vi.mock('@/lib/gallery-config', () => galleryConfigMocks);
+vi.mock('next/cache', () => ({
+    unstable_cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
+}));
 
 import sitemap from '@/app/sitemap';
 import robots from '@/app/robots';
@@ -103,6 +106,21 @@ describe('sitemap route', () => {
             `${TEST_BASE_URL}/feed.xml`,
         ]);
         expect(dataMocks.getImageIdsForSitemap).not.toHaveBeenCalled();
+    });
+});
+
+describe('sitemap cache ownership', () => {
+    it('keeps the route dynamic and caches only the successful data loader', async () => {
+        const source = await import('node:fs/promises').then(({ readFile }) =>
+            readFile(new URL('../app/sitemap.ts', import.meta.url), 'utf8'),
+        );
+
+        expect(source).toContain("export const dynamic = 'force-dynamic'");
+        expect(source).not.toMatch(/export const revalidate\s*=/);
+        expect(source).toContain('const getCachedSitemapData = unstable_cache(async () => {');
+        expect(source).toContain("['public-sitemap-data-v1'], { revalidate: 3600 }");
+        expect(source.indexOf('const getCachedSitemapData')).toBeLessThan(source.indexOf('try {'));
+        expect(source.indexOf('try {')).toBeLessThan(source.indexOf('await getCachedSitemapData()'));
     });
 });
 
