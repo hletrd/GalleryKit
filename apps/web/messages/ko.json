@@ -787,7 +787,7 @@
     "forceShowColorChips": "색상 칩 강제 표시",
     "forceShowColorChipsHint": "켜면 방문자에게 P3 색역 배지가 모든 디스플레이에서 표시됩니다. 관리자에게는 비 HDR 디스플레이에서도 HDR 감사 배지가 표시되지만, 공개 HDR 배지는 HDR 전달을 지원하기 전까지 숨겨집니다.",
     "navigationTitle": "내비게이션",
-    "navigationDesc": "내비게이션 바 링크 표시 여부.",
+    "navigationDesc": "내비게이션 바, 푸터, 사이트맵의 링크를 설정합니다. 숨겨도 해당 URL로 직접 접근할 수 있습니다.",
     "showTimelineNav": "타임라인 링크 표시",
     "showMapNav": "지도 링크 표시",
     "firefoxDisplayGapNote": "Firefox 디스플레이 감지 제한",

@@ -787,7 +787,7 @@
     "forceShowColorChips": "Force Show Color Chips",
     "forceShowColorChipsHint": "When ON, P3 gamut badges are shown to visitors on all displays. For admins, HDR audit badges are also shown on non-HDR displays; public HDR badges stay hidden until HDR delivery is supported.",
     "navigationTitle": "Navigation",
-    "navigationDesc": "Show or hide nav-bar links.",
+    "navigationDesc": "Controls links in the nav bar, footer, and sitemap. Hidden routes remain directly accessible by URL.",
     "showTimelineNav": "Show Timeline link",
     "showMapNav": "Show Map link",
     "firefoxDisplayGapNote": "Firefox display detection gap",
