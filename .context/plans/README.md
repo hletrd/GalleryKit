@@ -33,13 +33,6 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Cycle 13/100 (2026-07-18) Implementation Plan - unify archive-year domain,
-  make maximum-year ranges representable, reject unavailable timeline
-  selections, restore covering capture-year discovery, update index docs,
-  reconcile the Cycle 12 ledger, run full gates, signed push, and deploy
-  (`cycle-13-2026-07-18-plan.md`)
-- Cycle 13/100 Deferred Reconciliation - no new deferrals; every Cycle 13
-  finding is scheduled (`cycle-13-2026-07-18-deferred.md`)
 - Run-10 Cycle 38/100 Implementation Plan - recovery ledger after Cycle 38 subagent usage-limit failure: preserve partial reviews, finish aggregate/deferred register, center remaining admin pages, clarify analytics/GPS docs, close default raw-input touch-target scanner gap, run full gates, signed push, and per-cycle deploy (`run10-cycle38/plan.md`)
 - Run-10 Cycle 38/100 Deferred Findings - Cycle 38 deferred architecture/topology/performance/operator/test items with preserved severity/confidence and exit criteria (`run10-cycle38/deferred.md`)
 
@@ -52,6 +45,12 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Cycle 13/100 (2026-07-18) Implementation Plan - completed one canonical
+  1000..9999 archive-year domain, representable maximum-year ranges,
+  authoritative unavailable-year fallback, covering capture-year discovery,
+  truthful index docs, full gates, signed publication through `6e007e40`, and
+  a verified successful per-cycle deploy on 2026-07-18
+  (`archive/cycle-13-2026-07-18-plan.md`)
 - Cycle 12/100 (2026-07-18) Implementation Plan - completed real prior-cursor
   migration convergence, generated-column/index repair, indexed timeline-year
   schema, executable MySQL date semantics, and full gates; four GPG-good commits
