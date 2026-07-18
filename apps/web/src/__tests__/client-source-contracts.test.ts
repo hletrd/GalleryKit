@@ -70,6 +70,9 @@ describe('client component source contracts', () => {
 
   it('moves keyboard focus into expanded mobile nav and restores it on Escape', () => {
     const code = source('components/nav-client.tsx');
+    expect(code).toContain('const previousPathnameRef = useRef(pathname)');
+    expect(code).toContain('if (previousPathnameRef.current === pathname) return');
+    expect(code).toContain('previousPathnameRef.current = pathname');
     expect(code).toContain('keyboardExpansionPendingRef.current = willExpand && event.detail === 0');
     expect(code).toContain("querySelector<HTMLAnchorElement>('a')?.focus()");
     expect(code).toContain("if (event.key !== 'Escape' || !isExpanded) return");

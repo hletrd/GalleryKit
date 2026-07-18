@@ -44,6 +44,7 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     const topicsPanelRef = useRef<HTMLDivElement>(null);
     const menuToggleRef = useRef<HTMLButtonElement>(null);
     const keyboardExpansionPendingRef = useRef(false);
+    const previousPathnameRef = useRef(pathname);
     const currentTheme = (mounted ? (theme ?? 'system') : 'system') as StoredTheme;
     const nextThemeValue = nextTheme(currentTheme);
     const browseLinks = [
@@ -73,6 +74,8 @@ export function NavClient({ topics, navTitle, imageSizes, semanticSearchMode = '
     }, []);
 
     useEffect(() => {
+        if (previousPathnameRef.current === pathname) return;
+        previousPathnameRef.current = pathname;
         const frame = requestAnimationFrame(() => setIsExpanded(false));
         return () => cancelAnimationFrame(frame);
     }, [pathname]);
