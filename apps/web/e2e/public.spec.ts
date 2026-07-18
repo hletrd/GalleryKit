@@ -30,6 +30,16 @@ test('search dialog autofocuses, traps focus, and restores focus on close', asyn
   await expect(dialog).toBeVisible();
   const searchInput = dialog.locator('#search-input');
   await expect(searchInput).toBeFocused();
+  await expect(searchInput).toHaveAttribute('aria-expanded', 'false');
+
+  await searchInput.fill('E2E Smoke');
+  await expect(dialog.getByRole('listbox')).toBeVisible();
+  await expect(searchInput).toHaveAttribute('aria-expanded', 'true');
+
+  await searchInput.fill('zzzz-no-e2e-results');
+  await expect(dialog.getByText('No results')).toBeVisible();
+  await expect(dialog.getByRole('listbox')).toHaveCount(0);
+  await expect(searchInput).toHaveAttribute('aria-expanded', 'false');
 
   await page.keyboard.press('Tab');
   await expect.poll(async () => dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);

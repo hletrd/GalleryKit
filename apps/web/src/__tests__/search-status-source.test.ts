@@ -33,8 +33,10 @@ describe('search dialog status ownership', () => {
         expect(SOURCE).toContain('aria-describedby={hasDisplayedResults ?');
         expect(SOURCE).toContain("aria-controls={hasDisplayedResults ? 'search-results' : undefined}");
         expect(SOURCE).not.toContain("aria-controls={hasDisplayedResults ? 'search-results' : 'search-dialog'}");
+        const comboboxOpening = SOURCE.slice(SOURCE.indexOf('<Input'), SOURCE.indexOf('<Input') + 900);
+        expect(comboboxOpening).toContain('aria-expanded={hasDisplayedResults}');
+        // The separate trigger correctly keeps dialog expansion semantics.
         expect(SOURCE).toContain('aria-expanded={isOpen}');
-        expect(SOURCE).not.toContain('aria-expanded={hasDisplayedResults}');
         expect(SOURCE).toContain('{hasDisplayedResults ? (');
         expect(SOURCE).toContain(') : trimmedQuery ? (');
     });

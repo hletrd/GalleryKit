@@ -449,7 +449,7 @@ export function Search({ previewImageSizes = DEFAULT_IMAGE_SIZES, semanticSearch
                             role="combobox"
                             aria-autocomplete="list"
                             aria-controls={hasDisplayedResults ? 'search-results' : undefined}
-                            aria-expanded={isOpen}
+                            aria-expanded={hasDisplayedResults}
                             aria-activedescendant={activeIndex >= 0 && results[activeIndex] ? `search-result-${activeIndex}` : undefined}
                             value={query}
                             onChange={(e) => handleQueryChange(e.target.value)}
