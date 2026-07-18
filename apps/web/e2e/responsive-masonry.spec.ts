@@ -1,12 +1,18 @@
 import { expect, test } from '@playwright/test';
 import { expectNoNextError } from './helpers';
 
-const ARCHIVE_SIZES = '(min-width: 1536px) 20vw, (min-width: 1280px) 25vw, '
-  + '(min-width: 768px) 33vw, (min-width: 640px) 50vw, 100vw';
-const SHARED_GROUP_SIZES = '(min-width: 1280px) 25vw, (min-width: 1024px) 33vw, '
-  + '(min-width: 768px) 50vw, 100vw';
-const TWO_ITEM_MAIN_SIZES = '(min-width: 1536px) 50vw, (min-width: 1280px) 50vw, '
-  + '(min-width: 768px) 50vw, (min-width: 640px) 50vw, 100vw';
+const ARCHIVE_SIZES = '(min-width: 1536px) 288px, (min-width: 1280px) 300px, '
+  + '(min-width: 1024px) 320px, (min-width: 768px) 234px, '
+  + '(min-width: 640px) 296px, calc(100vw - 32px)';
+const SHARED_GROUP_SIZES = '(min-width: 1536px) 356px, (min-width: 1280px) 292px, '
+  + '(min-width: 1024px) 309px, (min-width: 768px) 344px, '
+  + '(min-width: 640px) 576px, calc(100vw - 64px)';
+const TWO_ITEM_MAIN_SIZES = '(min-width: 1536px) 744px, (min-width: 1280px) 616px, '
+  + '(min-width: 1024px) 488px, (min-width: 768px) 360px, '
+  + '(min-width: 640px) 296px, calc(100vw - 32px)';
+const THREE_ITEM_MAIN_SIZES = '(min-width: 1536px) 490px, (min-width: 1280px) 405px, '
+  + '(min-width: 1024px) 320px, (min-width: 768px) 234px, '
+  + '(min-width: 640px) 296px, calc(100vw - 32px)';
 
 for (const boundary of [
   { width: 320, columns: '1', candidate: 640 },
@@ -20,7 +26,7 @@ for (const boundary of [
     });
 
     test('shares item-capped columns across sources and intrinsic geometry', async ({ page }) => {
-      await page.goto('/en/e2e-smoke');
+      await page.goto('/en/e2e-smoke?tags=sparse');
       await expectNoNextError(page);
 
       const picture = page.locator('picture[data-grid-picture]').first();
@@ -54,11 +60,48 @@ for (const boundary of [
   });
 }
 
+test.describe('normal main-gallery masonry above the container cap', () => {
+  test.use({
+    viewport: { width: 2560, height: 900 },
+    deviceScaleFactor: 1,
+  });
+
+  test('selects the 640w candidate for three real 491px slots', async ({ page }) => {
+    await page.goto('/en/e2e-smoke');
+    await expectNoNextError(page);
+
+    const picture = page.locator('picture[data-grid-picture]').first();
+    await expect(picture).toBeVisible();
+    const state = await picture.evaluate(async (node) => {
+      const grid = node.closest<HTMLElement>('.columns-1');
+      const card = node.closest<HTMLElement>('.masonry-card');
+      const image = node.querySelector<HTMLImageElement>('img');
+      const source = node.querySelector<HTMLSourceElement>('source');
+      if (!grid || !card || !image || !source) throw new Error('Missing normal main masonry structure');
+      await image.decode();
+      return {
+        columns: getComputedStyle(grid).columnCount,
+        gridWidth: grid.getBoundingClientRect().width,
+        cardWidth: card.getBoundingClientRect().width,
+        sizes: source.sizes,
+        currentSrc: image.currentSrc,
+      };
+    });
+
+    expect(state.columns).toBe('3');
+    expect(state.gridWidth).toBeCloseTo(1504, 0);
+    expect(state.cardWidth).toBeCloseTo(491, 0);
+    expect(state.sizes).toBe(THREE_ITEM_MAIN_SIZES);
+    expect(state.currentSrc).toMatch(/_640\.(?:avif|webp|jpg)$/);
+  });
+});
+
 for (const boundary of [
-  { width: 640, columns: '2' },
+  { width: 640, columns: '2', candidate: 640 },
   { width: 768, columns: '3', candidate: 640 },
-  { width: 1280, columns: '4' },
-  { width: 1536, columns: '5' },
+  { width: 1280, columns: '4', candidate: 640 },
+  { width: 1536, columns: '5', candidate: 640 },
+  { width: 2560, columns: '5', candidate: 640 },
 ] as const) {
   test.describe(`archive masonry at ${boundary.width}px`, () => {
     test.use({
@@ -74,12 +117,15 @@ for (const boundary of [
       await expect(picture).toBeVisible();
       const state = await picture.evaluate(async (node) => {
         const grid = node.closest<HTMLElement>('.columns-1');
+        const card = node.closest<HTMLElement>('.break-inside-avoid');
         const image = node.querySelector<HTMLImageElement>('img');
         const source = node.querySelector<HTMLSourceElement>('source');
-        if (!grid || !image || !source) throw new Error('Missing archive masonry structure');
+        if (!grid || !card || !image || !source) throw new Error('Missing archive masonry structure');
         await image.decode();
         return {
           columns: getComputedStyle(grid).columnCount,
+          gridWidth: grid.getBoundingClientRect().width,
+          cardWidth: card.getBoundingClientRect().width,
           sizes: source.sizes,
           currentSrc: image.currentSrc,
         };
@@ -87,17 +133,17 @@ for (const boundary of [
 
       expect(state.columns).toBe(boundary.columns);
       expect(state.sizes).toBe(ARCHIVE_SIZES);
-      if ('candidate' in boundary) {
-        expect(state.currentSrc).toMatch(new RegExp(`_${boundary.candidate}\\.(?:avif|webp|jpg)$`));
+      expect(state.currentSrc).toMatch(new RegExp(`_${boundary.candidate}\\.(?:avif|webp|jpg)$`));
+      if (boundary.width === 2560) {
+        expect(state.gridWidth).toBeCloseTo(1504, 0);
+        expect(state.cardWidth).toBeCloseTo(288, 0);
       }
     });
   });
 }
 
 for (const boundary of [
-  // 33vw at DPR 2 is wider than the 640w candidate, so the coarse seeded
-  // ladder correctly selects 1536w even though the slot policy is aligned.
-  { width: 1024, columns: '3', candidate: 1536 },
+  { width: 1024, columns: '3', candidate: 640 },
   { width: 1280, columns: '4', candidate: 640 },
 ] as const) {
   test.describe(`shared-group masonry at ${boundary.width}px`, () => {
@@ -131,3 +177,39 @@ for (const boundary of [
     });
   });
 }
+
+test.describe('shared-group masonry above the outer container cap', () => {
+  test.use({
+    viewport: { width: 2700, height: 900 },
+    deviceScaleFactor: 1,
+  });
+
+  test('selects the 640w candidate for nested-container slots', async ({ page }) => {
+    await page.goto('/g/Abc234Def5');
+    await expectNoNextError(page);
+
+    const picture = page.locator('picture[data-grid-picture]').first();
+    await expect(picture).toBeVisible();
+    const state = await picture.evaluate(async (node) => {
+      const grid = node.closest<HTMLElement>('.columns-1');
+      const card = node.closest<HTMLElement>('a');
+      const image = node.querySelector<HTMLImageElement>('img');
+      const source = node.querySelector<HTMLSourceElement>('source');
+      if (!grid || !card || !image || !source) throw new Error('Missing capped shared masonry structure');
+      await image.decode();
+      return {
+        columns: getComputedStyle(grid).columnCount,
+        gridWidth: grid.getBoundingClientRect().width,
+        cardWidth: card.getBoundingClientRect().width,
+        sizes: source.sizes,
+        currentSrc: image.currentSrc,
+      };
+    });
+
+    expect(state.columns).toBe('4');
+    expect(state.gridWidth).toBeCloseTo(1472, 0);
+    expect(state.cardWidth).toBeCloseTo(356, 0);
+    expect(state.sizes).toBe(SHARED_GROUP_SIZES);
+    expect(state.currentSrc).toMatch(/_640\.(?:avif|webp|jpg)$/);
+  });
+});

@@ -64,7 +64,7 @@ const seedImages: SeedImage[] = [
     height: 900,
     createdAt: '2025-01-01 09:00:00',
     captureDate: '2025-01-01 08:00:00',
-    tagNames: ['e2e', 'landscape'],
+    tagNames: ['e2e', 'landscape', 'sparse'],
   },
   {
     key: 'e2e-portrait',
@@ -74,7 +74,17 @@ const seedImages: SeedImage[] = [
     height: 1400,
     createdAt: '2025-01-02 09:00:00',
     captureDate: '2025-01-02 08:00:00',
-    tagNames: ['e2e', 'portrait'],
+    tagNames: ['e2e', 'portrait', 'sparse'],
+  },
+  {
+    key: 'e2e-square',
+    title: 'E2E Square',
+    description: 'Seeded square image for normal-grid Playwright validation',
+    width: 1200,
+    height: 1200,
+    createdAt: '2025-01-03 09:00:00',
+    captureDate: '2025-01-03 08:00:00',
+    tagNames: ['e2e', 'square'],
   },
 ];
 
@@ -189,7 +199,7 @@ async function main() {
 
   const dirs = getUploadDirs();
   const allowedSeedBases = new Set(seedImages.map((image) => image.key));
-  const seedFileNameRe = /^(?<base>e2e-(?:landscape|portrait))(?:_\d+)?\.(?:jpe?g|webp|avif)$/;
+  const seedFileNameRe = /^(?<base>e2e-(?:landscape|portrait|square))(?:_\d+)?\.(?:jpe?g|webp|avif)$/;
   function safeSeedFile(dir: string, filename: string): string | null {
     const match = seedFileNameRe.exec(filename);
     const base = match?.groups?.base;
@@ -249,7 +259,8 @@ async function main() {
     }
 
     const tagIds = new Map<string, number>();
-    for (const name of ['e2e', 'landscape', 'portrait']) {
+    const seedTagNames = [...new Set(seedImages.flatMap((image) => image.tagNames))];
+    for (const name of seedTagNames) {
       const slug = name;
       await db.insert(tags).values({ name, slug }).onDuplicateKeyUpdate({ set: { name } });
       const [tag] = await db.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug)).limit(1);
