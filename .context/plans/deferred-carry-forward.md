@@ -16,6 +16,14 @@ fast/irregular, so ages for items first deferred before c96 use a compressed sca
 The RELATIVE ordering is load-bearing (an item first deferred at c80 MUST read older than
 one first deferred at c88); the absolute magnitude is a fuzzy estimate, not an exact count.
 
+**Cycle 9/100 closure check (2026-07-18):** `C6-24` is removed from the open
+table. Its explicit “real duplicated-cache staleness bug” exit criterion fired:
+COR-C9-01 proved that a pre-invalidation detached gallery-config read could
+republish stale settings and clear a newer in-flight owner. Cycle 9 schedules
+and implements generation- plus promise-identity-safe invalidation in
+`.context/plans/cycle-9-2026-07-18-plan.md`. No other carry-forward row or age
+is changed by this focused closure, and Cycle 9 adds no new deferred finding.
+
 **Age-budget check (run-10 c31):** Cycle 31 schedules all three newly confirmed findings in `.context/plans/run10-cycle31/plan.md`: stale active-cycle index state, stale Cycle 30 / loop-B Cycle 10b terminal-status wording, and the carry-forward checkpoint label drift. No Cycle 31 finding is deferred. The table already includes the newer loop-B D10b rows with preserved severity/confidence and short exit criteria; Cycle 31 updates the checkpoint labels so the register no longer appears frozen at Cycle 29. No open High-severity row newly crosses the 8-cycle budget without an existing architecture/operator/test-infra deferral rationale; Medium checkpoint handling remains bound to each row's home register.
 
 **Previous check (run-10 c26):** direct restore-maintenance correctness findings
@@ -196,7 +204,6 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C6-21 | LOW-MED/Med | cycle-6-2026-07-07 | r10c6 | 7 | Many-small-file / high-DB-latency perceived upload lag, OR next upload-flow perf cycle (client batching; sequential constraint is C4-10) |
 | C6-22 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 7 | Observed brute-force at restart-near-window-boundary, OR rate-limit algorithm unification |
 | C6-23 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 7 | Observed concurrent-migrate ER_DUP_KEYNAME/half-reconcile, OR migration-machinery hardening cycle |
-| C6-24 | LOW/High | cycle-6-2026-07-07 | r10c6 | 7 | Real duplicated-cache staleness bug, OR a config-cache refactor adopting one documented rule |
 | C6-25 | LOW-MED/High | cycle-6-2026-07-07 | r10c6 | 7 | Peer cycle-10 closes AGG-C10-19/20, else fold next docs cycle (`.omc/wiki` CLIP "LIVE" drift) |
 | C6-27 | LOW/Med | cycle-6-2026-07-07 | r10c6 | 7 | Next bulk-edit cycle OR a maintainer trips on the `titlePrefix` exact-set naming |
 | C6-28 | MED/High | cycle-6-2026-07-07 | r10c6 | 7 | On-this-day made client-driven, OR a `TZ` operator-config note ships, OR a wrong-day report |

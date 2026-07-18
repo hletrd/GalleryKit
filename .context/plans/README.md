@@ -33,11 +33,11 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Cycle 8/100 (2026-07-18) Implementation Plan - container-capped responsive
-  image hints across main/archive/shared grids, ultrawide candidate-selection
-  regressions, MasonryCard contract cleanup, Cycle 7 release-ledger closure,
+- Cycle 9/100 (2026-07-18) Implementation Plan - detached gallery-config
+  invalidation generation/ownership, complete configurable public-grid source
+  ladders, custom/high-DPR regression coverage, Cycle 8 release-ledger closure,
   full gates, signed push, and per-cycle deploy
-  (`cycle-8-2026-07-18-plan.md`)
+  (`cycle-9-2026-07-18-plan.md`)
 - Run-10 Cycle 38/100 Implementation Plan - recovery ledger after Cycle 38 subagent usage-limit failure: preserve partial reviews, finish aggregate/deferred register, center remaining admin pages, clarify analytics/GPS docs, close default raw-input touch-target scanner gap, run full gates, signed push, and per-cycle deploy (`run10-cycle38/plan.md`)
 - Run-10 Cycle 38/100 Deferred Findings - Cycle 38 deferred architecture/topology/performance/operator/test items with preserved severity/confidence and exit criteria (`run10-cycle38/deferred.md`)
 
@@ -50,6 +50,12 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Cycle 8/100 (2026-07-18) Implementation Plan - completed signed publication
+  through `f50e96b3`; shipped container-capped responsive source hints across
+  main/archive/shared grids and deterministic candidate-selection regressions.
+  Cycle 9 identified and scheduled the orthogonal complete-configured-ladder
+  defect instead of reopening the corrected slot-size policy
+  (`archive/cycle-8-2026-07-18-plan.md`)
 - Cycle 7/100 (2026-07-18) Implementation Plan - completed signed publication
   through `ff8c5f48`; shipped container-observed intrinsic geometry and
   narrow/ultrawide two-item geometry regressions. Cycle 8 qualified the earlier

@@ -1,151 +1,183 @@
-# Cycle 8 Aggregate Review
+# Aggregate Review — Cycle 9/100
 
-Date: 2026-07-18 KST
-Review HEAD: `ff8c5f48`
+Date: 2026-07-18
+Reviewed HEAD: `f50e96b31d04dae85cdd73eb2a99e816c8b403e7`
 
-## Agent coverage
+## Review coverage
 
-Completed and preserved provenance reviews: code-reviewer, perf-reviewer,
-security-reviewer, critic, verifier, test-engineer, tracer, architect,
-debugger, document-specialist, and designer. The environment exposed generic
-workers rather than named reviewer registrations, and the global four-thread
-limit rejected one initial batch launch; the required retry used the existing
-review worker and completed successfully. No repository-local custom reviewer
-definition was present.
+The collaboration runtime exposed two concurrent child slots and no registered
+specialist agent types. Both available children were launched together:
 
-Each lane inventoried the maintained repository before reviewing its specialty:
-671 TypeScript/JavaScript files, 31 migrations plus journal/reconcile, 365+
-unit-test files, 14+ Playwright files, App Router routes/actions, public/admin
-components, scripts, PWA/build/deploy assets, governing documentation, and the
-consolidated deferred register. The Cycle 7 diff was an entry point rather than
-a scope boundary. The designer read and used the required agent-browser skill
-family, then exercised production at 320, 1,536, and 2,560 CSS pixels with DOM,
-accessibility, computed-style, candidate-selection, theme, keyboard, and
-performance evidence.
+- `review_code_correctness`: code-reviewer, verifier, tracer, debugger
+- `review_security_perf_arch`: security-reviewer, perf-reviewer, architect
 
-## New deduplicated findings
+The lead covered critic, test-engineer, document-specialist, and designer,
+including the required live `agent-browser` interaction. This preserved all
+eleven requested perspectives despite the runtime's four-thread total limit.
+The provenance files are:
 
-### C8-01 — Responsive image hints remain viewport-owned after geometry became container-owned
+- `.context/reviews/cycle9-code-verifier-tracer-debugger.md`
+- `.context/reviews/cycle9-security-performance-architecture.md`
+- `.context/reviews/cycle9-critic-tests-docs-designer.md`
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed live runtime bandwidth defect on main and archive;
-  source-confirmed conditional impact on shared groups**
-- Agreement: code-reviewer, perf-reviewer, critic, verifier, test-engineer,
-  tracer, architect, debugger, document-specialist, designer
-- Regions: `apps/web/src/lib/responsive-masonry.ts:1-7,37-65`;
-  `apps/web/src/components/home-client.tsx:257-273,349-359`;
-  `apps/web/src/components/masonry-card.tsx:91-110`;
-  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:230-285`;
-  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:192-245`;
-  `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:180-245`;
-  `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`
-- Failure: Cycle 7 correctly moved intrinsic card geometry to the observed,
-  capped masonry container, but `sizes` still advertises `20vw`, `25vw`,
-  `33vw`, and related viewport fractions. At 2,560 px/DPR 2 the public grid
-  remains 1,504 px wide and a five-column card remains 288 px, so 640w covers
-  its 576 device pixels; `20vw` instead advertises 512 CSS px and selects the
-  1536w derivative. Production browser evidence reproduced `_640.avif` at
-  1,536 px and `_1536.avif` for the same 288 px Timeline cards at 2,560 px;
-  main-gallery cards after Load more reproduced the same selection. Three-item
-  DPR-1 main galleries and sufficiently wide shared grids cross analogous
-  640w/1536w boundaries. The selected pixel area can be roughly 5.8 times
-  larger without visible-detail benefit.
-- Fix: generate server-emittable source sizes from Tailwind's capped container
-  widths, accumulated horizontal padding, column gaps, and effective columns.
-  Reuse the policy for main, archive/year, and the nested shared-group variant;
-  do not wait for hydration to downgrade an already-started resource.
+All reviewers inventoried the repository and current rules, traced cross-file
+behavior, checked the complete Cycle 8 change surface against the surrounding
+system, deduplicated historical/closed findings, and performed a final missed-
+issues sweep. No child agent failed. An attempted third child allocation was
+rejected by the thread limit before creation; the lead completed those roles
+locally, so this is a capacity constraint rather than an agent failure.
 
-### C8-02 — Browser coverage samples only candidate-equivalent ultrawide shapes
+## Executive result
 
-- Severity / confidence: **Medium / High**
-- Status: **Confirmed test-design gap with independent Chromium counterexamples**
-- Agreement: critic, verifier, test-engineer, debugger, document-specialist,
-  designer
-- Regions: `apps/web/e2e/responsive-masonry.spec.ts:4-133`;
-  `apps/web/src/__tests__/responsive-masonry.test.ts:11-77`;
-  `apps/web/scripts/seed-e2e.ts:31-82,250-304`
-- Failure: the only 2,560 px main case has two 744 px cards at DPR 2, where
-  both accurate and inflated hints legitimately select the maximum 1536w
-  candidate. Archive coverage stops at 1,536 px, and shared coverage stops at
-  1,280 px. Unit tests lock the faulty literal viewport strings. Thus all 34
-  focused tests pass while a three-item 2,560/DPR-1 main grid, five-column
-  2,560/DPR-2 archive grid, and sufficiently wide shared grid each expose a
-  1536w-versus-640w mismatch.
-- Fix: retain the existing two-item geometry cases, seed/filter an independent
-  normal or three-item main shape, and add exact post-cap `currentSrc`, card
-  width, column, and `sizes` assertions for main/archive and shared variants.
-  Unit expectations must lock the capped container policy rather than the old
-  viewport fractions.
+Three unique current findings survived evidence review:
 
-### C8-03 — `MasonryCard` comments describe the removed viewport-width bucket
+1. **COR-C9-01 (Medium/High, confirmed):** detached gallery-config cache
+   invalidation is vulnerable to a late pre-invalidation promise republishing
+   stale settings and clearing a newer in-flight owner.
+2. **COR-C9-02 (Medium/High, confirmed):** public grid source sets truncate the
+   configurable derivative ladder by array position, forcing valid custom
+   configurations and high-DPR one-item grids to upscale smaller files while
+   adequate generated derivatives are omitted.
+3. **ARCH-C9-01 / DOC-C9-01 (Low/High, confirmed, deduplicated):** the active
+   Cycle 8 plan still reports signed publication and deployment as pending even
+   though the three commits are GPG-good, `master == origin/master`, the prior
+   cycle reported deployment success, and the live site exposes the shipped
+   source policy.
 
-- Severity / confidence: **Low / High**
-- Status: **Confirmed source-documentation drift; no current runtime failure**
-- Agreement: code-reviewer, document-specialist
-- Regions: `apps/web/src/components/masonry-card.tsx:16-25,176-185`;
-  replacement ownership at `apps/web/src/components/home-client.tsx:69-105,
-  257-273`
-- Failure: the nearest prop contract still says `estimatedCardWidth` changes
-  with a viewport bucket and implies a width-bucket change may bail out. Cycle
-  7 removed that state: a shared `ResizeObserver` owns a container-width
-  bucket, and any changed numeric width prop intentionally re-renders all
-  existing cards. A maintainer following the stale contract can regress to
-  window-only invalidation or expect a shallow-comparison bailout that cannot
-  occur.
-- Fix: name the observed container-width bucket and state the real memo
-  invariant: unchanged bucket observations and unrelated parent state bail
-  out; changed `estimatedCardWidth` intentionally re-renders cards.
+No new security, authorization, privacy, dependency, database-schema,
+performance-budget, WCAG, information-architecture, or test-flakiness finding
+survived validation. Existing carry-forward risks remain governed by
+`.context/plans/deferred-carry-forward.md`; only deferred item `C6-24` has an
+exit criterion newly fired, and its concrete production race is promoted into
+scheduled finding COR-C9-01 rather than left deferred.
 
-### C8-04 — Cycle 7's active ledger contradicts its signed remote publication
+## Deduplicated findings
 
-- Severity / confidence: **Low / High**
-- Status: **Confirmed repository-state mismatch; exact deployed SHA remains
-  manual-validation**
-- Agreement: code-reviewer, critic, verifier, tracer, architect, debugger,
-  document-specialist
-- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:3-5,35-50,58-66,
-  73-93`; `.context/plans/README.md:34-40`; commits `498e5122`, `90a3bc07`,
-  `ff8c5f48`
-- Failure: all three Cycle 7 commits have good GPG signatures and
-  `master == origin/master == ff8c5f48`, but the authoritative plan still says
-  signed release pending, leaves publication/deploy unchecked, and overstates
-  its 2,560 px proof as matching source-size hints when it proved intrinsic
-  geometry only. Recovery can repeat terminal work or select the wrong
-  frontier. The review did not establish an exact deployed SHA, so that state
-  must not be invented.
-- Fix: qualify the Cycle 7 validation as intrinsic-geometry coverage, record
-  observable signature/remote equality, archive the plan, and advance the
-  index. Record deploy evidence only when independently available; document a
-  terminal reconciliation convention so the same drift is not silently
-  reconstructed.
+### COR-C9-01 — Late detached-config reads can undo post-commit invalidation
 
-## Revalidated carry-forward findings
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed correctness defect; must be scheduled**
+- Regions: `apps/web/src/lib/gallery-config.ts:234-269`, invalidation caller
+  `apps/web/src/app/actions/settings.ts:235-267`, detached consumers in
+  `apps/web/src/lib/image-queue.ts:542-549,862-881,981-1008`, incomplete tests
+  `apps/web/src/__tests__/gallery-config-uncached-microcache.test.ts:76-94,129-141`.
+- Evidence: `getGalleryConfigDetached()` unconditionally publishes the result
+  of the promise that was current when a read began. Invalidation clears the
+  two module variables but cannot cancel that promise. If read A starts, a
+  settings transaction commits and invalidates, and read B starts, A may still
+  cache its stale value for two seconds; A's unconditional `finally` may also
+  clear B's ownership slot.
+- Concrete failure: an admin successfully disables stub semantic search while
+  a detached read is in flight, but a just-processed image still observes the
+  republished `stub` value and writes a stub embedding after the mutation
+  returned success. Legacy jobs without a persisted processing snapshot can
+  similarly observe old encode/caption settings.
+- Required fix: introduce an invalidation generation and promise-identity
+  ownership. A read may publish only when its captured generation is current,
+  and may clear the slot only if the slot still owns that same promise. Add a
+  controlled A/invalidate/B/A-resolves-first regression test.
+- Historical disposition: this concrete race fires deferred `C6-24`'s exit
+  criterion. It is no longer deferred.
 
-The shared image-queue/backfill pool budget, warn-only single-writer topology,
-failed-deploy rollback, SQL/file restore generation, large-map rendering,
-semantic-vector scanning, upload RSS, environment-gated browser proofs, and
-other explicit architecture/operator items remain in
-`.context/plans/deferred-carry-forward.md` with their original severity,
-confidence, reasons, and exit criteria. No exit criterion fired. Security
-reviewer reported zero new security issues.
+### COR-C9-02 — Public grid srcsets discard valid configured derivatives
 
-## Baseline evidence and final sweep
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed correctness/perceived-quality defect; must be scheduled**
+- Regions: configuration contract
+  `apps/web/src/lib/gallery-config-shared.ts:152-177,255-301`; main grid
+  `apps/web/src/components/masonry-card.tsx:87-115`; timeline
+  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:98-100,230-276`; year
+  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:104-111,192-238`;
+  shared groups `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:124-127,198-242`.
+- Evidence: the supported setting accepts one to eight sorted widths from 128
+  through 10,000 px, but main/shared use only `imageSizes[0]` and `[1]`;
+  timeline/year use a 640-nearest first value and positional `[1]` second value.
+  The remaining generated derivatives never enter any public grid `srcset`.
+- Concrete failure: valid `128,256,640,1536` output produces all four files,
+  yet a 490 px DPR-1 main-grid slot can see only 128w/256w and upscales the 256w
+  file. With defaults, a one-item 1,504 px grid at DPR 2 cannot choose the
+  existing 2048w/4096w variants because only 640w/1536w are advertised.
+- Required fix: centralize monotonic source-set generation from the complete
+  normalized configured width list and reuse it across main, timeline, year,
+  and shared grids. Add deterministic unit/source-contract coverage for custom
+  `128,256,640,1536`, one/two-size lists, and high-DPR large slots; add browser
+  coverage for actual custom candidate selection if feasible in the disposable
+  fixture.
+- Historical disposition: this is not the closed hardcoded/unsorted settings
+  finding. Configuration is correctly normalized and propagated; the remaining
+  live bug is positional truncation at render consumers.
 
-Fresh review baselines passed ESLint, API-auth lint, action-origin/mutation-
-barrier lint, public-route-rate-limit lint, production dependency audit, 34/34
-focused responsive tests, and `git diff --check`. Independent Chromium proofs
-and the live designer pass confirmed the source-candidate mismatch rather than
-trusting the current tests. Prompt 3 must still run every configured gate,
-including build, full Vitest, and full Playwright because browser-flow coverage
-is required.
+### ARCH-C9-01 / DOC-C9-01 — Cycle 8 release ledger is stale
 
-The final aggregate sweep rechecked responsive siblings, memo invalidation,
-route/action guards, privacy projections, migration/journal/reconcile,
-upload/delete/restore races, background consumers, caches, PWA/build/runtime
-configuration, deploy scripts, tests, design states, and release ledgers. No
-fifth fresh finding survived validation.
+- Severity: **Low**
+- Confidence: **High**
+- Status: **Confirmed documentation/workflow defect; two-reviewer agreement**
+- Regions: `.context/plans/cycle-8-2026-07-18-plan.md:5,63-65,99-100`, index
+  `.context/plans/README.md:33-43,51-57`.
+- Evidence: the plan says “signed release pending” and leaves signed push and
+  deploy unchecked. `git verify-commit` reports good signatures for
+  `b3e299f1`, `d2a90c3c`, and `f50e96b3`; local and remote master both resolve
+  to `f50e96b3`; Cycle 8 reported `per-cycle-success`; and the deployed public
+  site selects `_640.avif` for live 288 px ultrawide cards under the new policy.
+- Concrete failure: a recovery agent trusts the canonical plan frontier and
+  repeats already-completed terminal work or reports the release as unpublished.
+- Required fix: reconcile Cycle 8's status/checklist/evidence, archive it, and
+  advance the plan index. Record live behavioral evidence without inventing an
+  exact deployed SHA.
 
-## AGENT FAILURES
+## Cross-agent agreement and adjudication
 
-None. One initial worker launch was rejected by the global thread limit; the
-required retry completed all assigned provenance files.
+- The stale Cycle 8 release ledger was independently identified by the
+  security/performance/architecture child and the local document/critic pass;
+  those two reports are one deduplicated finding at the highest shared
+  severity/confidence (Low/High).
+- The code/correctness child supplied both Medium findings. The lead re-traced
+  the promise ownership and every main/archive/shared source-set construction;
+  both failure scenarios follow deterministically from current source and the
+  accepted settings contract.
+- The security/performance reviewer found no new vulnerability or independent
+  resource regression. COR-C9-02 nevertheless has a user-visible bandwidth/
+  sharpness consequence; its primary classification stays correctness because
+  valid generated outputs are unreachable from the browser source set.
+- The Cycle 8 container-cap arithmetic itself is sound. The new source-set
+  finding is an orthogonal candidate-ladder defect that the default 640/1536-
+  leading fixtures did not exercise.
+
+## Validation evidence from Prompt 1
+
+- ESLint passed.
+- API-auth, action-origin/mutation-barrier, and public-route-rate-limit lints
+  passed.
+- App and script typechecks passed.
+- Production dependency audit passed with zero vulnerabilities.
+- Focused Vitest passes: 42 correctness/queue/restore/responsive tests and 405
+  security/auth/privacy/migration/responsive tests.
+- Migration/journal inventory is 31/31.
+- `git diff --check` passed before aggregate creation.
+- Live public browser review covered 2560x1440/DPR 2 and 375x812 layouts,
+  accessibility structure, load-more, search-dialog focus/escape restoration,
+  theme/media state, error/console output, screenshots, accessibility diffs,
+  and source selection. Local live admin review was infeasible because the
+  disposable MySQL endpoint was down; that limitation does not affect the two
+  source-proven defects.
+
+These are review baselines, not substitutes for Prompt 3's required complete
+quality-gate run.
+
+## Deferred/revalidated items
+
+No new finding is deferred. Security, correctness, and data-loss findings are
+not deferrable under the cycle rules, so COR-C9-01 and COR-C9-02 must be
+implemented. ARCH-C9-01 is also scheduled because its fix is required by the
+plan-archival prompt. Existing carry-forward items retain their original
+severity, confidence, reasons, policy constraints, and exit criteria in
+`.context/plans/deferred-carry-forward.md`; none is silently copied or
+reclassified here. `C6-24` must be marked promoted/closed when COR-C9-01 lands.
+
+## Agent failures
+
+None. Both created child agents returned and persisted their reviews. The
+runtime rejected a third child allocation because all four total threads were
+already occupied; the lead completed those requested roles directly.
