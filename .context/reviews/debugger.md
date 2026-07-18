@@ -1,41 +1,52 @@
-# Debugger — Cycle 8 Provenance
+# Debugger — Cycle 12 Provenance
 
-Review target: `ff8c5f48`. Review only.
+Review target: `ff6532f4`. Review only.
 
 ## Inventory and debugging scope
 
-I inventoried the complete maintained source/test/script/runtime surface (671 TS/JS files, 31 migrations, 364 Vitest files plus one test stub, 14 Playwright files) before debugging the current responsive path through React state, `ResizeObserver`, Tailwind containment, CSS columns, intrinsic sizing, HTML candidate selection, fallback handling, and coverage. I also swept request guards, restore/queue failures, caches, listeners/timers, schema promotion, and release state. Focused responsive tests passed 34/34. A standalone Chromium proof at 2,560 px/DPR 1 selected 1536w for `33vw` and 640w for a `491px` slot against the same `srcset`.
+I inventoried the full maintained repo surface and traced the Cycle 11 changes through their actual runtime branches. For schema work, I followed empty DB initialization, journal baselining, an existing DB at the prior cursor, Drizzle execution, reconcile degradation, and the On This Day consumer. I also checked image fan-out/cleanup, search activation, request guards, restore/queue error handling, and release recovery. Focused Vitest passed 39/39; the green result is part of the reproduction because the failing production branch is absent from those tests.
 
 ## Current findings
 
-### DBG-C8-01 — The observer fixes card height but the browser still sees the old ultrawide width
+### DBG-C12-01 — The test and production schema paths fork before migration SQL is reached
+
+- Severity: **High**
+- Confidence: **High**
+- Status: **Confirmed root cause/control-flow reproduction; executing a deliberately broken migration against MySQL was not performed**
+- Regions: `apps/web/scripts/migrate.js:923-937,940-970,1008-1015`; `apps/web/scripts/check-schema-convergence.mjs:82-102`; `apps/web/src/__tests__/migrate-pending-migrations.test.ts:96-111,348-363`; `apps/web/drizzle/0032_capture_date_indexes.sql:1-13`
+
+Root cause: CI begins with no gallery tables, so `prepareLegacyDatabaseIfNeeded` runs reconcile and inserts all migration hashes. `runMigrations` sees the latest hash already represented and does not execute 0032. The convergence command mutates that same reconcile-authored schema and calls reconcile directly. Production begins with gallery tables and a 0031 hash cursor, so the missing 0032 entry is left for Drizzle and its SQL is executed.
+
+Deterministic failure scenario: introduce any MySQL error into the 0032 SQL while leaving reconcile correct. The existing `npm run init`, convergence command, source tripwires, and focused 39-test set remain capable of passing; an existing 0031 database fails on the real DDL. The rejection-propagation unit test is not a substitute because it injects a synthetic function and never parses or runs the migration file.
+
+Suggested fix: create a disposable 0031 DB, record hashes only through 0031, invoke the real migration runner, and assert 0032's hash plus schema equivalence. Add a test-only mutation or fixture that proves the lane goes red when the SQL is invalid, preventing future accidental routing back through bootstrap.
+
+### DBG-C12-02 — Same-named malformed generated columns survive every reconcile
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed root cause and deterministic candidate outcome; network-byte measurement manual-validation**
-- Regions: `apps/web/src/components/home-client.tsx:69-105,257-273,349-359`; `apps/web/src/lib/responsive-masonry.ts:1-7,37-54`; `apps/web/src/components/masonry-card.tsx:91-110`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`; `apps/web/e2e/responsive-masonry.spec.ts:11-55`
+- Status: **Confirmed root cause by helper trace; live malformed-column reproduction is manual-validation**
+- Regions: `apps/web/scripts/migrate.js:268-283,502-506`; `apps/web/scripts/check-schema-convergence.mjs:73-80`; `apps/web/src/lib/data-timeline.ts:117-136`
 
-Root cause: `ResizeObserver` updates only `estimatedCardWidth`. The `<source sizes>` string is still memoized solely from `itemCount` and is built from `vw`, so it never receives the observed container measurement.
+Root cause: the degradation test drops the columns, which selects the only branch `ensureColumn` can repair. It never replaces their definitions while retaining their names. `ensureColumn` checks only whether `columnInfo` returned a row.
 
-Deterministic reproduction: use three items, a 2,560 px viewport, and DPR 1. The capped/padded grid renders roughly 491 px cards and the observer produces a matching intrinsic estimate. `sizes="... 33vw"` tells the image selection algorithm the slot is roughly 845 px. Against the only masonry candidates, 640w and 1536w, 491 chooses 640 while 845 chooses 1536. The current regression uses two items at DPR 2; both the right and wrong slot widths choose the maximum 1536w candidate, so its `currentSrc` assertion cannot expose the bug.
+Concrete failure: change `capture_day` to a plain nullable `tinyint`, then run reconcile. It performs no column ALTER, and the On This Day query continues to trust `capture_day` as a database-maintained value. Rows can disappear from the widget with no application error.
 
-Concrete failure: filtered/topic galleries with exactly three visible results fetch materially larger thumbnails on common DPR-1 ultrawide monitors.
+Suggested fix: route these fields through `ensureColumnDefinition`, normalize MySQL's generation-expression representation, and test wrong type, plain-vs-generated, wrong expression, and virtual-vs-stored variants.
 
-Fix: cap the top-breakpoint source slot to the actual public-container geometry, then add a 2,560 px/DPR-1, three-item selection regression. Do not loosen the existing two-item geometry assertions; they test a different failure.
-
-### DBG-C8-02 — Recovery flags remain stale after successful signed publication
+### DBG-C12-03 — Recovery metadata points at the pre-publication state
 
 - Severity: **Low**
 - Confidence: **High**
-- Status: **Confirmed repository-state bug; deploy completion manual-validation**
-- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:5,48-50,73-82`; `.context/plans/README.md:34-40`
+- Status: **Confirmed repository-state bug; deploy completion unknown**
+- Regions: `.context/plans/cycle-11-2026-07-18-plan.md:3-5,77-79,109-121`; `.context/plans/README.md:34-44`
 
-`git log --show-signature` reports good signatures for `498e5122`, `90a3bc07`, and `ff8c5f48`; `master` and `origin/master` both resolve to `ff8c5f48`. The plan nevertheless says signed release pending and leaves the terminal checkboxes open.
+`HEAD` and `origin/master` both resolve to signed `ff6532f4`, but the recovery plan says signed publication is pending from start HEAD `7e40e95c`.
 
-Concrete failure: a resumed agent can rerun already-completed publication work or debug from the wrong start SHA.
+Concrete failure: a resumed run diagnoses or republishes from the wrong frontier.
 
-Fix: mark the proven signed push complete, keep deploy state qualified by actual evidence, archive Cycle 7, and update the active index.
+Suggested fix: record the proven remote publication, retain deploy as unknown without independent evidence, and rotate the active plan.
 
 ## Negative hypotheses and final missed-issue sweep
 
-I ruled out width quantization, the 16 px gaps, invalid dimensions, `React.memo`, fallback-source removal, and DPR 2 as the root cause; DPR 2 masks rather than creates the candidate mismatch. Abort/cleanup paths, retries, queue shutdown, restore finalization, action/route error handling, and cache invalidation produced no third current actionable bug.
+I ruled out journal timestamp regression, missing privacy omissions, generated-column null behavior for a correctly defined schema, the new derivative-width cap, and search link activation as causes of the schema issue. Abort/cleanup paths, retry queues, action/route exception handling, and cache invalidation produced no fourth fresh debugger finding.

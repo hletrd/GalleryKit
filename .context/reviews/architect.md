@@ -1,41 +1,52 @@
-# Architect — Cycle 8 Provenance
+# Architect — Cycle 12 Provenance
 
-Review target: `ff8c5f48`. Review only.
+Review target: `ff6532f4`. Review only.
 
 ## Inventory and architecture sweep
 
-I inventoried the full 671-file maintained TS/JS surface, 364 Vitest files plus one test stub, 14 Playwright files, 31 migrations with journal/reconcile, and the package/build/PWA/Docker/deploy boundaries, then reviewed configuration lifetime, persistence, concurrency, privacy, cache, and responsive-layout ownership across the relevant files. `AGENTS.md`, all of `CLAUDE.md`, the Cycle 7 plan, aggregate, role reports, and the carry-forward register were read to separate current breaks from accepted/deferred architecture.
+I inventoried the complete maintained source, test, script, migration, configuration, and operational surface (3,698 tracked files; 631 maintained TS/TSX/JS source files under `apps/web/src`; 30 scripts; 16 Playwright files; 33 migrations) after reading `AGENTS.md`, `CLAUDE.md`, the active plan/deferred pair, aggregate, and carry-forward register. The architecture sweep traced schema authority and lifetime across Drizzle declarations, historical SQL, reconcile/bootstrap, pending upgrades, CI, runtime queries, and deployment, then rechecked persistence, privacy, cache, single-writer, restore, and image-delivery boundaries.
 
 ## Current findings
 
-### ARCH-C8-01 — Responsive geometry now has two authorities at the container cap
+### ARCH-C12-01 — Schema correctness has two write authorities but CI exercises only one
+
+- Severity: **High**
+- Confidence: **High**
+- Status: **Confirmed architecture/validation split; no malformed current production schema claimed**
+- Regions: fresh/bootstrap authority `apps/web/scripts/migrate.js:923-937`; upgrade authority `apps/web/scripts/migrate.js:948-970,1008-1015`; probe `apps/web/scripts/check-schema-convergence.mjs:82-102`; migration `apps/web/drizzle/0032_capture_date_indexes.sql:1-13`; CI `.github/workflows/quality.yml:67-79`
+
+Fresh databases are authored by `reconcileLegacySchema` and then baseline all SQL hashes. Existing current installations are authored by pending migration SQL. The new gate bootstraps and degrades the reconcile-authored database, so its reference snapshot and repair operation share the same authority. It does not establish equivalence with the SQL-authored upgrade state.
+
+Concrete failure: reconcile and 0032 can be internally consistent but mutually different, or 0032 can be unexecutable. CI still compares reconcile output with earlier reconcile output and passes. An existing installation then either fails the deploy or reaches a schema different from a fresh installation.
+
+Suggested fix: model schema convergence as a differential invariant: database A = fresh reconcile/bootstrap; database B = exact prior release plus real pending SQL. Compare full structured snapshots A and B, then run reconcile on both and prove idempotence. A self-comparison of A is useful recovery coverage but cannot be the sole convergence oracle.
+
+### ARCH-C12-02 — Reconcile's new structural abstraction is narrower than the schema contract
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed architectural invariant split; bandwidth symptom manual-validation**
-- Regions: `apps/web/src/lib/responsive-masonry.ts:1-7,24-54`; `apps/web/src/components/home-client.tsx:257-273,349-359`; `apps/web/src/components/masonry-card.tsx:91-110`; `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`
+- Status: **Confirmed design defect; live drift occurrence is manual-validation**
+- Regions: column helpers `apps/web/scripts/migrate.js:268-283`; index helpers `apps/web/scripts/migrate.js:319-344`; latest use sites `apps/web/scripts/migrate.js:502-506,753-765`; rich snapshot fields `apps/web/scripts/check-schema-convergence.mjs:44-53`
 
-Cycle 7 established the masonry element as the measurement boundary for intrinsic layout, but responsive resource selection remains owned by viewport percentages in `SLOT_SIZE_BY_COLUMNS`. Thus a single card has container-domain geometry and viewport-domain loading policy. Above the container cap they cannot both describe the rendered slot.
+The schema snapshot knows column generation expressions, nullability, types, index visibility, uniqueness, direction, prefix, and type. The reconciliation helpers used for 0032 compare only column existence and index column-name order. Thus the observer is richer than the repair contract, and many detected structural dimensions have no repair operation.
 
-Concrete failure: for three items at 2,560 px/DPR 1, the container authority says about 491 px while the source authority says about 845 px. With the deliberately coarse 640w/1536w thumbnail ladder, those values land on different candidates, so the split creates a real large-file fetch rather than harmless rounding.
+Concrete failure: `capture_month` exists as a normal integer, or `idx_images_processed_capture_month_day` has the correct columns but is invisible. Reconcile reports no relevant change. The query either returns stale/empty results or loses the intended index plan, despite the architecture claiming exact current-schema convergence.
 
-Fix: expose one responsive geometry policy that covers effective columns, capped slot width, and `sizes`; keep live observation for `contain-intrinsic-size`, while making the server-rendered source hint encode the same public-container cap. Prove the shared policy at a three-item ultrawide DPR-1 boundary.
+Suggested fix: define canonical column/index descriptors and make reconcile compare every material field it promises to converge. At minimum, generated-column definitions need type/nullability/extra/expression checks and the three 0032 indexes need visibility/non-unique/index-type/direction checks. Use the same normalized descriptors in the differential test.
 
-The old review about a missing `2xl` column was closed by adding five-column policy. This finding concerns the still-duplicated measurement domain after the new observer landed.
-
-### ARCH-C8-02 — Release state still requires the next cycle to repair the previous cycle
+### ARCH-C12-03 — Release-state ownership still ends before terminal publication
 
 - Severity: **Low**
 - Confidence: **High**
-- Status: **Confirmed workflow-state drift; production identity manual-validation**
-- Regions: `.context/plans/cycle-7-2026-07-18-plan.md:3-5,48-50,73-82`; `.context/plans/README.md:34-40`
+- Status: **Confirmed workflow architecture drift; deployment fact manual-validation**
+- Regions: `.context/plans/cycle-11-2026-07-18-plan.md:5,77-79,109-121`; `.context/plans/README.md:34-44`; remote HEAD `ff6532f4`
 
-The active plan is necessarily committed before its own final publication, but no terminal state artifact follows the push. Consequently the repo again records a published signed cycle as pending, now through `ff8c5f48`; Cycle 7 had to repair the identical Cycle 6 state.
+The plan is necessarily committed before its own final push, but no post-push authority updates its terminal state. The repository therefore again records a signed remote cycle as pending.
 
-Concrete failure: repository recovery chooses a stale frontier and may repeat terminal work.
+Concrete failure: recovery tooling chooses a stale frontier or repeats terminal work.
 
-Fix: reconcile/archive Cycle 7 now and introduce a post-push/deploy terminal record or a clearly documented next-cycle reconciliation invariant so the authoritative state does not claim that remote work is pending after remote equality is observable.
+Suggested fix: establish one post-publication status artifact owned by the orchestrator or next-cycle bootstrap, with signed push and deploy recorded as separate facts. Never infer deployment from remote equality.
 
 ## Final missed-issue sweep
 
-I rechecked module ownership, DB/file dual writes, restore fences, advisory-lock discipline, process-local coordination, pool overlap, migrations, storage quarantine, PWA/runtime boundaries, and source/test symmetry. Existing broad risks remain in the carry-forward register; no third fresh architecture break survived.
+I rechecked DB/file dual writes, advisory-lock and process-local topology, restore fences, cache/runtime configuration lifetime, privacy projections, source-selection ownership, and migration removal policy. Existing broad risks remain in the carry-forward register; no fourth fresh architecture issue survived deduplication.

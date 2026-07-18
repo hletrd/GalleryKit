@@ -1,53 +1,36 @@
-# Security Reviewer — Cycle 8 Provenance
+# Security Reviewer — Cycle 12 Provenance
 
-Review target: `ff8c5f48`. Review only.
+Review target: `ff6532f4` (`master` / `origin/master` at review start). Review only; no product code or plan was modified.
 
-## Inventory and validation
+## Inventory and method
 
-I inventoried the maintained repository and governing documentation, including
-516 source `.ts` files, 113 source `.tsx` files, 12 App Router route handlers,
-13 action modules plus the action barrel and admin DB actions, 31 migration SQL
-files with journal/reconcile machinery, 369 unit-test files, 16 Playwright
-files, scripts/configuration, deployment assets, current plans/reviews, and the
-consolidated carry-forward register.
+I read `AGENTS.md` and all 779 lines of `CLAUDE.md`, then inventoried the 3,698 tracked files. The maintained implementation inventory was 516 source `.ts` files, 113 source `.tsx` files, 13 action modules, 12 route handlers, 116 library modules, 61 component files, 30 operational scripts, 33 migration SQL files, 371 unit-test/fixture files, and 16 Playwright files.
 
-The security sweep traced session/password/PAT authentication, proxy and origin
-trust, public/admin rate limits, mutation barriers, public/private projections,
-upload and derivative path containment, backup/restore child processes, SQL and
-JSON-LD/OG sinks, CSP, secrets/config validation, migration promotion, and
-single-writer/background-job boundaries. The Cycle 7 implementation diff is
-confined to client-side masonry measurement plus tests and review ledgers; it
-does not alter credential, authorization, privacy, persistence, file, SQL, or
-process-execution boundaries.
+The security pass traced the complete cookie-session and PAT paths; password hashing; account/IP/token rate limits; proxy/origin derivation; middleware and route/action authorization; restore mutation barriers and advisory locks; upload body/quota, content, path, symlink, realpath, GPS, and cleanup controls; public/admin field projections; backup/restore child processes and SQL scanning; JSON-LD/OG/CSP sinks; DB TLS and runtime secrets; Docker/nginx/deploy boundaries; schema-convergence mutation guards; and the complete post-Cycle-11 implementation diff. Repository-wide searches covered raw SQL, `sql.raw`, child-process execution, filesystem writes, environment reads, exemptions/suppressions, and HTML injection sinks.
 
-Fresh checks passed:
+Fresh validation passed:
 
-- `lint:api-auth`
-- `lint:action-origin` including mutation-barrier enforcement
-- `lint:public-route-rate-limit`
-- production dependency audit with zero vulnerabilities
+- `npm run lint:api-auth --workspace=apps/web`
+- `npm run lint:action-origin --workspace=apps/web`
+- `npm run lint:public-route-rate-limit --workspace=apps/web`
+- `npm run audit:prod` — zero production vulnerabilities at the configured threshold
+- 137 focused migration/timeline/image contract tests
 
-## New Cycle 8 findings
+## Findings
 
-**Zero.** The confirmed ultrawide derivative-selection issue is bandwidth and
-test-policy debt, not a new resource-exhaustion primitive or trust-boundary
-failure. The stale release ledger is provenance state rather than a security
-control failure.
+**Finding count: 0.** No new security defect survived cross-file validation.
 
-## Revalidated, not new
+The new schema-convergence helper is mutation-capable, but it fails closed unless an explicit opt-in is present, the DB host is exactly local, and the database name contains a delimited `test`, `ci`, or `e2e` token (`apps/web/scripts/check-schema-convergence.mjs:11-25`). Its validation blind spot is recorded by the tracer as test-infrastructure risk, not as an authorization or remote-destruction primitive.
 
-Warn-only single-writer enforcement, process-local fast-path buckets, plaintext
-DB backups at the operator boundary, production `style-src 'unsafe-inline'`,
-host-applied nginx policy, upload/restore buffering, shared background pool
-budgeting, and operator-owned proxy/secret checks remain documented or present
-in `.context/plans/deferred-carry-forward.md`. None of their exit criteria was
-triggered by the current client-only implementation.
+The post-Cycle-11 changes do not widen trust boundaries: the derivative-width fix changes only public-safe delivered geometry; search now suppresses speculative RSC fetches; capture-date generated columns remain omitted from public projections; and the convergence script is CI/operator tooling rather than a request path.
+
+## Revalidated existing boundaries (not counted as new findings)
+
+- Process-local coordination and rate-limit fast paths still rely on the documented single-web-instance topology (`CLAUDE.md`, Runtime topology; `apps/web/src/lib/single-writer-guard.ts`). The guard is warn-only, but no scale-out/topology exit criterion is evidenced at this HEAD.
+- SQL backups remain plaintext at rest inside an owner-only non-public directory (`apps/web/src/app/[locale]/admin/db-actions.ts:177-195,229-359`); host/storage encryption remains the documented operator boundary.
+- Production CSP still permits inline styles for Next/Radix compatibility (`apps/web/src/lib/content-security-policy.ts`); there is no new HTML/script injection sink, and JSON-LD paths continue through `safeJsonLd`.
+- Public page protection still depends on the shipped nginx edge policy, while app-layer route/action limiters remain present. No repository evidence shows an unprotected alternate production proxy.
 
 ## Final missed-issue sweep
 
-The final sweep rechecked guard ordering/exemptions, token scope/expiry/revoke,
-session cookies, account/IP buckets, trusted proxy selection, privacy type
-guards, SQL and process arguments, path/symlink containment, restore drains and
-finalizers, CSP/OG origin pinning, analytics disclosure, runtime secrets,
-migration assertions, and the complete Cycle 7 diff. No current-HEAD security
-finding survived source, history, and guard-check validation.
+The final sweep rechecked session HMAC shape/age/DB revocation, cookie attributes, PAT scope/expiry/revocation/use accounting, same-origin ordering, last-admin protection, sensitive-key symmetry, SQL parameterization, process argument arrays and minimal child environments, restore drains/finalizers, upload path containment and fail-closed GPS behavior, OG canonical-origin pinning, backup file-descriptor validation, schema-tool mutation containment, tracked-secret patterns, and all security lint exemptions. No confirmed, likely, or manual-validation security finding remained.

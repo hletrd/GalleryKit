@@ -1,32 +1,52 @@
-# Test Engineer — Cycle 8 Provenance
+# Test Engineer — Cycle 12 Provenance
 
-Review target: `ff8c5f48`, 2026-07-18 KST. Review only.
+Review target: `ff6532f4`, 2026-07-18 KST. Review only.
 
-## Inventory and independent validation
+## Inventory and validation map
 
-I inventoried the full 671-file maintained TS/JS surface and mapped all 364 Vitest files plus one test stub and 14 Playwright files to the 80 App Router files, 116 library files, 61 component files, 28 scripts, 12 route handlers, 13 server-action modules, and 31 migrations with journal/reconcile. I reviewed the configured gate scripts, responsive fixtures/seeding, main/archive/shared masonry implementations, the Cycle 7 plan/evidence, and the current role findings. Historical coverage findings were checked at HEAD and omitted when the new 320/1,536/2,560 intrinsic-geometry cases had closed them.
+I inventoried all 372 Vitest files and 16 Playwright files against the 639-file `apps/web/src` surface, 30 scripts, 12 route handlers, 13 server-action modules, and 33 migrations. I mapped the latest schema, image, and search changes to unit, source-tripwire, live-MySQL, and browser coverage, then checked the configured gate ordering and the prior-cycle acceptance claims. Focused Vitest passed 4 files / 39 tests.
 
-Focused responsive Vitest passed 34/34. Independent standalone Chromium selection proofs against the committed 640w/1536w candidate pair confirmed all three uncovered boundaries below: `33vw` at 2,560 px/DPR 1 selects 1536w while a 491 px slot selects 640w; `20vw` at DPR 2 selects 1536w while a 288 px slot selects 640w; and `25vw` at DPR 1.25 selects 1536w while a 356 px slot selects 640w.
+## Current findings
 
-## Current finding
+### TEST-C12-01 — No executable test upgrades a prior-release database with the real latest SQL
 
-### TEST-C8-01 — Candidate coverage never crosses the post-container-cap selection boundaries
+- Severity: **High**
+- Confidence: **High**
+- Status: **Confirmed coverage gap; current migration text is not claimed broken**
+- Regions: CI `.github/workflows/quality.yml:67-79`; probe `apps/web/scripts/check-schema-convergence.mjs:82-102`; routing unit `apps/web/src/__tests__/migrate-pending-migrations.test.ts:96-111,348-363`; source-only gate `apps/web/src/__tests__/schema-convergence-gate.test.ts:12-31`; migration `apps/web/drizzle/0032_capture_date_indexes.sql:1-13`
+
+The source gate checks strings and ordering. The routing test uses a mocked connection and synthetic migration function. The live gate starts from a fresh reconcile-authored database and calls reconcile after degradation. None builds the previous release schema and executes the actual pending migration file through Drizzle.
+
+Concrete counterexample: replace a 0032 statement with invalid SQL while keeping the journal tag and reconcile source intact. Every assertion in `schema-convergence-gate.test.ts` still passes, the live fresh initialization baselines the bad file without running it, and the degradation probe still succeeds. Only an existing-database deploy discovers the failure.
+
+Suggested fix: keep two disposable MySQL databases in the gate. Initialize one at HEAD through fresh bootstrap. Initialize the second with the previous migration set/schema, then run the unmodified production migration entry point against the complete current journal. Assert recorded hashes and compare full snapshots. Add a red-team fixture proving malformed SQL fails this lane.
+
+### TEST-C12-02 — The drift matrix tests absence, not malformed same-named objects
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed coverage gap with browser-reproduced counterexamples**
-- Regions: `apps/web/e2e/responsive-masonry.spec.ts:4-55,57-133`; `apps/web/src/__tests__/responsive-masonry.test.ts:11-39`; policy at `apps/web/src/lib/responsive-masonry.ts:1-7,37-65`; main source set at `apps/web/src/components/masonry-card.tsx:91-110`; archive source sets at `apps/web/src/app/[locale]/(public)/timeline/page.tsx:230-275` and `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:219-235`; shared source set at `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:181-188,219-235`; container boundary at `apps/web/src/app/[locale]/(public)/layout.tsx:17-20`
+- Status: **Confirmed coverage gap exposing a confirmed helper limitation**
+- Regions: drift setup `apps/web/scripts/check-schema-convergence.mjs:73-80`; column helper `apps/web/scripts/migrate.js:268-283`; index helper `apps/web/scripts/migrate.js:319-344`; snapshot dimensions `apps/web/scripts/check-schema-convergence.mjs:44-53`; latest objects `apps/web/scripts/migrate.js:502-506,753-765`
 
-The suite asserts the literal viewport-based `sizes` strings and samples candidate selection only where the viewport and capped container either still coincide or both sides choose the same coarse candidate. The main test always has two items and DPR 2; archive stops at 1,536 px; shared stops at 1,280 px. Consequently it proves column transitions but never asks whether the advertised slot and rendered slot land on different sides of the 640w/1536w boundary after the public container stops growing.
+The probe drops generated columns and changes only index column lists. It never preserves an object name while corrupting generation expression, stored/virtual mode, type, nullability, index visibility, uniqueness, direction, or type. Yet the snapshot explicitly records those attributes, creating false breadth: they are compared after the narrow mutations but never challenged.
 
-Concrete failures that all pass the current suite:
+Concrete failure: make `capture_month` a plain nullable integer or mark the same-column composite index invisible. The probe has no case for either state, and current helpers accept them by name/column list.
 
-- Main, three items, 2,560 px/DPR 1: rendered slot about 491 px -> 640w is sufficient; `33vw` advertises about 845 px -> Chromium selects 1536w.
-- Main/archive, five columns, 2,560 px/DPR 2: rendered slot about 288 CSS px / 576 device px -> 640w; `20vw` advertises 512 CSS px / 1,024 device px -> 1536w.
-- Shared group, four columns inside the nested padded container, 2,560 px/DPR 1.25: rendered slot about 356 CSS px / 445 device px -> 640w; `25vw` advertises 640 CSS px / 800 device px -> 1536w.
+Suggested fix: parameterize degradation cases and run independent restore/idempotence checks for wrong generated expression, plain/generated, virtual/stored, type/nullability, missing index, old column list, and invisible index. Require every material snapshot dimension either to be repairable and tested or explicitly excluded from the convergence promise.
 
-Fix: after the source-size policy is made container-capped, add exact candidate regressions at those three boundaries. Seed or filter the main route to exactly three items for the DPR-1 case; retain the current two-item/DPR-2 geometry tests. Extend archive to 2,560 px/DPR 2 and shared to 2,560 px/DPR 1.25, recording real grid/card widths with `currentSrc`. Unit tests should assert the capped top-breakpoint slots rather than hard-code the current `20vw`/`25vw`/`33vw` defect. These are targeted browser cases, not a request for a combinatorial viewport matrix.
+### TEST-C12-03 — On This Day's new database semantics are asserted with source text and a JavaScript imitation
+
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed test-oracle gap; current query is correct by source inspection**
+- Regions: `apps/web/src/__tests__/data-timeline.test.ts:49-89,184-207`; production query `apps/web/src/lib/data-timeline.ts:117-136`; generated schema `apps/web/src/db/schema.ts:40-46`; Cycle 11 acceptance claim `.context/plans/cycle-11-2026-07-18-plan.md:44-48,96-103`
+
+The test asserts that source strings mention `eq(images.capture_month, month)` and then proves cross-year behavior with an unrelated JavaScript `Date` filter. It does not insert MySQL rows, verify generated values, run the Drizzle query, confirm leap-day/null matching, or inspect the query plan. Thus it cannot validate the behavior or the claimed index use.
+
+Concrete failure: the generated expression could compute the wrong value, the query could bind/order incorrectly, or the intended index could be invisible; the source strings and JavaScript imitation still pass.
+
+Suggested fix: in the disposable MySQL lane, insert null, normal cross-year, nonmatching, and February 29 capture dates; call or reproduce the real Drizzle query and verify exact ids/order/limit. Run `EXPLAIN FORMAT=JSON` (with sufficient representative rows if necessary) or at minimum assert the intended usable index definition separately rather than claiming sargability from source text.
 
 ## Final missed-issue sweep
 
-I rechecked candidate boundaries for one, two, three, four, and five columns across DPR 1/1.25/1.5/2, invalid/unmeasured width helpers, observer cleanup, memo invalidation, fallback behavior, action/route/security contracts, migration tests, upload/restore/delete paths, PWA tests, touch targets, and release checks. No second independent current coverage gap survived deduplication; the stale `MasonryCard` comments and Cycle 7 ledger are documentation findings rather than missing executable product assertions.
+I rechecked the real Sharp delivered-width test, search RSC listener timing/activation, security lint tests, privacy symmetry, migration journal/post-condition coverage, browser seed assumptions, and expected CLIP skips. No fourth independent current coverage gap survived deduplication.
