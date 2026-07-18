@@ -139,8 +139,10 @@ describe('cycle 17 operator-facing copy and routing contracts', () => {
     });
 
     it('documents semantic-search stub limits and includes required copyright examples', () => {
-        expect(readApp('messages/en.json')).toContain('Stub mode uses deterministic placeholder embeddings');
-        expect(readApp('messages/en.json')).toContain('Production CLIP search is operator-runbook-only');
+        const en = readApp('messages/en.json');
+        expect(en).toContain('Stub mode uses deterministic placeholder embeddings');
+        expect(en).toContain("Production CLIP search can't be enabled here");
+        expect(en).toContain('SEMANTIC_SEARCH_ALLOW_PRODUCTION');
         const copyright = String.fromCodePoint(0xa9);
         expect(readRepo('README.md')).toContain(`"copyright": "${copyright} 2026 Author Name"`);
         expect(readApp('src/site-config.example.json')).toContain(`"copyright": "${copyright} 2026 GalleryKit"`);
