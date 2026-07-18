@@ -33,7 +33,7 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Active Current-Cycle Plans
 
-- Cycle 3/100 (2026-07-18) Implementation Plan - mobile tag disclosure containment, CSS-column-safe image priority, mobile nav keyboard disclosure flow, browser regressions, prior release-ledger closure, full gates, signed push, and per-cycle deploy (`cycle-3-2026-07-18-plan.md`)
+- Cycle 4/100 (2026-07-18) Implementation Plan - masonry browser geometry proof, universal-first-card priority-policy cleanup, Cycle 3 release-ledger closure, full gates, signed push, and per-cycle deploy (`cycle-4-2026-07-18-plan.md`)
 - Run-10 Cycle 38/100 Implementation Plan - recovery ledger after Cycle 38 subagent usage-limit failure: preserve partial reviews, finish aggregate/deferred register, center remaining admin pages, clarify analytics/GPS docs, close default raw-input touch-target scanner gap, run full gates, signed push, and per-cycle deploy (`run10-cycle38/plan.md`)
 - Run-10 Cycle 38/100 Deferred Findings - Cycle 38 deferred architecture/topology/performance/operator/test items with preserved severity/confidence and exit criteria (`run10-cycle38/deferred.md`)
 
@@ -46,6 +46,7 @@ the MED backlog re-review mechanical rather than open-ended, but does not by its
 
 ## Recently Completed Current-Cycle Plans
 
+- Cycle 3/100 (2026-07-18) Implementation Plan - completed mobile tag disclosure containment, CSS-column-safe image priority, mobile nav keyboard disclosure flow, browser regressions, and Cycle 2 release-ledger closure; signed production release verified through `01d39653` (`archive/cycle-3-2026-07-18-plan.md`)
 - Cycle 2/100 (2026-07-18) Implementation Plan - completed sitemap runtime ownership, responsive scheduling, combobox semantics, semantic recall docs, deploy trust wording, full gates, signed push, and per-cycle production release through `afa11cf4`; Cycle 3 records the follow-up CSS-column geometry correction and replaces the missing claimed browser regression (`archive/cycle-2-2026-07-18-plan.md`)
 - Cycle 1/100 (2026-07-18) Implementation Plan - completed seven fresh review fixes covering login outage rate limiting, Strict Effects lifecycle, 320 px nav reflow, discovery-setting copy, GeoIP failure diagnostics, deploy-env ownership, and SSR image priority; all gates green and per-cycle release recorded in git/deploy history (`archive/cycle-1-2026-07-18-plan.md`)
 - Run-10 Cycle 37/100 Implementation Plan - completed, pushed, deployed, and recovery-deployed through signed `54083a2c`; covered navigation visibility settings, LR restore-slot re-scope, photo-page SW docs, OSM privacy note, admin centering, nav-toggle accessibility/touch-target recovery, gates, and production smoke (`run10-cycle37/plan.md`)

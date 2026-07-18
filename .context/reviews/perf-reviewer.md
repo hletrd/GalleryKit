@@ -1,51 +1,58 @@
-# Performance reviewer — cycle 3 provenance
+# Performance reviewer — cycle 4 provenance
 
-Review target: `afa11cf4`, 2026-07-18 KST. Review only.
+Review target: `01d39653`, 2026-07-18 KST. Review only.
 
 ## Inventory and review coverage
 
-The complete 939-file inventory was classified before review: public/admin SSR and route handlers, all data/analytics/search queries, 61 client components, image/Sharp/CLIP pipelines, queue/backfill/maintenance writers, DB pool/schema/migrations, PWA caches, uploads/restores, deploy/container assets, 368 unit tests, 12 browser files, and operating docs/deferred history. I traced CPU, memory, I/O, DB occupancy, request waterfalls, hydration, timers/listeners, pagination/cardinality, and recent diffs. ESLint, architectural linters, and typecheck passed. A focused headless-Chromium layout experiment validated CSS-column geometry rather than relying on comments or final DOM attributes.
+I classified the complete maintained product inventory before review: all public/admin SSR and route handlers, every data/analytics/search query, 61 components, Sharp/color/HDR/CLIP paths, queue/backfill/maintenance writers, DB schema/migrations, PWA caches, upload/restore pipelines, deploy/container assets, 369 unit-test files, 12 Playwright files, and operating/deferred documentation. I reviewed the full Cycle 3-to-HEAD diff and swept CPU, memory, I/O, request waterfalls, DB-pool occupancy, pagination/cardinality, hydration, layout, listeners/timers, and image scheduling across the rest of the repository.
 
-## Genuinely new cycle-3 finding
+API/auth/action/rate-limit gates, typecheck, focused tests, and diff hygiene passed. Production SSR now emits one eager masonry image and no longer emits the invalid first-N media preload set.
 
-### PERF-C3-01 — Desktop preloads below-fold cards while missing visible column leaders
+## New performance findings
+
+No new runtime performance defect was confirmed at this HEAD. `d2ef7817` intentionally trades speculative desktop first-row acceleration for correct identity ownership under browser-balanced CSS columns; viewport-native lazy loading still discovers the other visible column leaders. The remaining obsolete preload comments/dead policy parameters are recorded as `CR-C4-02` / `ARCH-C4-02`, not inflated into a measured performance regression.
+
+## Revalidated carry-forward performance findings
+
+### PERF-C4-R1 — Independent background workers reserve the same DB-pool capacity
+
+- Severity: **High**
+- Confidence: **High**
+- Status: **Confirmed carry-forward; not new**
+- Regions: `apps/web/src/db/index.ts:21-45`; `apps/web/src/lib/image-queue.ts:120-152`; `apps/web/src/lib/admin-backfill-runner.ts:97-142`; `apps/web/src/lib/background-db-writes.ts`
+
+The image queue and in-app backfill compute independent concurrency budgets against the same pool, while analytics/background writes and request traffic share the remaining connections.
+
+Concrete failure: queue processing overlaps a two-worker backfill at the shipped 10-connection pool, leaving approximately one connection for public/admin traffic and causing pool waits or request latency spikes.
+
+Suggested fix: introduce a shared weighted background admission controller or mutual exclusion for the high-cost workers, with foreground reserve telemetry and an overlap stress test.
+
+### PERF-C4-R2 — The public map can hydrate thousands of duplicate marker/list records
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed new cycle-3 finding**
-- Regions: `apps/web/src/components/home-client.tsx:129-169,272-314,363-375`; `apps/web/src/components/masonry-card.tsx:21-33,121-145`; analogous first-N scheduling in `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:187-196,244-245` and archive pages at `timeline/page.tsx:138,227-282` / `year/[year]/page.tsx:131,189-241`
+- Status: **Confirmed carry-forward; exit criterion has not fired in repository evidence**
+- Regions: `apps/web/src/lib/data.ts:1759-1816`; `apps/web/src/app/[locale]/(public)/map/page.tsx:42-109`; `apps/web/src/components/map/map-client.tsx:77-145`
 
-The new responsive preloads correctly avoid mobile through `media`, but select cards by row-major DOM index. CSS columns are column-major/balanced. In Chromium, 20 equal 180 px cards in four columns yielded visual top indices `0,5,10,15`; the code preloads `1,2,3` for four columns and gives indices `0..3` eager/high after hydration. Those requests target cards down column 1 while top cards in later columns receive no explicit priority.
+The bounded query can still serialize up to 10,000 geotagged records and render marker data plus an accessible fallback list.
 
-Concrete failure: a cold desktop gallery competes for bandwidth on below-fold derivatives and can leave the actual largest above-fold photo at lazy/auto priority, worsening LCP—the inverse of the change's purpose. Variable image heights make a static first-N correction impossible under the current layout.
+Concrete failure: a large gallery pays a multi-megabyte RSC/client payload and long map/list hydration before interaction.
 
-Suggested fix: immediately constrain explicit preload/high priority to the first universally visible item. For multi-card priority, make layout placement deterministic (explicit columns/grid derived from dimensions) or measure actual geometry before issuing lower-priority opportunistic preloads. Add cold-cache request/geometry E2E coverage; the current string fixture at `masonry-card-memo.test.ts:115-123` cannot measure the waterfall.
+Suggested fix: when production cardinality triggers the documented threshold, use clustered viewport fetch and paginate or virtualize the accessible list.
 
-## Revalidated carry-forward performance findings (not new)
+### PERF-C4-R3 — Semantic and similar routes repeat bounded blob transfer/decode/ranking
 
-### PERF-C3-R1 — Queue and in-app backfill independently spend the same DB reserve
-
-- Severity/Confidence: **High / High** (preserved carry-forward classification)
-- Regions: `apps/web/src/db/index.ts:21-45`; `apps/web/src/lib/image-queue.ts:120-152`; `apps/web/src/lib/admin-backfill-runner.ts:97-142`
-
-At the 10-connection pool, queue and backfill can each admit two workers while the backfill pins its run lock. Their independent proofs do not compose and can consume about nine connections before live request, analytics, or maintenance work. Use one weighted background admission budget or quiesce the queue during in-app backfill.
-
-### PERF-C3-R2 — Public map duplicates up to 10,000 records into map and fallback UI
-
-- Severity/Confidence: **Medium / High**
-- Regions: `apps/web/src/lib/data.ts:1759-1791`; `apps/web/src/app/[locale]/(public)/map/page.tsx:42-109`; `apps/web/src/components/map/map-client.tsx:77-140`
-- Status: unchanged carry-forward; exit criterion has not fired in repository evidence
-
-The bounded query still serializes thousands of markers and renders a duplicate accessible list. Use clustering/viewport fetch plus paginated or virtualized accessible results when production cardinality warrants it.
-
-### PERF-C3-R3 — Semantic routes repeat bounded blob transfer/decode/ranking
-
-- Severity/Confidence: **Medium / High**
+- Severity: **Medium**
+- Confidence: **High**
+- Status: **Confirmed carry-forward**
 - Regions: `apps/web/src/app/api/search/semantic/route.ts:263-353`; `apps/web/src/app/api/search/similar/[id]/route.ts:137-270`
-- Status: unchanged carry-forward
 
-Each request reads and decodes the same embedding window and ranks it in the web process. Keep the bounded limits; at activation/scale, move to a model-versioned in-memory snapshot/index or vector store with explicit invalidation and memory limits.
+Each request re-reads and decodes the embedding window and ranks vectors in the web process.
+
+Concrete failure: concurrent semantic requests repeatedly move and decode the same blobs, consuming DB bandwidth and CPU even though scan caps prevent unbounded work.
+
+Suggested fix: at production activation/scale, adopt a model-versioned bounded in-memory snapshot/index or vector store with explicit invalidation and memory limits.
 
 ## Final missed-issue sweep
 
-I rechecked query/index alignment, non-sargable archive/search predicates, pagination, buffer materialization, Sharp and CLIP concurrency, combined pool occupancy, service-worker cache mutations, image srcset/sizes/preload output, client state growth, observers/listeners, route freshness, and deploy cleanup. The new masonry scheduling defect is the only new performance issue supported by direct runtime evidence; all other surviving items map to established deferred rows and were not double-counted.
+The closing sweep covered query/index alignment, pagination and bounds, Sharp/CLIP concurrency, combined pool occupancy, service-worker cache mutation, image srcset/sizes/eager output, client state growth, observers, timers, and deploy cleanup. No additional new performance issue survived validation.

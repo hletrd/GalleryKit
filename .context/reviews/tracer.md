@@ -1,59 +1,41 @@
-# Tracer — cycle 3 provenance
+# Tracer — cycle 4 provenance
 
-Review target: `afa11cf4`, 2026-07-18 KST. Review only.
+Review target: `01d39653`, 2026-07-18 KST. Review only.
 
 ## Inventory and trace coverage
 
-I first inventoried the entire 939-file repository: all App Router and action files, libraries/components/DB, migrations/reconcile/scripts, tests/E2E, PWA and image assets, Docker/nginx/deploy, and governing/current/deferred docs. Causal traces covered request→guards→mutation→DB, upload→quota→original→privacy scrub→queue→derivatives→embedding, delete→transaction→durable cleanup, restore→locks/barrier/import/migrations/stores, SSR→preload→CSS placement→hydration, semantic inference→ranking/enrichment, and deploy→replacement→health. The final trace sweep also challenged recent tests/comments against runtime semantics.
+I inventoried the full maintained repository, then traced request→guards→mutation→DB, upload→quota→private original→queue→derivatives/embedding, delete→transaction→durable cleanup, restore→locks/barrier/import/migrations/stores, SSR→image attributes→CSS placement→browser request, nav activation→focus→collapse, tag disclosure→layout/hit testing, semantic inference→ranking/enrichment, migration journal→apply→postcondition, and deploy→replacement→health→production. Every post-Cycle-3 change was followed through callers, tests, SSR output, and current production output.
 
-## Genuinely new cycle-3 findings
+## New trace findings
 
-### TRC-C3-01 — Resource-hint target selection breaks at the DOM-order → visual-placement edge
+### TRC-C4-01 — The Cycle 3 release trace reaches production but not its authoritative terminal ledger
 
-- Severity: **Medium**
+- Severity: **Low**
 - Confidence: **High**
-- Status: **Confirmed new cycle-3 causal break**
-- Trace: `home-client.tsx:146-169` selects indices 1-4 → React emits media-qualified image preloads → `home-client.tsx:307-314,363-375` hands the same ordered DOM list to CSS columns → browser balances top-to-bottom chunks → `masonry-card.tsx:121-145` applies eager/high from the same first-N assumption
-- Adjacent repetitions: `g/[key]/page.tsx:192-196,244-245`; `timeline/page.tsx:138,227-282`; `year/[year]/page.tsx:131,189-241`
+- Status: **Confirmed** evidence-chain break; same root as `CR-C4-01`
+- Trace/regions: `.context/plans/cycle-3-2026-07-18-plan.md:5` declares push/deploy pending → signed commits `2d9060de..01d39653` exist on `origin/master` → production SSR contains the changed tag/nav/masonry output → `.context/plans/cycle-3-2026-07-18-plan.md:45-48,64-65` still terminates before push/deploy → `.context/plans/README.md:34-38` keeps Cycle 3 active
 
-The missing causal edge is “DOM index identifies visible column leader.” It does not exist. Browser proof at four columns placed indices 0/5/10/15 at the top, while the hint loop targeted 1/2/3. Thus the viewport media predicates are correct but operate on the wrong identities.
+Concrete failure: recovery tooling or a reviewer follows the ledger rather than reconstructing git plus live state, and repeats terminal work or misstates which release production runs.
 
-Concrete failure: parser-time preload/high priority accelerates below-fold cards and misses later-column LCP candidates. Post-hydration DOM assertions can report the intended number of eager elements without revealing their actual positions.
+Suggested fix: append the signed commit frontier and live proof, mark both transitions complete, archive Cycle 3, and make Cycle 4 the active trace root.
 
-Fix: either stop the trace at the only invariant target (index 0) or produce explicit placement metadata from a deterministic layout. Test the complete trace by correlating resource requests with card rects.
+### TRC-C4-02 — The image-priority code path and its adjacent declared contract now diverge
 
-### TRC-C3-02 — Claimed request-timeline evidence terminates before the browser boundary
-
-- Severity: **Low-Medium**
+- Severity: **Low**
 - Confidence: **High**
-- Status: **Confirmed new cycle-3 evidence-chain break**
-- Trace: `.context/plans/cycle-2-2026-07-18-plan.md:29-32` promises browser request coverage → `masonry-card-memo.test.ts:115-123` only reads source → `apps/web/e2e/public.spec.ts:4-49` covers homepage presence and search state, not image requests/layout
+- Status: **Confirmed** maintainability trace break; runtime output is correct
+- Trace/regions: `apps/web/src/components/home-client.tsx:26-49` declares desktop media preloads/first-row eager scheduling → `home-client.tsx:127-145` actually returns true only for index 0 and contains no preload call → `masonry-card.tsx:28-33` still declares first-N/wider-eager props → `masonry-card.tsx:121-144` receives only the index-0 policy
 
-The evidence chain proves strings were added, not that media filters, srcsets, balanced placement, or request priority work together. Update the ledger and add the missing browser leg.
+Concrete failure: a maintainer traces from interface comments, assumes missing first-row scheduling is an implementation omission, and restores the invalid DOM-first-N behavior.
 
-## Revalidated carry-forward traces (not new)
+Suggested fix: align comments and types with the actual trace, remove ignored policy inputs, and expose one universal-first-card predicate.
 
-### TRC-C3-R1 — Background DB reservation traces converge on the same pool
+## Revalidated carry-forward traces
 
-- Severity/Confidence: **High / High**
-- Trace: `db/index.ts:31-45` establishes 10 connections → `image-queue.ts:120-152` independently reserves/adopts workers + `admin-backfill-runner.ts:97-142` independently reserves/adopts workers → distinct locks allow overlap → live query/analytics work reaches the same queue
+- **TRC-C4-R1 — background reservation traces converge on one DB pool** — High / High / confirmed carry-forward; `db/index.ts:21-45`, `image-queue.ts:120-152`, `admin-backfill-runner.ts:97-142`. Use a shared weighted budget.
+- **TRC-C4-R2 — restore consistency stops at the SQL/filesystem generation boundary** — Medium / High / documented carry-forward; `db-actions.ts:789-1098`, `docker-compose.yml:24-32`. Pair snapshots with a generation/manifest or reconcile after restore.
+- **TRC-C4-R3 — deploy failure is observed after promotion with no reverse transition** — Medium / High / confirmed carry-forward; `apps/web/deploy.sh:63-89`. Preserve and restore the prior release or promote a candidate only after health.
 
-Each local calculation passes, but their summed occupancy can leave one foreground connection. A shared weighted ledger or mutual exclusion must own the converging edge.
+## Final causal sweep
 
-### TRC-C3-R2 — Restore safety stops at the SQL/filesystem generation boundary
-
-- Severity/Confidence: **Medium / High**
-- Trace: `db-actions.ts:789-1046` fences writers and imports SQL → `docker-compose.yml:24-32` retains originals/derivatives/resources independently → restored rows and files can belong to different snapshots
-
-This remains an explicitly documented operational boundary, not a new code regression. Full recovery needs paired snapshot identity and post-restore reconciliation.
-
-### TRC-C3-R3 — Deploy health observes failure after promotion
-
-- Severity/Confidence: **Medium / High**
-- Trace: `deploy.sh:67` replaces/starts the fixed service → `:69-83` observes health → `:85-89` exits without a reverse edge
-
-The trace has detection but no rollback transition. This is unchanged carry-forward.
-
-## Final causal/missed-file sweep
-
-The closing sweep traced sitemap build/runtime cache ownership, search query/request/result/listbox state, every admin/public writer through origin/rate-limit/barrier checks, processing/delete races, restore sidecars and advisory locks, session/file cleanup, schema journal→apply→postcondition, settings→encoder→cache validators, IP trust→rate limits/analytics, and deploy→prune. No additional new causal break survived competing-hypothesis validation; established map/vector/topology/restore/deploy risks were preserved as carry-forward rather than counted again.
+The closing trace rechecked sitemap runtime cache ownership, search/listbox ownership, every writer's origin/rate-limit/barrier sequence, processing/delete races, restore sidecars/advisory locks, schema application, settings→encoder→ETag flow, proxy IP→rate-limit/analytics flow, service-worker cache mutation, and deploy/prune ordering. No further new causal break survived validation.

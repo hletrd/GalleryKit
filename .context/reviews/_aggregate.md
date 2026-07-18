@@ -1,146 +1,116 @@
-# Cycle 3 Aggregate Review
+# Cycle 4 Aggregate Review
 
 Date: 2026-07-18 KST
-Review HEAD: `afa11cf4`
+Review HEAD: `01d39653`
 
 ## Agent coverage
 
 Completed provenance reviews: code-reviewer, perf-reviewer,
 security-reviewer, critic, verifier, test-engineer, tracer, architect,
-debugger, document-specialist, and designer. No reviewer failed.
+debugger, document-specialist, designer, and the project-specific
+photographer/color-HDR lane. Each lane inventoried its relevant whole-repo
+surface and performed a final missed-issue sweep.
 
-The environment exposed two concurrent worker slots rather than eleven named
-reviewer profiles, so the required perspectives were distributed across two
-workers and each perspective produced its own provenance file. Both workers
-first inventoried the full repository and recorded final missed-file sweeps.
-The designer read and used the complete applicable `agent-browser` skill set
-and exercised the production UI at 1536x900 and 393x852 with accessibility
-snapshots, computed DOM/box metrics, focus/keyboard interaction, theme/search
-states, network/debug/trace tooling, and responsive geometry. Authenticated
-admin pages, trustworthy reduced-motion emulation, and a cold retained request
-log remained live-validation limitations; findings below do not depend on
-those unavailable proofs.
+The environment provided one child-review slot. The core/performance/security/
+architecture lanes ran there; the validation, test, documentation, debugger,
+and browser-backed designer lanes ran in this cycle agent. The designer read
+and used the full agent-browser skill set against production at 320, 393, and
+1536 px, using accessibility snapshots, keyboard interaction, computed DOM
+geometry/styles, theme/search states, network/debug buffers, trace, and visual
+captures. Authenticated admin, unsupported RTL locales, reliable
+reduced-motion emulation in this CLI build, and true cold-cache profiling
+remain manual-validation limits; no finding relies on those unavailable proofs.
 
 ## New deduplicated findings
 
-### C3-01 — Closed mobile tag disclosure leaves its flex panel rendered beneath the gallery
+### C4-01 — Masonry Playwright coverage claims geometry without asserting geometry
 
-- Severity/Confidence: **High / High**
-- Agreement: designer, with direct fresh-session Chromium evidence
-- Regions: `apps/web/src/components/tag-filter.tsx:143-160`
-- Failure: the author `flex` utility overrides Chromium's closed-`details`
-  hiding rule. At 393 px, `details.open` was false and its box was 44 px tall,
-  but the tag group still computed to `display:flex` with a 361x200 rectangle
-  starting below the summary. The accessibility tree and Tab order omitted the
-  controls while the panel painted underneath the first masonry card; hit
-  testing selected the photo layer instead of a tag chip. Opening correctly
-  exposed the group and moved the grid, then closing reproduced the mismatch.
-- Disposition: schedule this cycle. Explicitly hide the group while closed,
-  preserve the open flex layout, and add a real mobile browser regression for
-  rendered box/hit-target/flow behavior.
+- Severity / confidence: **Medium / High**
+- Status: **Confirmed test/evidence defect; current production layout is not
+  observed broken**
+- Agreement: critic, verifier, test-engineer, debugger,
+  document-specialist, designer
+- Regions: `apps/web/e2e/masonry-priority.spec.ts:20-32` and the completed
+  claim in `.context/plans/cycle-3-2026-07-18-plan.md:23-31`
+- Failure: the test asserts that only DOM index 0 carries eager/high attributes
+  and that its request occurred, but never reads a rectangle. Live 1536x900
+  geometry placed the top-edge CSS-column leaders at non-contiguous indices 0,
+  6, 13, 16, and later, whereas 393x852 had only index 0. A future breakpoint
+  or masonry-class regression could move index 0 away from the visual top edge
+  while leaving its attributes unchanged; both viewport variants would remain
+  green and explicit priority could again target a below-fold card.
+- Disposition: **Schedule this cycle.** Collect browser-computed card
+  rectangles, derive the visual top-edge leaders, prove index 0 belongs to
+  that set at both viewports and that desktop has multiple/non-contiguous
+  leaders, then retain the explicit-priority and request assertions.
 
-### C3-02 — CSS multi-column placement invalidates first-N image priority and preload targeting
+### C4-02 — The one-card priority fix left dead layout-policy APIs and obsolete contracts
 
-- Severity/Confidence: **Medium / High**
-- Agreement: code-reviewer, perf-reviewer, architect, debugger, tracer, and
-  designer; independently reproduced in isolated and live Chromium geometry
-- Regions: `apps/web/src/components/home-client.tsx:129-169,272-314,363-375`;
-  `apps/web/src/components/masonry-card.tsx:21-33,121-145`;
-  analogous first-N scheduling in
-  `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:187-196,220-245`,
-  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:138,227-282`, and
-  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:131,189-241`
-- Failure: the scheduling code equates DOM indices `0..columnCount-1` with a
-  visual first row, but CSS columns balance top-to-bottom chunks. Live 1536 px
-  production geometry put eager/high cards 0-4 in the first column while the
-  visible second-column leader was index 6 and remained lazy/auto. An isolated
-  four-column proof placed top cards at indices 0/5/10/15. Parser-time hints
-  therefore consume bandwidth on below-fold cards and can miss the actual LCP.
-- Disposition: schedule this cycle. Remove the invalid first-N inference on all
-  affected masonry surfaces and keep explicit high/eager/preload ownership to
-  the universally visible first card unless layout placement becomes
-  deterministic. Lock the layout/scheduling boundary with browser geometry.
+- Severity / confidence: **Low / High**
+- Status: **Confirmed maintainability defect; runtime behavior is correct**
+- Agreement: code-reviewer, tracer, architect
+- Regions: `apps/web/src/components/home-client.tsx:26-49,127-145,247-262,344-345`;
+  `apps/web/src/components/masonry-card.tsx:23-33`
+- Failure: adjacent comments still say media-qualified preloads cover desktop
+  first-row cards, and the priority helpers/props still model a wider
+  layout-aware policy. The helpers are now identical index-0 predicates and
+  ignore `columnCount` / `hasMeasuredViewport`. A maintainer following those
+  declarations can treat the removed first-N policy as missing implementation
+  and recreate the CSS-column bug Cycle 3 fixed.
+- Disposition: **Schedule this cycle.** Expose one universal-first-card
+  predicate, remove ignored policy arguments/duplicate derivation, keep column
+  count only for intrinsic-size estimation, and update comments/tests to the
+  actual ownership boundary.
 
-### C3-03 — Expanded mobile navigation skips newly revealed links in keyboard order
+### C4-03 — Cycle 3 remains documented as pending and active after signed production release
 
-- Severity/Confidence: **Medium / High**
-- Agreement: designer, with direct keyboard/accessibility evidence
-- Regions: `apps/web/src/components/nav-client.tsx:112-216`;
-  incomplete source contract at
-  `apps/web/src/__tests__/client-source-contracts.test.ts:64`
-- Failure: topic links precede controls and the menu toggle in DOM order. After
-  activating **Expand menu**, focus remains on the now **Collapse menu** toggle;
-  the next Tab goes directly to the main tag-filter summary, skipping the
-  newly visible topic links. Escape does not collapse. Keyboard users must
-  reverse-tab through unrelated controls to reach the content they revealed.
-- Disposition: schedule this cycle. Restore logical disclosure focus order,
-  support Escape collapse/focus restoration, and add mobile browser coverage
-  for open, Tab/Shift+Tab, and Escape.
-
-### C3-04 — Responsive image work claims a browser regression that was never committed
-
-- Severity/Confidence: **Medium / High**
-- Agreement: code-reviewer, architect, debugger, tracer, critic, verifier,
-  test-engineer, and document-specialist
-- Regions: `.context/plans/cycle-2-2026-07-18-plan.md:29-32,64-78`;
-  `apps/web/src/__tests__/masonry-card-memo.test.ts:115-123`;
-  `apps/web/e2e/public.spec.ts:21-50`
-- Failure: Cycle 2 checks off mobile/desktop request-timeline coverage, but its
-  only preload regression reads source text and checks literals. The Playwright
-  change covers combobox state, not resource hints, requests, or geometry. The
-  exact C3-02 wrong-identity behavior stays green, and later framework/media
-  regressions could do the same.
-- Disposition: schedule this cycle together with C3-02. Correct the Cycle 2
-  evidence and commit browser coverage that crosses emitted hints/priority into
-  actual responsive geometry rather than asserting final source strings.
-
-### C3-05 — Cycle 2 remains documented as active and unreleased after release
-
-- Severity/Confidence: **Low / High**
-- Agreement: critic, verifier, document-specialist; corroborated by git and
-  live production state
-- Regions: `.context/plans/cycle-2-2026-07-18-plan.md:5,45-48,79-80`;
+- Severity / confidence: **Low / High**
+- Status: **Confirmed release-provenance defect**
+- Agreement: code-reviewer, critic, verifier, test-engineer, tracer,
+  architect, debugger, document-specialist
+- Regions: `.context/plans/cycle-3-2026-07-18-plan.md:5,45-48,56-65` and
   `.context/plans/README.md:34-38`
-- Failure: the plan says signed push/deploy remain pending and the index lists
-  Cycle 2 as active, while `master == origin/master`, all five implementation
-  commits have good GPG signatures, and production exposes the shipped search
-  and responsive-preload behavior. Recovery work can resume from a false
+- Failure: `master == origin/master` at signed `01d39653`, all five Cycle 3
+  commits have good signatures, and production renders the shipped tag/nav/
+  one-card-priority behavior. The plan nevertheless says signed push/deploy
+  are pending and remains active. Recovery work can resume from a false
   frontier or repeat terminal actions.
-- Disposition: schedule this cycle. Record the signed release frontier and
-  production evidence, mark the prior plan complete, and archive it when the
-  Cycle 3 plan becomes active.
+- Disposition: **Schedule this cycle.** Record the signed frontier and live
+  proof, check terminal tasks, mark complete, archive Cycle 3, and advance the
+  active index to Cycle 4.
 
 ## Revalidated carry-forward findings
 
-These are not newly discovered and retain their original severity/confidence,
-reasons, and exit criteria in `.context/plans/deferred-carry-forward.md`:
+These are not newly discovered and retain their authoritative severity,
+confidence, reason, and exit criterion in
+`.context/plans/deferred-carry-forward.md`:
 
-- shared queue/backfill DB-budget oversubscription (High / High);
-- warn-only single-writer enforcement and process-local coordination
-  (High / High in the security lane; documented single-instance boundary);
-- failed deploy health recovery/rollback (Medium / High);
-- SQL-restore/file-store generation mismatch (Medium / High);
+- shared image-queue/backfill DB-pool oversubscription (High / High);
+- warn-only single-writer enforcement with process-local coordination
+  (High / High in the security/topology lane);
+- failed deploy health without rollback (Medium / High);
+- SQL restore/file-store generation mismatch (Medium / High);
 - 10,000-row map rendering and repeated semantic vector scans
   (Medium / High);
-- existing authenticated-admin, browser-matrix, zoom, and broad test-infra
-  validation items.
+- existing authenticated-admin, browser-matrix, zoom, model-weight, and broad
+  environment validation items.
 
-No security, correctness, or data-loss finding is newly deferred by this
-review. Prompt 2 must preserve all carry-forward policy and exit criteria.
+No security, correctness, or data-loss finding is newly deferred by Cycle 4.
 
-## Baseline evidence and final aggregation sweep
+## Baseline evidence and final sweep
 
-Review lanes reported green ESLint, API-auth/action-origin/public-route
-scanners, typecheck, production build, production dependency audit, and full
-Vitest (361 files passed, 2 skipped; 3,410 tests passed, 4 expected CLIP skips).
-The built sitemap remains dynamic and absent from the prerender manifest. The
-designer revalidated search combobox ownership and exposed C3-01/C3-03 through
-live interaction rather than screenshots alone.
+The independent lane reported green API-auth, action-origin/mutation-barrier,
+public-route-rate-limit, full typecheck, focused 42-test Vitest, and diff
+checks. Production SSR and browser interaction confirmed the Cycle 3 runtime
+fixes. The final aggregate sweep preserved the geometry-proof defect at the
+highest Medium/High classification, kept the distinct dead-policy abstraction
+and terminal-ledger findings at Low/High, and mapped every surviving historical
+risk to the carry-forward register.
 
-The final aggregation sweep merged the CSS-column finding at Medium/High across
-six reviewers, promoted the missing-browser-proof finding to Medium/High based
-on eight-agent agreement and its role in allowing C3-02, preserved the mobile
-tag disclosure at its original High/High classification, retained the nav focus
-issue at Medium/High, and kept ledger drift at Low/High. Every new provenance
-finding is scheduled above; every surviving non-new issue maps to the existing
-carry-forward register. There are no agent failures.
+## AGENT FAILURES
+
+A second child-review worker was attempted twice but the thread tree rejected
+both starts at its concurrency limit. No perspective was dropped: the six
+assigned validation/UI roles were completed locally with their own provenance
+files and browser evidence. The one child worker that started returned
+successfully.

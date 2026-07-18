@@ -1,49 +1,46 @@
-# Code reviewer — cycle 3 provenance
+# Code reviewer — cycle 4 provenance
 
-Review target: `afa11cf4` (`master`), 2026-07-18 KST. Review only; no source, plan, aggregate, or git state was changed.
+Review target: `01d39653` (`master`), 2026-07-18 KST. Review only; no source or plan file was changed.
 
-## Relevant-file inventory and method
+## Complete inventory and method
 
-I enumerated all 939 repository files before reviewing: 81 App Router files, 115 library files, 61 components, 3 DB files, 368 unit-test files, 12 Playwright files, 29 scripts, all 31 migration SQL files plus journal/reconcile, public/PWA assets, package/build/lint/type configs, Docker/Compose/nginx/deploy surfaces, and `AGENTS.md`, `CLAUDE.md`, both READMEs, current review history, and the authoritative deferred register. I traced every change since the cycle-2 start (`ba4bc60a`) through its consumers and tests, then swept actions/routes, DB and filesystem lifecycles, queues/locks, image scheduling, error paths, suppressions, and source-contract tests. ESLint, all three custom architectural linters, typecheck, and `git diff --check` passed.
+I enumerated the entire working tree before reviewing. Excluding generated/dependency/cache/history artifacts, the maintained product surface comprises 635 `apps/web/src` files (81 App Router files, 115 libraries, 61 components, 3 DB files, and 369 unit-test files), 12 Playwright files, 29 scripts, 31 migration SQL files plus the Drizzle journal/reconcile implementation, build/package/CI configuration, Docker/Compose/nginx/deploy assets, PWA assets, and the governing `AGENTS.md`, full `CLAUDE.md`, current plans, current reviews, and deferred registers. I reviewed every file changed from the Cycle 3 review target `afa11cf4` through HEAD and traced every changed symbol through callers, tests, server-rendered output, and production-visible behavior. The final whole-repository sweep covered routes/actions, auth/rate-limit/mutation barriers, DB/filesystem lifecycles, queues/locks, migrations, privacy projections, color/HDR, image delivery, caches, build/runtime configuration, deployment, and suppressions.
 
-## Genuinely new cycle-3 findings
+Evidence: API-auth lint, action-origin/mutation-barrier lint, public-route-rate-limit lint, full typecheck, focused 42-test Vitest run, and `git diff --check` passed. `master == origin/master`; all five post-review commits report good GPG signatures. The live home document contains the new `group-open:flex` disclosure fix, the two-id nav control relationship, 30 masonry cards, and exactly one eager image, confirming the current release reached production.
 
-### CR-C3-01 — “First row” scheduling selects the wrong photos in CSS multi-column layout
+## New findings
 
-- Severity: **Medium**
+### CR-C4-01 — Cycle 3 is pushed and deployed but its authoritative plan still says both operations are pending
+
+- Severity: **Low**
 - Confidence: **High**
-- Status: **Confirmed**, newly discovered in cycle 3; the newest home preload path was introduced by `2875b816`, while the same latent assumption exists on adjacent archive/share surfaces
-- Regions: `apps/web/src/components/home-client.tsx:129-169,272-314,363-375`; `apps/web/src/components/masonry-card.tsx:21-33,121-145`; `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:187-196,220-245`; `apps/web/src/app/[locale]/(public)/timeline/page.tsx:138,227-282`; `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:131,189-241`
+- Status: **Confirmed** current-head provenance defect
+- Regions: `.context/plans/cycle-3-2026-07-18-plan.md:5,45-48,56-65`; `.context/plans/README.md:34-38`
 
-The code equates DOM indices `0..columnCount-1` with the visual first row and now preloads indices 1-4 at desktop breakpoints. CSS multi-column layout flows top-to-bottom and balances chunks across columns; it is not row-major. A headless Chromium geometry check at four columns with 20 equal cards placed indices `0,5,10,15` at `y=0`, while indices `1..4` stayed down the first column (`y=196..784`). Real variable aspect ratios make the boundary data-dependent rather than restoring the assumption.
+The plan's status, unchecked terminal work package, and progress list still say signed push and deploy are pending. In current repository state, `master` and `origin/master` are both `01d39653`; commits `2d9060de`, `235e8cb8`, `d2ef7817`, `54418100`, and `01d39653` all have good signatures. The production HTML contains the shipped Cycle 3 tag-disclosure, nav, and one-eager-card output, so deploy is also complete. The index nevertheless keeps Cycle 3 under active plans without terminal evidence.
 
-Concrete failure: desktop downloads cards 2-5 early even when some are below the fold, while the top card in columns 2-5 remains lazy/normal priority. If one of those omitted top cards becomes LCP, the attempted LCP fix delays it and spends bandwidth on the wrong images. Shared-group and archive pages repeat the same first-N heuristic.
+Concrete failure: a recovery agent trusts the authoritative plan, repeats a deploy or release audit, or starts Cycle 4 from a false release frontier. This is the same failure class Cycle 3 fixed for Cycle 2, so leaving it open immediately recreates the recently closed operational ambiguity.
 
-Suggested fix: do not claim row membership from DOM index under CSS columns. The contained safe fix is to prioritize only the universally top-left first item and let viewport discovery schedule the rest. If deterministic first-row priority is required, adopt a layout with known row membership (or explicit server/client column assignment based on the known dimensions) and preserve reading order. Add browser geometry plus request-timeline assertions at each column breakpoint.
+Suggested fix: mark the plan complete, record the signed terminal frontier and production proof, check the push/deploy boxes, archive the plan, and advance the active-plan index to Cycle 4.
 
-### CR-C3-02 — The completed plan claims browser request coverage that does not exist
+### CR-C4-02 — The masonry fix left obsolete first-row preload contracts beside the corrected code
 
-- Severity: **Low-Medium**
+- Severity: **Low**
 - Confidence: **High**
-- Status: **Confirmed** evidence/maintainability gap; it directly allowed CR-C3-01 to pass
-- Regions: `.context/plans/cycle-2-2026-07-18-plan.md:29-32,64-78`; `apps/web/src/__tests__/masonry-card-memo.test.ts:115-123`; `apps/web/e2e/public.spec.ts:4-19`
+- Status: **Confirmed** maintainability defect; runtime behavior is currently correct
+- Regions: `apps/web/src/components/home-client.tsx:26-49,127-145,247-262,344-345`; `apps/web/src/components/masonry-card.tsx:23-33`
 
-The plan marks “browser request-timeline coverage at 320 px and desktop width” complete, but the only new masonry test reads source text and asserts that preload-related strings are present. The Playwright change covers search ARIA state; no E2E spec observes preload requests or card geometry. Thus all gates pass while the actual hints target the wrong elements.
+The implementation now correctly marks only DOM index 0 eager/high, but `useColumnCount` still says media-qualified preloads cover desktop first-row cards and that column-count tracking exists so 4/5 first-row images receive eager/high. Those preloads were deleted. `MasonryCardProps` likewise still defines `isAboveFold` as the first N cards and says `shouldEagerLoad` may be wider for a five-column first row. The two derivation helpers are now identical predicates and retain ignored `columnCount` / `hasMeasuredViewport` parameters solely from the removed policy.
 
-Concrete failure: future breakpoint/media/srcset changes—and the current multicolumn ordering defect—remain green as long as the expected strings remain in the file.
+Concrete failure: the next performance change follows the adjacent comments/interface contract and reintroduces first-N priority or media preloads, recreating the CSS-column defect just fixed in `d2ef7817`. At minimum, reviewers must reverse-engineer whether comments or code are authoritative.
 
-Suggested fix: correct the completion record and add a cold-context Playwright test that records derivative requests before hydration at mobile/desktop widths, correlates requested image ids with `getBoundingClientRect().top`, and proves no below-fold card is explicitly preloaded ahead of visible column leaders.
+Suggested fix: update the comments and prop documentation to the universal-first-card contract. Then collapse the two identical derivations into one explicit priority predicate (or pass direct `index === 0`) and remove parameters that no longer participate, while retaining `useColumnCount` only for intrinsic-size/layout estimation.
 
-## Revalidated carry-forward (not new)
+## Revalidated carry-forward, not new
 
-### CR-C3-R1 — Failed deploy health leaves the failed release active
+- **CR-C4-R1 — failed deployment health has no rollback transition** — Medium / High / confirmed carry-forward; `apps/web/deploy.sh:63-89`. The fixed-name service is replaced before health passes, and failure exits without restoring the prior release.
+- **CR-C4-R2 — DB restore does not restore the matching mutable file generation** — Medium / High / confirmed documented boundary; `apps/web/src/app/[locale]/admin/db-actions.ts:789-1098`, `apps/web/docker-compose.yml:24-32`.
 
-- Severity/Confidence: **Medium / High**
-- Region: `apps/web/deploy.sh:63-89`; `apps/web/docker-compose.yml:3-17`
-- Status: unchanged carry-forward
+## Final missed-issue sweep
 
-`docker compose up -d --build` replaces the fixed-name container before the health loop. On failure the script logs and exits without restoring the prior image/container, so the unhealthy release remains live/restarting. Capture and restore the prior release or use candidate promotion after health.
-
-## Final missed-issue/file-coverage sweep
-
-The closing sweep rechecked recent sitemap caching, search state races, React resource-hint output, action/auth/rate-limit scanners, migration journal/reconcile parity, privacy projection guards, advisory-lock release helpers, restore/file cleanup paths, queue reset state, service-worker generated/template parity, raw SQL, path construction, timers/listeners, swallowed errors, and all suppressions. The sitemap and combobox fixes match their stated runtime ownership; no additional new critical/high correctness defect survived validation. Existing scale, deploy, restore-generation, and single-writer risks remain in the carry-forward register rather than being relabeled as cycle-3 discoveries.
+The closing sweep rechecked every changed file plus sibling implementations, all action/route exports, raw SQL/child processes, path construction and cleanup, migration journal/reconcile parity, privacy guards, image/CLIP queues, render/cache ownership, event/timer cleanup, and current historical findings. The tag and nav fixes match their runtime ownership, and the one-card masonry policy is correct. No other new correctness defect survived validation; established topology, restore, map/vector-scale, and deploy-recovery items remain carry-forward rather than being relabeled.
