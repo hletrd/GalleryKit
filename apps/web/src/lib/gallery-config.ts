@@ -233,7 +233,14 @@ export const getGalleryConfigDetachedStrict: typeof getGalleryConfigStrict = asy
  */
 export const DETACHED_CONFIG_TTL_MS = 2_000;
 let uncachedConfigCache: { value: GalleryConfig; expiresAt: number } | null = null;
-let uncachedConfigInFlight: Promise<GalleryConfig> | null = null;
+let uncachedConfigInFlight: { owner: symbol; promise: Promise<GalleryConfig> } | null = null;
+let detachedConfigGeneration = 0;
+
+function clearDetachedConfigInFlight(owner: symbol): void {
+    if (uncachedConfigInFlight?.owner === owner) {
+        uncachedConfigInFlight = null;
+    }
+}
 
 export const getGalleryConfigDetached: typeof _getGalleryConfig = async () => {
     const now = Date.now();
@@ -241,18 +248,23 @@ export const getGalleryConfigDetached: typeof _getGalleryConfig = async () => {
         return uncachedConfigCache.value;
     }
     if (uncachedConfigInFlight) {
-        return uncachedConfigInFlight;
+        return uncachedConfigInFlight.promise;
     }
-    uncachedConfigInFlight = (async () => {
+    const requestGeneration = detachedConfigGeneration;
+    const owner = Symbol('detached-gallery-config-read');
+    const inFlight = (async () => {
         try {
             const value = await _getGalleryConfig();
-            uncachedConfigCache = { value, expiresAt: Date.now() + DETACHED_CONFIG_TTL_MS };
+            if (requestGeneration === detachedConfigGeneration) {
+                uncachedConfigCache = { value, expiresAt: Date.now() + DETACHED_CONFIG_TTL_MS };
+            }
             return value;
         } finally {
-            uncachedConfigInFlight = null;
+            clearDetachedConfigInFlight(owner);
         }
     })();
-    return uncachedConfigInFlight;
+    uncachedConfigInFlight = { owner, promise: inFlight };
+    return inFlight;
 };
 
 /**
@@ -264,6 +276,7 @@ export const getGalleryConfigDetached: typeof _getGalleryConfig = async () => {
  * documented single-writer topology). Also used by tests.
  */
 export function invalidateDetachedGalleryConfigCache(): void {
+    detachedConfigGeneration += 1;
     uncachedConfigCache = null;
     uncachedConfigInFlight = null;
 }

@@ -140,6 +140,52 @@ describe('getGalleryConfigDetached micro-cache (C3-16)', () => {
         expect(fresh.imageQualityWebp).toBe(95);
     });
 
+    it('does not let a pre-invalidation read publish over or disown the refreshed read', async () => {
+        type SettingsRow = { key: string; value: string };
+        const pendingReads: Array<{
+            promise: Promise<SettingsRow[]>;
+            resolve: (rows: SettingsRow[]) => void;
+        }> = [];
+        selectMock.mockImplementation(() => {
+            let resolve!: (rows: SettingsRow[]) => void;
+            const promise = new Promise<SettingsRow[]>((settle) => {
+                resolve = settle;
+            });
+            pendingReads.push({ promise, resolve });
+            return {
+                from: vi.fn().mockReturnValue({
+                    where: vi.fn().mockReturnValue(promise),
+                }),
+            };
+        });
+
+        const staleRead = getGalleryConfigDetached();
+        expect(pendingReads).toHaveLength(1);
+
+        // Mirrors updateGallerySettings(): commit the new value, invalidate,
+        // then let the next detached consumer start a fresh owner.
+        invalidateDetachedGalleryConfigCache();
+        const refreshedRead = getGalleryConfigDetached();
+        expect(pendingReads).toHaveLength(2);
+
+        // The pre-invalidation read may still finish for its original caller,
+        // but must neither publish into the shared TTL cache nor clear the
+        // post-invalidation promise from the ownership slot.
+        pendingReads[0].resolve([{ key: 'image_quality_webp', value: '77' }]);
+        expect((await staleRead).imageQualityWebp).toBe(77);
+        const joinedRefreshedRead = getGalleryConfigDetached();
+        expect(selectMock).toHaveBeenCalledTimes(2);
+
+        pendingReads[1].resolve([{ key: 'image_quality_webp', value: '95' }]);
+        const [refreshed, joined] = await Promise.all([refreshedRead, joinedRefreshedRead]);
+        expect(refreshed.imageQualityWebp).toBe(95);
+        expect(joined.imageQualityWebp).toBe(95);
+
+        const cached = await getGalleryConfigDetached();
+        expect(cached.imageQualityWebp).toBe(95);
+        expect(selectMock).toHaveBeenCalledTimes(2);
+    });
+
     it('bounds the TTL at 2s and keeps the deprecated alias pointing at the same accessor (CRIT4-01)', () => {
         // The safety argument for the micro-cache ("far below any human
         // flip-setting-then-act latency") was previously protected by
