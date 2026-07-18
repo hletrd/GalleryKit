@@ -24,6 +24,16 @@ and implements generation- plus promise-identity-safe invalidation in
 `.context/plans/cycle-9-2026-07-18-plan.md`. No other carry-forward row or age
 is changed by this focused closure, and Cycle 9 adds no new deferred finding.
 
+**Cycle 11/100 closure check (2026-07-18):** the schema-cycle criteria for
+`C2-16`, `C19-07`, `C20-12`, `C20-28`, and `C21-08` fired. Cycle 11 ships the
+sargable on-this-day generated-column index, id-complete listing indexes, and
+a live disposable-MySQL reconcile/idempotence gate in migration 0032. Stale
+rows `C2-21` and `C8b-04/PERF8-BF-01` are also retired because migrations
+0029 and 0030 already shipped their requested indexes. `C94-10/C88-03`
+remains Medium/High at its approximately-16-cycle checkpoint: migration 0032
+does not implement the dedicated multi-model embedding key, write, query,
+backfill, and garbage-collection semantics in that row's exit criterion.
+
 **Age-budget check (run-10 c31):** Cycle 31 schedules all three newly confirmed findings in `.context/plans/run10-cycle31/plan.md`: stale active-cycle index state, stale Cycle 30 / loop-B Cycle 10b terminal-status wording, and the carry-forward checkpoint label drift. No Cycle 31 finding is deferred. The table already includes the newer loop-B D10b rows with preserved severity/confidence and short exit criteria; Cycle 31 updates the checkpoint labels so the register no longer appears frozen at Cycle 29. No open High-severity row newly crosses the 8-cycle budget without an existing architecture/operator/test-infra deferral rationale; Medium checkpoint handling remains bound to each row's home register.
 
 **Previous check (run-10 c26):** direct restore-maintenance correctness findings
@@ -158,9 +168,7 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C2-12 | MED/High | cycle-2-2026-07-07 | r10c2 | 10 | ~1000 geotagged map photos OR measured multi-second /map mount |
 | C2-14b | MED/High | cycle-2-2026-07-07 | r10c2 | 10 | Semantic search enabled in prod + measured scan latency (MUST copy vectors — PERF3-04 rider, run-10 c3) |
 | C2-15 | MED/High | cycle-2-2026-07-07 | r10c2 | 10 | Measured view-record latency OR DB-backed test infra |
-| C2-16 | MED/Med | cycle-2-2026-07-07 | r10c2 | 10 | Measured home latency OR next schema cycle folds the index |
 | C2-20 | MED/High | cycle-2-2026-07-07 | r10c2 | 10 | C1-33 RSS trace OR OOM incident during GPS-stripped uploads |
-| C2-21 | MED/High | cycle-2-2026-07-07 | r10c2 | 10 | Next migration-authoring cycle folds the `(processed, updated_at, id)` index |
 | C2-24b | MED/High | cycle-2-2026-07-07 | r10c2 | 10 | Operator needs runtime site-config edits despite documented build-time import semantics OR config-precedence product decision |
 | C2-27 | MED/High | cycle-2-2026-07-07 | r10c2 | 10 | Product decision: wire or delete the storage abstraction |
 | C2-28 | MED-LOW/Med-High | cycle-2-2026-07-07 | r10c2 | 10 | Admin perceived-lag report OR next admin-table cycle (now folds C4-24) |
@@ -224,7 +232,6 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C19-04 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 10 | Shared DB background budget scheduled OR measured queue/backfill pool starvation |
 | C19-05 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 10 | Semantic traffic/gallery size exceeds scan limits OR vector indexing/caching scheduled |
 | C19-06r | MED/High | cycle-19-2026-07-08 | r10c19 | 10 | Map clustering/viewport pagination scheduled OR map trace proves thousands-marker jank |
-| C19-07 | HIGH/High | cycle-19-2026-07-08 | r10c19 | 10 | Next migration/schema cycle OR DB-backed reconcile convergence gate |
 | C19-08 | MED/High | cycle-19-2026-07-08 | r10c19 | 10 | Next high-risk source-contract-only finding OR behavior-test hardening cycle |
 | C19-09 | MED/High | cycle-19-2026-07-08 | r10c19 | 10 | Browser-specific regression OR Playwright mobile/WebKit/Firefox matrix scheduled |
 | C19-10 | MED/High | cycle-19-2026-07-08 | r10c19 | 10 | Admin-flow regression OR admin E2E expansion cycle |
@@ -239,7 +246,6 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C20-09 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Semantic traffic reaches scan limits OR vector index/cache project |
 | C20-10 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Map GPS rows approach thousands OR clustering/viewport project |
 | C20-11 | LOW-MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Map a11y polish batch OR AT/keyboard marker-name report |
-| C20-12 | MED/Medium | cycle-20-2026-07-08 | r10c20 | 9 | Next schema/index migration OR listing filesort/temp-table evidence |
 | C20-13 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Scale-out attempt, singleton contention, or shared-state topology project |
 | C20-14 | MED/High-Med | cycle-20-2026-07-08 | r10c20 | 9 | Host nginx verified/applied OR app-layer public page limiter project |
 | C20-15 | MED/Medium | cycle-20-2026-07-08 | r10c20 | 9 | Shared-group cache/refactor OR counter drift report |
@@ -253,7 +259,6 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C20-25 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Button primitive touch-target change OR a11y audit cycle |
 | C20-26 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Next i18n/message edit OR placeholder bug |
 | C20-27 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Next source-contract false confidence OR behavior-test hardening cycle |
-| C20-28 | HIGH/High | cycle-20-2026-07-08 | r10c20 | 9 | Next migration/schema cycle OR DB-backed reconcile convergence gate |
 | C20-29 | HIGH/Medium | cycle-20-2026-07-08 | r10c20 | 9 | Next backup/restore cycle OR child-process harness lands |
 | C20-30 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Browser/admin/PWA/CLIP matrix project OR regression in those surfaces |
 | C20-31 | MED/High | cycle-20-2026-07-08 | r10c20 | 9 | Next tag-filter/UI cycle OR mobile closed-filter report |
@@ -267,7 +272,6 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C21-04 | HIGH/High-Medium | cycle-21-2026-07-08 | r10c21 | 8 | Production RSS/OOM incident during upload/restore, or approved streaming-ingress project |
 | C21-05 | HIGH/High | cycle-21-2026-07-08 | r10c21 | 8 | Measured pool starvation during queue/backfill/search, or shared background-budget project approved |
 | C21-07 | HIGH/High | cycle-21-2026-07-08 | r10c21 | 8 | Next high-risk source-contract-only finding, or behavior/integration test-hardening cycle |
-| C21-08 | HIGH/High | cycle-21-2026-07-08 | r10c21 | 8 | Next migration/schema cycle with DB test infra, or reconcile/schema drift incident |
 | C21-09 | HIGH/Medium | cycle-21-2026-07-08 | r10c21 | 8 | Next backup/restore cycle, child-process regression, or reusable spawn/fixture harness lands |
 | C21-10..14 | mixed, up to MED | cycle-21-2026-07-08 | r10c21 | 8 | Public discovery/search/map/vector performance exit criteria in Cycle 21 deferred register |
 | C21-16 | MED/Medium | cycle-21-2026-07-08 | r10c21 | 8 | Counter drift bug report, shared-group cache refactor, or analytics consistency cycle |
@@ -321,7 +325,6 @@ under C96-*/C94-*). Do not resurrect ids from that file without re-verifying aga
 | C8b-01 / ARCH8-01 | MED/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 8 | Next upload-flow-touching cycle extracts shared `ingestUploadedImage(...)` orchestration (LR route vs browser action; drift class burned twice, both healed), OR a third settings/validation drift lands |
 | C8b-02 / TEST8-03b | HIGH/High (test-design) | cycle-8b-2026-07-07 | r10c8(loop-B) | 8 | Behavioral concurrency harness for `uploadImages()` (C94-04/C4-18 test-infra class); the strictly-stronger no-await window pin shipped c8b WP7 — underlying code verified correct by the c8 verifier lane |
 | C8b-03 / PERF8-SW-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 8 | Next SW-template-touching cycle amortizes the HTML offline-cache O(N) eviction reads, OR measured SW main-thread cost |
-| C8b-04 / PERF8-BF-01 | LOW/High | cycle-8b-2026-07-07 | r10c8(loop-B) | 8 | Next schema/migration-authoring cycle folds a `(pipeline_version, id)` index for backfill candidate scans (rides the next journal entry, same treatment as C2-21) |
 | D9b-01..05 | up to HIGH (test-infra) | cycle-9b-2026-07-08 | r10c9(loop-B) | 1 | See `cycle-9b-2026-07-08-deferred.md` (e2e color/semantic/SW harness, color-sidecar lock exit tests, Toaster browser-validation, TagFilter single-mount, GPS action harness) — authoritative detail there; table-catch-up (cycle-9b WP14 landed no register row) |
 | D10b-01 / AGG-C10b-01 | Major/High (test-design) | cycle-10b-2026-07-08 | r10c10b(loop-B) | 0 | Next cycle owning `grid-picture-fallback-boundary.tsx` extracts the handler + fake-DOM behavioral test; peer-fresh-file conflict, code correct today |
 | D10b-02 / AGG-C10b-07 | MED (up to HIGH/High) | cycle-10b-2026-07-08 | r10c10b(loop-B) | 0 | Next cycle owning the WP11 components (lightbox/image-zoom/photo-viewer/image-manager/search) adds extracted behavioral locks; peer-fresh-file conflict, code correct today |

@@ -1,169 +1,183 @@
-# Aggregate Review — Cycle 10/100
+# Aggregate Review — Cycle 11/100
 
 Date: 2026-07-18
-Reviewed HEAD: `1e3646e32c116e9016982225fe54f1e55ac3d29e`
+Reviewed HEAD: `7e40e95c46e09faf5faf6e87989a5586874b02d1`
 
 ## Review coverage
 
 The collaboration runtime exposed two child slots after the root orchestrator
 and this cycle agent. Both slots were launched together and covered every
-required perspective in specialist bundles:
+required and repository-specific perspective in specialist bundles:
 
-- `review_core`: code-reviewer, perf-reviewer, security-reviewer, architect,
-  debugger, and tracer.
+- `review_engineering`: code-reviewer, perf-reviewer, security-reviewer,
+  architect, debugger, and tracer.
 - `review_product`: critic, verifier, test-engineer, document-specialist,
-  designer, and the discovered project-specific photographer-workflow,
-  product-marketer, and UI/UX-designer reviewers.
+  designer, photographer-workflow-reviewer, product-marketer-reviewer, and
+  UI/UX-designer-reviewer.
 
-The provenance files are the fourteen reports under
-`.context/reviews/run-current-cycle10/`. Each reviewer read the repository
-rules, built a file inventory, examined the current implementation and newest
-commit range, traced cross-file behavior, and completed a final missed-issues
-sweep. The designer used the required agent-browser skill family against the
-deployed public application because no local server or authenticated admin
-credentials were available. No child failed.
+The fourteen provenance reports are under
+`.context/reviews/run-current-cycle11/`. Each lane inventoried the complete
+tracked repository, routed the historical review/plan corpus through the
+current authoritative ledgers, examined the Cycle 10 change end to end, and
+completed a final missed-issue sweep. The design lanes used the complete
+required agent-browser skill family against the deployed public application,
+with DOM/accessibility/computed-style/network evidence rather than screenshot-
+only inference. No child failed.
 
 ## Executive result
 
-Three unique current findings survived aggregation:
+Three unique actionable findings survived aggregation:
 
-1. **COR-C10-01 (Medium/High, confirmed):** responsive `srcset` width
-   descriptors use configured filename aliases even when the encoder clamps
-   the resource to fewer actual pixels. Source-limited and WI-15-downscaled
-   images are therefore advertised with false intrinsic widths, redundant
-   candidates, and misleading high-DPR test evidence.
-2. **DOC-C10-02 (Low/High, confirmed):** the active Cycle 9 plan and plan index
-   still report signed publication/deployment as pending even though the
-   commits are GPG-valid, local and remote `master` match, and the deployed
-   public DOM exposes the shipped complete ladder behavior.
-3. **MAINT-C10-03 (Low/High, confirmed lead finding):** the deprecated
-   `getGalleryConfigUncached` alias is documented as a one-cycle bridge but is
-   still exported and test-pinned hundreds of commits later despite having no
-   production caller.
+1. **COR-C11-01 (Medium/High, confirmed):** `processImageFormats` persists the
+   source/WI-15 processing ceiling as `derivative_max_width`, even when the
+   largest configured derivative is smaller. The public field can therefore
+   exceed every delivered file.
+2. **TEST-C11-02 (High/High validation obligation, confirmed trigger; no live
+   drift claimed):** migration 0031 fired the preserved disposable-MySQL
+   reconcile-convergence exit criterion, but current coverage still stops at
+   source-text/name presence and cannot prove executable DDL convergence.
+3. **PERF-C11-03 (Medium/High, confirmed live):** search result links use
+   default Next prefetch. One ordinary deployed query caused 16 dynamic photo
+   RSC fetches for 10 unique result ids, including six duplicate destinations,
+   before hover, focus, or activation.
 
-No new security, authorization, privacy, schema, migration, restore,
-background-ownership, accessibility, i18n, or dependency finding survived
-validation. Existing carry-forward findings remain governed by
-`.context/plans/deferred-carry-forward.md`; none has a newly fired exit
-criterion in this cycle.
+No new authorization, privacy, data-loss, accessibility-conformance, i18n,
+color-fidelity, dependency, or deployment-code defect survived validation.
 
 ## Deduplicated findings
 
-### COR-C10-01 — Responsive candidates advertise aliases rather than delivered widths
+### COR-C11-01 — Persisted derivative maximum exceeds the largest delivered file
 
 - Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed correctness, performance, test, and photographer-fidelity defect**
-- Cross-agent agreement: code-reviewer, perf-reviewer, architect, debugger,
-  tracer, critic, verifier, test-engineer, document-specialist, designer, and
-  all three project-specific reviewers.
-- Regions: producer contract `apps/web/src/lib/process-image.ts:1032-1043,
-  1087-1115,1212-1234`; source builder `apps/web/src/lib/image-url.ts:72-95`;
-  consumers `apps/web/src/components/masonry-card.tsx:87-109`,
-  `apps/web/src/components/photo-viewer.tsx:453-460`,
-  `apps/web/src/app/[locale]/(public)/timeline/page.tsx:250-272`,
-  `apps/web/src/app/[locale]/(public)/year/[year]/page.tsx:213-233`, and
-  `apps/web/src/app/[locale]/(public)/g/[key]/page.tsx:217-236`; incomplete
-  proof `apps/web/e2e/responsive-masonry.spec.ts:102-138` and
-  `apps/web/src/__tests__/image-url.test.ts:110-136`.
-- Evidence: the encoder computes `resizeWidth = min(processingBaseWidth,
-  configuredSize)`. For later configured aliases it hard-links or copies the
-  last capped render. `sizedImageSrcSet` has only filenames and configured
-  aliases, so it labels every candidate `${configuredSize}w` even when the
-  resource is narrower. Direct fixture inspection found the 1200 px E2E
-  square's `_1536`, `_2048`, `_4096`, `_5120`, and `_7680` AVIF/WebP/JPEG
-  files are all 1200 px wide. The E2E test calls `_4096` adequate without
-  decoding it.
-- Concrete failure: a 1200 px photo shown in a 1504 CSS-px one-item grid at
-  DPR 2 is reported to Chromium as having a 4096 px candidate. Chromium picks
-  it as adequate but decodes only 1200 pixels for a roughly 3008-device-pixel
-  target, producing visible softness while the regression remains green.
-  WI-15 can create the same mismatch when stored original width is larger than
-  the processing width.
-- Required fix: make the effective processed width a persisted pipeline/data
-  contract, build candidates as `(configured alias URL, actual delivered
-  width)`, deduplicate aliases resolving to the same actual width, and use the
-  truthful list across all five callers. Add producer/consumer and browser
-  coverage that inspects decoded pixels rather than suffixes alone.
+- Status: **Confirmed correctness/data-contract defect**
+- Cross-agent agreement: code-reviewer, architect, debugger, and tracer.
+- Regions: producer `apps/web/src/lib/process-image.ts:1044-1046,
+  1214-1219,1366-1377,1462-1465`; schema contract
+  `apps/web/src/db/schema.ts:79-85`; public projection
+  `apps/web/src/lib/data.ts:294-302`; consumer
+  `apps/web/src/lib/image-url.ts:96-145`; documentation `CLAUDE.md:189-190`.
+- Evidence: each output uses `min(processingBaseWidth, configuredSize)` and
+  the unsuffixed base file is linked from the largest configured output. The
+  return value is nevertheless the uncapped `processingBaseWidth`.
+- Concrete failure: a 10,000 px input under the default ladder produces
+  AVIF/WebP/JPEG derivatives and a base file no wider than 7,680 px, while all
+  three persistence paths store and publicly project
+  `derivative_max_width=10000`. Current markup stays truthful only because the
+  serializer independently iterates aliases no larger than 7,680, a hidden
+  cross-module invariant.
+- Required fix: return and persist
+  `min(processingBaseWidth, largestConfiguredSize)`, validate the non-empty
+  normalized ladder invariant, and add a real wide-source encode regression
+  that compares the returned value with decoded output widths.
 
-### DOC-C10-02 — Cycle 9 terminal ledger is stale
+### TEST-C11-02 — Migration 0031 has no executable reconcile-convergence gate
 
-- Severity: **Low**
+- Severity: **High** (schema-safety validation risk)
 - Confidence: **High**
-- Status: **Confirmed documentation/workflow defect**
-- Cross-agent agreement: code-reviewer, architect, tracer, critic, verifier,
-  and document-specialist.
-- Regions: `.context/plans/cycle-9-2026-07-18-plan.md:5,83-85,119-130` and
-  `.context/plans/README.md:34-40`.
-- Evidence: the plan says “signed release pending” and leaves publication and
-  deploy unchecked. `git verify-commit` reports good signatures for
-  `7f6fb05e`, `819f5432`, and `1e3646e3`; local and remote `master` both equal
-  `1e3646e3`. The live public HTML contains the shipped six-width ladder,
-  proving behavior deployment without exposing an exact production SHA.
-- Concrete failure: recovery automation treats the plan index as the current
-  work frontier and repeats completed publication/deployment or reports the
-  release as unpublished.
-- Required fix: reconcile the objectively proven signed push and observable
-  deployment evidence without inventing a deployed SHA, archive Cycle 9, and
-  advance the active index to Cycle 10.
+- Status: **Confirmed fired carry-forward trigger; no current drift claimed**
+- Cross-agent agreement: architect and tracer; debugger independently noted
+  the same validation boundary.
+- Regions: trigger records
+  `.context/plans/cycle-19-2026-07-08-deferred.md:13-20`,
+  `.context/plans/cycle-20-2026-07-08-deferred.md:37`, and
+  `.context/plans/cycle-21-2026-07-08-deferred.md:19`; migration
+  `apps/web/drizzle/0031_derivative_max_width.sql:1-2`; reconcile mirror
+  `apps/web/scripts/migrate.js:433-475`; source-only coverage
+  `apps/web/src/__tests__/migrate-reconcile-coverage.test.ts:13-19,76-103`.
+- Evidence: the three preserved High/High records reopen on the next schema
+  authoring cycle. Migration 0031 is that cycle. Its name appears in migration,
+  schema, reconcile, and source tests, but the test explicitly says it cannot
+  verify types, defaults, nullability, index/foreign-key shape, idempotence, or
+  live baseline/reconcile ordering.
+- Concrete failure: executable DDL can carry the right column name with a
+  wrong structural definition and every current unit test remains green. That
+  is the same class that historically let legacy/fresh databases report a
+  successful deploy while remaining structurally incomplete.
+- Required fix: add a deliberately disposable-DB-only MySQL gate that removes
+  the latest schema artifact, runs `reconcileLegacySchema`, compares the live
+  schema with its pre-mutation/current contract, proves a second reconcile is
+  idempotent, and is mandatory in CI after database initialization. The gate
+  must fail closed against production/non-test database names.
 
-### MAINT-C10-03 — Expired detached-config compatibility alias remains test-pinned
+### PERF-C11-03 — Search results prefetch unused dynamic photo pages
 
-- Severity: **Low**
+- Severity: **Medium**
 - Confidence: **High**
-- Status: **Confirmed maintainability defect; lead aggregation finding**
-- Regions: `apps/web/src/lib/gallery-config.ts:204-208,284-285` and
-  `apps/web/src/__tests__/gallery-config-uncached-microcache.test.ts:26-32,
-  191-197`.
-- Evidence: both the API comment and deprecation annotation say
-  `getGalleryConfigUncached` is retained for one cycle. Repository search
-  finds no production or script caller; only the compatibility assertion
-  imports it. The bridge originated in `12037508`, hundreds of commits before
-  current HEAD.
-- Concrete failure: a future internal caller can choose the misleading old
-  name and obscure the accessor's deliberate two-second cache contract, while
-  the test converts temporary compatibility debt into a permanent API
-  requirement.
-- Required fix: remove the unused alias, remove the assertion/import that pins
-  it, and update the nearby documentation to describe the completed rename.
+- Status: **Confirmed performance/perceived-performance defect**
+- Cross-agent agreement: critic, verifier, test-engineer, designer,
+  product-marketer-reviewer, and UI/UX-designer-reviewer.
+- Regions: `apps/web/src/components/search.tsx:77-85,498-513`; missing network
+  assertion `apps/web/e2e/public.spec.ts:21-69`; contrast with the explicit
+  no-prefetch grid contract in `apps/web/src/components/masonry-card.tsx:80-83`.
+- Evidence: a fresh deployed session made zero `/en/p/*` requests before
+  search. Showing one populated result set then made 16 successful dynamic
+  `/en/p/{id}?_rsc=...` requests for 10 unique ids; six ids were fetched twice
+  with different RSC keys, without a result being focused, hovered, or opened.
+- Concrete failure: a visitor refining several queries on a phone spends
+  bandwidth and backend/DB work rendering unused detail pages, competing with
+  the next search and result thumbnails.
+- Required fix: set `prefetch={false}` on `SearchResultItem` links and add an
+  E2E request listener proving that a populated list emits no photo-detail RSC
+  request until the visitor activates a result.
 
 ## Cross-agent adjudication
 
-- COR-C10-01 is one root cause despite being reported as code, architecture,
-  performance, debugger, tracing, test, documentation, UI/UX, and photographer
-  findings. The highest shared severity/confidence is retained.
-- The finding does not mean the encoder should upscale. Its no-enlargement
-  behavior is correct; the defect is losing the actual processed width before
-  constructing HTML descriptors. Passing only the original DB width would not
-  cover WI-15, so the fix must preserve effective processing width.
-- DOC-C10-02 is one workflow finding. Exact deployed SHA remains unobservable,
-  so the ledger must record behavioral evidence rather than inventing one.
-- MAINT-C10-03 was found during the lead's final repository sweep. It is not a
-  security or correctness blocker, but its promised removal condition has
-  unambiguously elapsed and the removal is self-contained.
+- COR-C11-01 is one root cause despite four role labels. The photographer and
+  verifier reports say the actual derivative maximum is persisted, but their
+  claim is disproved by the direct producer trace above. Their live examples
+  covered sources below the configured maximum, where source ceiling and
+  delivered maximum happen to be identical. The engineering evidence is
+  retained.
+- TEST-C11-02 is not a claim that migration 0031 is currently malformed. It is
+  the explicit High/High validation exit criterion reopening; the planned
+  disposable test is the closure condition.
+- PERF-C11-03 and its E2E gap are one product defect, not separate performance,
+  UX, marketing, and testing findings.
+- The Cycle 10 plan's deploy-pending terminal state is not counted as a new
+  review defect. The orchestrator's Cycle 10 report records
+  `DEPLOY: per-cycle-success`; Prompt 2 must reconcile/archive that ledger using
+  the prior-cycle evidence rather than invent a production SHA.
+
+## Reopened and stale carry-forward records for Prompt 2
+
+These are existing findings, not additional Cycle 11 findings, but the planner
+must not silently ignore them:
+
+- `C2-16` explicitly reopened when migration 0031 became the next schema-
+  touching cycle. Its non-sargable `MONTH()/DAY()` on-this-day predicates still
+  need the recorded generated-column/index remedy or a newly justified
+  disposition with original Medium/Medium severity.
+- `AGG-C20-12` explicitly reopened on the next schema/index migration. The
+  listing indexes still omit the final `id` tie-breaker used by keyset ordering;
+  the current cycle must resolve the overlap/drop decision rather than re-list
+  the trigger unchanged.
+- `C2-21` and `C8b-04/PERF8-BF-01` are stale open rows in the consolidated
+  register: migrations 0029 and 0030/current Drizzle schema already provide
+  the processed/topic `updated_at` indexes and the processed-pipeline-version
+  index respectively. Prompt 2 should retire those rows with citations.
+- `C94-10/C88-03` has reached the repository's approximately 16-cycle Medium
+  checkpoint. Its detailed exit criterion remains a dedicated multi-model
+  embedding-storage migration, not any unrelated schema edit; if it remains
+  deferred, the current ledger must explicitly re-justify it without changing
+  its Medium/High severity.
 
 ## Validation evidence from Prompt 1
 
-- Focused responsive/config tests passed: 4 files, 52 tests.
-- Full app/script typecheck passed.
-- The product bundle independently passed 3 focused files, 28 tests.
-- All three newest commits have good GPG signatures and
-  `master == origin/master` at the reviewed HEAD.
-- Live browser review covered desktop/mobile, EN/KO, light/dark, search
-  keyboard/focus behavior, offline fallback, network/console state, and 320 px
-  reflow. Direct derivative metadata inspection established the decoded-width
-  mismatch.
-- These are review baselines, not substitutes for Prompt 3's complete gates.
-
-## Deferred/revalidated items
-
-No Cycle 10 finding is deferred. COR-C10-01 is a correctness defect and is
-non-deferrable under the loop policy. DOC-C10-02 and MAINT-C10-03 are scheduled
-because their fixes are bounded and immediately actionable. Existing deferred
-items retain their original severity, confidence, reasons, policy constraints,
-and exit criteria in the consolidated carry-forward register.
+- ESLint, API-auth lint, action-origin/mutation-barrier lint, public-route-rate-
+  limit lint, full app/script typecheck, production build, production
+  dependency audit, and full Vitest passed in the review bundles.
+- Vitest: 363 files passed; 3,447 tests passed; expected CLIP skips only.
+- The lead independently passed full app/script typecheck and four focused
+  suites (35 tests) covering image URLs, privacy, sidecar persistence, and
+  admin-backfill detection-failure persistence.
+- Live browser review covered desktop/mobile, EN/KO, theme modes, keyboard and
+  focus behavior, accessibility structure, network/console state, offline,
+  320 px reflow, and responsive-resource selection.
+- Local and remote `master` match `7e40e95c`, and the four Cycle 10 commits
+  verify with good GPG signatures.
 
 ## Agent failures
 
-None. Both available child agents returned and wrote every required and
-project-specific provenance report.
+None. Both available child agents returned and wrote all fourteen required and
+project-specific provenance reports.
