@@ -55,7 +55,7 @@ Completed provenance reviews: code-reviewer, perf-reviewer, security-reviewer, c
 - Agreement: security-reviewer
 - Regions: `scripts/deploy-remote.sh:55-93`; `apps/web/deploy.sh:17-43`; deploy contract tests
 - Failure: root/sudo execution can source or consume a less-privileged user's env file, including a file-controlled shell deploy command.
-- Disposition: scheduled this cycle; fail closed on owner mismatch and extend contract coverage.
+- Disposition: scheduled this cycle; fail closed unless the file owner is the executing user or the explicitly trusted repository owner (shared-mount support), and extend contract coverage.
 
 ### C1-07 — Desktop first-row image priority arrives only after hydration
 

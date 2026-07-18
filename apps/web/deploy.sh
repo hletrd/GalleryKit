@@ -21,8 +21,19 @@ if [ ! -f "$env_file" ]; then
     exit 1
 fi
 
-if [ ! -O "$env_file" ]; then
-    echo "Refusing to deploy with runtime env file not owned by the current user: $env_file" >&2
+env_owner_uid="$(stat -c '%u' "$env_file" 2>/dev/null || true)"
+repo_owner_uid="$(stat -c '%u' "$REPO_ROOT" 2>/dev/null || true)"
+if [[ -z "$env_owner_uid" || -z "$repo_owner_uid" ]]; then
+    env_owner_uid="$(stat -f '%u' "$env_file")"
+    repo_owner_uid="$(stat -f '%u' "$REPO_ROOT")"
+fi
+current_uid="$(id -u)"
+if [[ ! "$env_owner_uid" =~ ^[0-9]+$ || ! "$repo_owner_uid" =~ ^[0-9]+$ ]]; then
+    echo "Error: could not determine runtime env/repository owner UID: $env_file" >&2
+    exit 1
+fi
+if [[ "$env_owner_uid" != "$current_uid" && "$env_owner_uid" != "$repo_owner_uid" ]]; then
+    echo "Refusing to deploy with runtime env file not owned by the current user or repository owner: $env_file" >&2
     exit 1
 fi
 

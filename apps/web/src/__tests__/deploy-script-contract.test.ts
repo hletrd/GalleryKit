@@ -92,17 +92,19 @@ describe('deploy script safety contract', () => {
     });
 
     it('fails closed on env-file ownership mismatches before use', () => {
-        const remoteOwnerCheck = remoteDeployScript.indexOf('if [[ ! -O "$ENV_FILE" ]]');
+        const remoteOwnerCheck = remoteDeployScript.indexOf('if [[ "$env_owner_uid" != "$current_uid" && "$env_owner_uid" != "$repo_owner_uid" ]]');
         const remoteSource = remoteDeployScript.indexOf('source "$ENV_FILE"');
-        const runtimeOwnerCheck = deployScript.indexOf('if [ ! -O "$env_file" ]');
+        const runtimeOwnerCheck = deployScript.indexOf('if [[ "$env_owner_uid" != "$current_uid" && "$env_owner_uid" != "$repo_owner_uid" ]]');
         const compose = deployScript.indexOf('docker compose --env-file "$env_file"');
 
         expect(remoteOwnerCheck).toBeGreaterThan(-1);
         expect(remoteDeployScript.slice(remoteOwnerCheck, remoteSource)).toContain('exit 1');
-        expect(remoteDeployScript.slice(remoteOwnerCheck, remoteSource)).toContain('Refusing to source deploy env file not owned');
+        expect(remoteDeployScript.slice(remoteOwnerCheck, remoteSource)).toContain('not owned by the current user or repository owner');
+        expect(remoteDeployScript).toContain('repo_owner_uid="$(stat -c \'%u\' "$ROOT_DIR"');
         expect(runtimeOwnerCheck).toBeGreaterThan(-1);
         expect(deployScript.slice(runtimeOwnerCheck, compose)).toContain('exit 1');
-        expect(deployScript.slice(runtimeOwnerCheck, compose)).toContain('Refusing to deploy with runtime env file not owned');
+        expect(deployScript.slice(runtimeOwnerCheck, compose)).toContain('not owned by the current user or repository owner');
+        expect(deployScript).toContain('repo_owner_uid="$(stat -c \'%u\' "$REPO_ROOT"');
     });
 
     it('refuses group/world-readable runtime env files before Docker Compose consumes them', () => {

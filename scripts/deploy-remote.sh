@@ -58,8 +58,19 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-if [[ ! -O "$ENV_FILE" ]]; then
-  echo "Refusing to source deploy env file not owned by the current user: $ENV_FILE" >&2
+env_owner_uid="$(stat -c '%u' "$ENV_FILE" 2>/dev/null || true)"
+repo_owner_uid="$(stat -c '%u' "$ROOT_DIR" 2>/dev/null || true)"
+if [[ -z "$env_owner_uid" || -z "$repo_owner_uid" ]]; then
+  env_owner_uid="$(stat -f '%u' "$ENV_FILE")"
+  repo_owner_uid="$(stat -f '%u' "$ROOT_DIR")"
+fi
+current_uid="$(id -u)"
+if [[ ! "$env_owner_uid" =~ ^[0-9]+$ || ! "$repo_owner_uid" =~ ^[0-9]+$ ]]; then
+  echo "Error: could not determine deploy env/repository owner UID: $ENV_FILE" >&2
+  exit 1
+fi
+if [[ "$env_owner_uid" != "$current_uid" && "$env_owner_uid" != "$repo_owner_uid" ]]; then
+  echo "Refusing to source deploy env file not owned by the current user or repository owner: $ENV_FILE" >&2
   exit 1
 fi
 
