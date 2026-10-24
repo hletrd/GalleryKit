@@ -21,7 +21,7 @@ describe('cycle 12 operational proof surfaces', () => {
 
     it('pins Docker production bases to the reviewed node:24-slim digest', () => {
         const dockerfile = readFileSync(resolve(ROOT, 'apps/web/Dockerfile'), 'utf8');
-        const pinnedBase = 'node:24-slim@sha256:b31e7a42fdf8b8aa5f5ed477c72d694301273f1069c5a2f71d53c6482e99a2fc';
+        const pinnedBase = 'node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205';
         expect(dockerfile.match(new RegExp(`FROM ${pinnedBase}`, 'g'))?.length).toBe(2);
         expect(dockerfile).toContain('docker buildx imagetools inspect node:24-slim');
     });
